@@ -244,7 +244,12 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener {
   // navigational events before. It is safe to ignore these events.
   virtual void DidFinishLoad(RenderFrameHost* render_frame_host,
                              const GURL& validated_url) {}
-
+#ifndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_CALLED  // zhibin:patch_message ipc
+  virtual void DidAddEventListenerCalledClient(
+      content::RenderFrameHost* render_frame_host,
+                           const std::string& node_name,
+                           const std::string& event_type) {}
+ #endif
   // This method is like DidFinishLoad, but when the load failed or was
   // cancelled, e.g. window.stop() is invoked.
   virtual void DidFailLoad(RenderFrameHost* render_frame_host,

@@ -111,6 +111,11 @@ class CONTENT_EXPORT RenderFrameObserver : public IPC::Listener,
                                         ui::PageTransition transition) {}
   virtual void DidFailProvisionalLoad(const blink::WebURLError& error) {}
   virtual void DidFinishLoad() {}
+  #if 1
+  //voidParam
+  virtual void DidNotifyEventAdded(const WTF::String& node_name,
+                                   const AtomicString& event_type) {}
+  #endif
   virtual void DidFinishDocumentLoad() {}
   virtual void DidHandleOnloadEvents() {}
   virtual void DidCreateScriptContext(v8::Local<v8::Context> context,

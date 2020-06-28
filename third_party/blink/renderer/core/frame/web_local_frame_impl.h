@@ -423,7 +423,10 @@ class CORE_EXPORT WebLocalFrameImpl final
   void DidFailProvisionalLoad(const ResourceError&,
                               const AtomicString& http_method);
   void DidFinish();
-
+#ifndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_DISPATCH  // zhibin:patch_to_content
+  void DidNotifyEvent(const std::string& node_name,
+                      const std::string& event_type);
+  #endif
   void SetClient(WebLocalFrameClient* client) { client_ = client; }
 
   WebFrameWidgetBase* FrameWidgetImpl() { return frame_widget_; }

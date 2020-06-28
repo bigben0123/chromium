@@ -903,6 +903,10 @@ bool WebContentsImpl::OnMessageReceived(RenderFrameHostImpl* render_frame_host,
     IPC_MESSAGE_HANDLER(FrameHostMsg_DidFinishDocumentLoad,
                         OnDocumentLoadedInFrame)
     IPC_MESSAGE_HANDLER(FrameHostMsg_DidFinishLoad, OnDidFinishLoad)
+#ifndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_CALLED//zhibin:patch_message ipc
+    IPC_MESSAGE_HANDLER(FrameHostMsg_DidAddEventListenerCalled,
+                        OnAddEventListenerCalled)
+#endif      
     IPC_MESSAGE_HANDLER(FrameHostMsg_DidLoadResourceFromMemoryCache,
                         OnDidLoadResourceFromMemoryCache)
     IPC_MESSAGE_HANDLER(FrameHostMsg_DidDisplayInsecureContent,
@@ -4825,6 +4829,19 @@ void WebContentsImpl::OnDidFinishLoad(RenderFrameHostImpl* source,
   for (auto& observer : observers_)
     observer.DidFinishLoad(source, validated_url);
 }
+
+#ifndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_CALLED  // zhibin:patch_message ipc
+void WebContentsImpl::OnAddEventListenerCalled(RenderFrameHostImpl* source,
+                                           std::string node_name, std::string event_type) {
+  if (!source->GetParent()) {
+    size_t frame_count = source->frame_tree_node()->GetFrameTreeSize();
+    UMA_HISTOGRAM_COUNTS_1000("Navigation.MainFrame.FrameCount", frame_count);
+  }
+
+  for (auto& observer : observers_)
+    observer.DidAddEventListenerCalledClient(source, node_name, event_type);
+}
+#endif
 
 void WebContentsImpl::OnGoToEntryAtOffset(RenderFrameHostImpl* source,
                                           int offset,

@@ -475,6 +475,12 @@ class BLINK_EXPORT WebLocalFrameClient {
 
   // The frame's document and all of its subresources succeeded to load.
   virtual void DidFinishLoad() {}
+#ifndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_DISPATCH  // zhibin:patch_to_content
+                                                      // ipc voidparam
+  virtual void DidNotifyEventAdded(const std::string& node_name,
+                                   const std::string& event_type) {} 
+
+  #endif
 
   // The navigation resulted in no change to the documents within the page.
   // For example, the navigation may have just resulted in scrolling to a

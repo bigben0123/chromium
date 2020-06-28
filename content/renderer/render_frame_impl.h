@@ -766,6 +766,11 @@ class CONTENT_EXPORT RenderFrameImpl
   void DidFailLoad(const blink::WebURLError& error,
                    blink::WebHistoryCommitType commit_type) override;
   void DidFinishLoad() override;
+#ifndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_DISPATCH  // zhibin:patch_to_content
+                                                      // voidParam
+  void DidNotifyEventAdded(const std::string& node_name,
+                           const std::string& event_type) override;
+  #endif
   void DidFinishSameDocumentNavigation(const blink::WebHistoryItem& item,
                                        blink::WebHistoryCommitType commit_type,
                                        bool content_initiated) override;

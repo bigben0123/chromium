@@ -1953,6 +1953,19 @@ void WebLocalFrameImpl::DidFinish() {
   Client()->DidFinishLoad();
 }
 
+#ifndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_DISPATCH  // zhibin:patch_to_content
+void WebLocalFrameImpl::DidNotifyEvent(const std::string& node_name,
+                                       const std::string& event_type) {
+  if (!Client())
+    return;
+
+//  if (WebPluginContainerImpl* plugin = GetFrame()->GetWebPluginContainer()) //zhi:todo
+//    plugin->DidFinishLoading();
+
+  Client()->DidNotifyEventAdded(node_name,event_type);//voidparam not client's interface
+}
+#endif
+
 HitTestResult WebLocalFrameImpl::HitTestResultForVisualViewportPos(
     const IntPoint& pos_in_viewport) {
   IntPoint root_frame_point(

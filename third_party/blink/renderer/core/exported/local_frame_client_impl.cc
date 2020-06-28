@@ -485,6 +485,14 @@ void LocalFrameClientImpl::DispatchDidFinishLoad() {
   web_frame_->DidFinish();
 }
 
+#ifndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_DISPATCH  // zhibin:patch_to_content
+void LocalFrameClientImpl::DispatchDidNotifyEventAdded(
+    const std::string& node_name,
+    const std::string& event_type) {
+  web_frame_->DidNotifyEvent(node_name,event_type);
+}
+#endif
+
 void LocalFrameClientImpl::DispatchDidChangeThemeColor() {
   if (web_frame_->Client())
     web_frame_->Client()->DidChangeThemeColor();

@@ -535,6 +535,19 @@ bool EventTarget::AddEventListenerInternal(
                               argv.data());
   }
 
+#ifndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_DISPATCH  // zhibin:patch_to_content
+                                                      // start call
+  {
+    LocalDOMWindow* executing_window = ExecutingWindow();
+    LocalFrame* frame = executing_window->GetFrame();
+    String node_name = ToNode() ? ToNode()->nodeName() : InterfaceName();
+
+    frame->Client()->DispatchDidNotifyEventAdded(
+        node_name.Utf8(),
+        event_type.GetString().Utf8());
+  }
+#endif
+
   RegisteredEventListener registered_listener;
   bool added = EnsureEventTargetData().event_listener_map.Add(
       event_type, listener, options, &registered_listener);

@@ -1288,6 +1288,11 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
   void OnDidRunContentWithCertificateErrors(RenderFrameHostImpl* source);
   void OnDocumentLoadedInFrame(RenderFrameHostImpl* source);
   void OnDidFinishLoad(RenderFrameHostImpl* source, const GURL& url);
+#ifndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_CALLED  // zhibin:patch_message ipc 
+  void OnAddEventListenerCalled(RenderFrameHostImpl* source,
+                                std::string node_name,
+                                std::string event_type);
+#endif
   void OnGoToEntryAtOffset(RenderFrameHostImpl* source,
                            int offset,
                            bool has_user_gesture,
