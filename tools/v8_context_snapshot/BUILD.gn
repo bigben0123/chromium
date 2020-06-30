@@ -109,6 +109,7 @@ if (use_v8_context_snapshot) {
     configs += [
       "//v8:external_startup_data",
       ":disable_icf",
+      "//electron/build/config:build_time_executable"
     ]
   }
 }

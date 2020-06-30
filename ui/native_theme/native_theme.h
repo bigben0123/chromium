@@ -389,6 +389,11 @@ class NATIVE_THEME_EXPORT NativeTheme {
     kColorId_TableHeaderText,
     kColorId_TableHeaderBackground,
     kColorId_TableHeaderSeparator,
+    // Results Tables, such as the omnibox
+    kColorId_ResultsTableNormalBackground,
+    kColorId_ResultsTableHoveredBackground,
+    kColorId_ResultsTableNormalText,
+    kColorId_ResultsTableDimmedText,
     // Colors for the material spinner (aka throbber).
     kColorId_ThrobberSpinningColor,
     kColorId_ThrobberWaitingColor,
@@ -423,6 +428,22 @@ class NATIVE_THEME_EXPORT NativeTheme {
   virtual SkColor GetSystemColor(
       ColorId color_id,
       ColorScheme color_scheme = ColorScheme::kDefault) const = 0;
+
+  enum ThemeSource {
+    kSystem,
+    kForcedDark,
+    kForcedLight,
+  };
+
+  ThemeSource theme_source() const {
+    return theme_source_;
+  }
+
+  void set_theme_source(ThemeSource theme_source) {
+    bool original = ShouldUseDarkColors();
+    theme_source_ = theme_source;
+    if (ShouldUseDarkColors() != original) NotifyObservers();
+  }
 
   // Returns a shared instance of the native theme that should be used for web
   // rendering. Do not use it in a normal application context (i.e. browser).
@@ -541,6 +562,8 @@ class NATIVE_THEME_EXPORT NativeTheme {
   bool is_high_contrast_ = false;
   PreferredColorScheme preferred_color_scheme_ =
       PreferredColorScheme::kNoPreference;
+
+  ThemeSource theme_source_ = ThemeSource::kSystem;
 
   DISALLOW_COPY_AND_ASSIGN(NativeTheme);
 };

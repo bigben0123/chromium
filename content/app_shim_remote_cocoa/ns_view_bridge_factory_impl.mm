@@ -61,8 +61,10 @@ class RenderWidgetHostNSViewBridgeOwner
     return nil;
   }
   void SetAccessibilityWindow(NSWindow* window) override {
+#ifndef MAS_BUILD
     host_->SetRemoteAccessibilityWindowToken(
         ui::RemoteAccessibility::GetTokenForLocalElement(window));
+#endif
   }
 
   void ForwardKeyboardEvent(const content::NativeWebKeyboardEvent& key_event,
@@ -121,8 +123,10 @@ class RenderWidgetHostNSViewBridgeOwner
 
   mojom::RenderWidgetHostNSViewHostAssociatedPtr host_;
   std::unique_ptr<RenderWidgetHostNSViewBridge> bridge_;
+#ifndef MAS_BUILD
   base::scoped_nsobject<NSAccessibilityRemoteUIElement>
       remote_accessibility_element_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostNSViewBridgeOwner);
 };

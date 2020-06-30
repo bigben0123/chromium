@@ -17,7 +17,6 @@
 #include "third_party/blink/public/mojom/service_worker/service_worker_provider.mojom.h"
 #include "third_party/blink/public/mojom/worker/worker_main_script_load_params.mojom.h"
 #include "third_party/blink/public/platform/web_dedicated_worker.h"
-#include "third_party/blink/public/platform/web_security_origin.h"
 #include "third_party/blink/public/platform/web_url.h"
 
 namespace content {
@@ -32,14 +31,13 @@ DedicatedWorkerHostFactoryClient::DedicatedWorkerHostFactoryClient(
 
 DedicatedWorkerHostFactoryClient::~DedicatedWorkerHostFactoryClient() = default;
 
-void DedicatedWorkerHostFactoryClient::CreateWorkerHostDeprecated(
-    const blink::WebSecurityOrigin& script_origin) {
+void DedicatedWorkerHostFactoryClient::CreateWorkerHostDeprecated() {
   DCHECK(!base::FeatureList::IsEnabled(blink::features::kPlzDedicatedWorker));
   service_manager::mojom::InterfaceProviderPtr interface_provider_ptr;
   mojo::PendingRemote<blink::mojom::BrowserInterfaceBroker>
       browser_interface_broker;
   factory_->CreateWorkerHost(
-      script_origin, mojo::MakeRequest(&interface_provider_ptr),
+      mojo::MakeRequest(&interface_provider_ptr),
       browser_interface_broker.InitWithNewPipeAndPassReceiver(),
       remote_host_.BindNewPipeAndPassReceiver());
   OnWorkerHostCreated(std::move(interface_provider_ptr),
@@ -48,9 +46,7 @@ void DedicatedWorkerHostFactoryClient::CreateWorkerHostDeprecated(
 
 void DedicatedWorkerHostFactoryClient::CreateWorkerHost(
     const blink::WebURL& script_url,
-    const blink::WebSecurityOrigin& script_origin,
     network::mojom::CredentialsMode credentials_mode,
-    const blink::WebSecurityOrigin& fetch_client_security_origin,
     network::mojom::ReferrerPolicy fetch_client_referrer_policy,
     const blink::WebURL& fetch_client_outgoing_referrer,
     const blink::WebInsecureRequestPolicy fetch_client_insecure_request_policy,
@@ -69,7 +65,7 @@ void DedicatedWorkerHostFactoryClient::CreateWorkerHost(
           : blink::mojom::InsecureRequestsPolicy::kDoNotUpgrade;
 
   factory_->CreateWorkerHostAndStartScriptLoad(
-      script_url, script_origin, credentials_mode,
+      script_url, credentials_mode,
       std::move(outside_fetch_client_settings_object),
       mojo::PendingRemote<blink::mojom::BlobURLToken>(
           std::move(blob_url_token), blink::mojom::BlobURLToken::Version_),

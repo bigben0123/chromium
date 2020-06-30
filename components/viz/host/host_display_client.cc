@@ -18,6 +18,10 @@
 
 namespace viz {
 
+void HostDisplayClient::IsOffscreen(IsOffscreenCallback callback) {
+  std::move(callback).Run(false);
+}
+
 HostDisplayClient::HostDisplayClient(gfx::AcceleratedWidget widget)
     : binding_(this) {
 #if defined(OS_MACOSX) || defined(OS_WIN)
@@ -46,9 +50,9 @@ void HostDisplayClient::OnDisplayReceivedCALayerParams(
 }
 #endif
 
-#if defined(OS_WIN)
 void HostDisplayClient::CreateLayeredWindowUpdater(
     mojom::LayeredWindowUpdaterRequest request) {
+#if defined(OS_WIN)
   if (!NeedsToUseLayerWindow(widget_)) {
     DLOG(ERROR) << "HWND shouldn't be using a layered window";
     return;
@@ -56,8 +60,12 @@ void HostDisplayClient::CreateLayeredWindowUpdater(
 
   layered_window_updater_ =
       std::make_unique<LayeredWindowUpdaterImpl>(widget_, std::move(request));
-}
+#else
+  CHECK(false) << "Chromium is calling CreateLayeredWindowUpdater for non-OSR "
+                  "windows on POSIX platforms, something is wrong with "
+                  "Electron's OSR implementation.";
 #endif
+}
 
 #if defined(USE_X11)
 void HostDisplayClient::DidCompleteSwapWithNewSize(const gfx::Size& size) {

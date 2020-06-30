@@ -33,6 +33,8 @@ class PrintJob;
 class PrintQueriesQueue;
 class PrinterQuery;
 
+using CompletionCallback = base::OnceCallback<void(bool, const std::string&)>;
+
 // Base class for managing the print commands for a WebContents.
 class PrintViewManagerBase : public content::NotificationObserver,
                              public PrintManager {
@@ -42,7 +44,9 @@ class PrintViewManagerBase : public content::NotificationObserver,
   // Prints the current document immediately. Since the rendering is
   // asynchronous, the actual printing will not be completed on the return of
   // this function. Returns false if printing is impossible at the moment.
-  virtual bool PrintNow(content::RenderFrameHost* rfh);
+  virtual bool PrintNow(content::RenderFrameHost* rfh,
+                        std::unique_ptr<IPC::Message> message,
+                        CompletionCallback callback);
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   // Prints the document in |print_data| with settings specified in
@@ -202,8 +206,14 @@ class PrintViewManagerBase : public content::NotificationObserver,
   // The current RFH that is printing with a system printing dialog.
   content::RenderFrameHost* printing_rfh_;
 
+  // Respond with success of the print job.
+  CompletionCallback callback_;
+
   // Indication of success of the print job.
   bool printing_succeeded_;
+
+  // Indication of whether the print job was manually cancelled
+  bool printing_cancelled_ = false;
 
   // Set while running an inner message loop inside RenderAllMissingPagesNow().
   // This means we are _blocking_ until all the necessary pages have been

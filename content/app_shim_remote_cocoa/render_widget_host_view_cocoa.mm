@@ -152,6 +152,11 @@ void ExtractUnderlines(NSAttributedString* string,
 
 }  // namespace
 
+@interface NSWindow (AtomCustomMethods)
+- (BOOL)acceptsFirstMouse;
+- (BOOL)disableAutoHideCursor;
+@end
+
 // These are not documented, so use only after checking -respondsToSelector:.
 @interface NSApplication (UndocumentedSpeechMethods)
 - (void)speakString:(NSString*)string;
@@ -571,6 +576,9 @@ void ExtractUnderlines(NSAttributedString* string,
 }
 
 - (BOOL)acceptsFirstMouse:(NSEvent*)theEvent {
+  if ([self.window respondsToSelector:@selector(acceptsFirstMouse)] &&
+      [self.window acceptsFirstMouse])
+    return YES;
   return [self acceptsMouseEventsWhenInactive];
 }
 
@@ -989,6 +997,10 @@ void ExtractUnderlines(NSAttributedString* string,
   bool shouldAutohideCursor = textInputType_ != ui::TEXT_INPUT_TYPE_NONE &&
                               eventType == NSKeyDown &&
                               !(modifierFlags & NSCommandKeyMask);
+
+  if ([theEvent.window respondsToSelector:@selector(disableAutoHideCursor)] &&
+      [theEvent.window disableAutoHideCursor])
+    shouldAutohideCursor = NO;
 
   // We only handle key down events and just simply forward other events.
   if (eventType != NSKeyDown) {
@@ -1769,9 +1781,11 @@ void ExtractUnderlines(NSAttributedString* string,
 // Since this implementation doesn't have to wait any IPC calls, this doesn't
 // make any key-typing jank. --hbono 7/23/09
 //
+#ifndef MAS_BUILD
 extern "C" {
 extern NSString* NSTextInputReplacementRangeAttributeName;
 }
+#endif
 
 - (NSArray*)validAttributesForMarkedText {
   // This code is just copied from WebKit except renaming variables.
@@ -1780,7 +1794,10 @@ extern NSString* NSTextInputReplacementRangeAttributeName;
         initWithObjects:NSUnderlineStyleAttributeName,
                         NSUnderlineColorAttributeName,
                         NSMarkedClauseSegmentAttributeName,
-                        NSTextInputReplacementRangeAttributeName, nil]);
+#ifndef MAS_BUILD
+                        NSTextInputReplacementRangeAttributeName,
+#endif
+                        nil]);
   }
   return validAttributesForMarkedText_.get();
 }
@@ -2203,7 +2220,9 @@ extern NSString* NSTextInputReplacementRangeAttributeName;
 }
 
 - (NSTouchBar*)makeTouchBar {
-  if (textInputType_ != ui::TEXT_INPUT_TYPE_NONE) {
+  if (textInputType_ != ui::TEXT_INPUT_TYPE_NONE &&
+      !(textInputFlags_ & blink::kWebTextInputFlagAutocorrectOff) &&
+      !(textInputFlags_ & blink::kWebTextInputFlagSpellcheckOff)) {
     candidateListTouchBarItem_.reset([[NSCandidateListTouchBarItem alloc]
         initWithIdentifier:NSTouchBarItemIdentifierCandidateList]);
     auto* candidateListItem = candidateListTouchBarItem_.get();

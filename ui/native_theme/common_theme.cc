@@ -56,6 +56,14 @@ SkColor GetAuraColor(NativeTheme::ColorId color_id,
       case NativeTheme::kColorId_BubbleFooterBackground:
         return SkColorSetRGB(0x32, 0x36, 0x39);
 
+      // Results Tables
+      case NativeTheme::kColorId_ResultsTableNormalBackground:
+        return SkColorSetRGB(0x28, 0x28, 0x28);
+      case NativeTheme::kColorId_ResultsTableNormalText:
+        return SK_ColorWHITE;
+      case NativeTheme::kColorId_ResultsTableDimmedText:
+        return SkColorSetA(base_theme->GetSystemColor(NativeTheme::kColorId_ResultsTableNormalText), 0x80);
+
       // FocusableBorder
       case NativeTheme::kColorId_FocusedBorderColor:
         return SkColorSetA(gfx::kGoogleBlue300, 0x66);
@@ -358,6 +366,18 @@ SkColor GetAuraColor(NativeTheme::ColorId color_id,
       return SkColorSetA(gfx::kGoogleBlue500, 0x66);
     case NativeTheme::kColorId_UnfocusedBorderColor:
       return SkColorSetA(SK_ColorBLACK, 0x66);
+
+    // Results Tables
+    case NativeTheme::kColorId_ResultsTableNormalBackground:
+      return SK_ColorWHITE;
+    case NativeTheme::kColorId_ResultsTableHoveredBackground:
+      return SkColorSetA(base_theme->GetSystemColor(
+                             NativeTheme::kColorId_ResultsTableNormalText),
+                         0x0D);
+    case NativeTheme::kColorId_ResultsTableNormalText:
+      return SK_ColorBLACK;
+    case NativeTheme::kColorId_ResultsTableDimmedText:
+      return SkColorSetRGB(0x64, 0x64, 0x64);
 
     // Material spinner/throbber
     case NativeTheme::kColorId_ThrobberSpinningColor:

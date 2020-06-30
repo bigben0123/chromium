@@ -35,7 +35,7 @@ void CreateDedicatedWorkerHostFactory(
     int creator_process_id,
     int ancestor_render_frame_id,
     int creator_render_frame_id,
-    const url::Origin& origin,
+    const url::Origin& creator_origin,
     mojo::PendingReceiver<blink::mojom::DedicatedWorkerHostFactory> receiver);
 
 // A host for a single dedicated worker. Its lifetime is managed by the
@@ -49,7 +49,7 @@ class DedicatedWorkerHost final
       int worker_process_id,
       int ancestor_render_frame_id,
       int creator_render_frame_id,
-      const url::Origin& origin,
+      const url::Origin& creator_origin,
       mojo::PendingReceiver<blink::mojom::DedicatedWorkerHost> host);
   ~DedicatedWorkerHost() final;
 
@@ -60,7 +60,7 @@ class DedicatedWorkerHost final
   RenderProcessHost* GetProcessHost() {
     return RenderProcessHost::FromID(worker_process_id_);
   }
-  const url::Origin& GetOrigin() { return origin_; }
+  const url::Origin& GetWorkerOrigin() { return worker_origin_; }
 
   void BindFileSystemManager(
       mojo::PendingReceiver<blink::mojom::FileSystemManager> receiver);
@@ -82,7 +82,6 @@ class DedicatedWorkerHost final
   // PlzDedicatedWorker:
   void StartScriptLoad(
       const GURL& script_url,
-      const url::Origin& request_initiator_origin,
       network::mojom::CredentialsMode credentials_mode,
       blink::mojom::FetchClientSettingsObjectPtr
           outside_fetch_client_settings_object,
@@ -145,7 +144,12 @@ class DedicatedWorkerHost final
   // MSG_ROUTING_NONE when this worker is nested.
   const int creator_render_frame_id_;
 
-  const url::Origin origin_;
+  // The origin of the frame or dedicated worker that starts this worker.
+  const url::Origin creator_origin_;
+
+  // The origin of this worker.
+  // https://html.spec.whatwg.org/C/#concept-settings-object-origin
+  const url::Origin worker_origin_;
 
   // The network isolation key to be used for both the worker script and the
   // worker's subresources.

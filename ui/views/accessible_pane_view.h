@@ -35,7 +35,7 @@ class VIEWS_EXPORT AccessiblePaneView : public View,
   // If |initial_focus| is not NULL, that control will get
   // the initial focus, if it's enabled and focusable. Returns true if
   // the pane was able to receive focus.
-  bool SetPaneFocus(View* initial_focus);
+  virtual bool SetPaneFocus(View* initial_focus);
 
   bool pane_has_focus() const { return pane_has_focus_; }
 
@@ -83,7 +83,7 @@ class VIEWS_EXPORT AccessiblePaneView : public View,
   bool ContainsForFocusSearch(View* root, const View* v);
 
   // Remove pane focus.
-  void RemovePaneFocus();
+  virtual void RemovePaneFocus();
 
   View* GetFirstFocusableChild();
   View* GetLastFocusableChild();

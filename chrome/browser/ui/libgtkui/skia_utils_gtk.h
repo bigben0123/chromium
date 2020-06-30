@@ -8,6 +8,7 @@
 #include <gtk/gtk.h>
 #include <stdint.h>
 
+#include "chrome/browser/ui/libgtkui/libgtkui_export.h"
 #include "third_party/skia/include/core/SkColor.h"
 
 #if !GTK_CHECK_VERSION(3, 90, 0)
@@ -48,7 +49,7 @@ const SkBitmap GdkPixbufToImageSkia(GdkPixbuf* pixbuf);
 // Convert and copy a SkBitmap to a GdkPixbuf. NOTE: this uses BGRAToRGBA, so
 // it is an expensive operation.  The returned GdkPixbuf will have a refcount of
 // 1, and the caller is responsible for unrefing it when done.
-GdkPixbuf* GdkPixbufFromSkBitmap(const SkBitmap& bitmap);
+LIBGTKUI_EXPORT GdkPixbuf* GdkPixbufFromSkBitmap(const SkBitmap& bitmap);
 
 }  // namespace libgtkui
 

@@ -27,10 +27,7 @@
 #include "chrome/browser/printing/print_view_manager_common.h"
 #include "chrome/browser/printing/printer_query.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/simple_message_box.h"
-#include "chrome/browser/ui/webui/print_preview/printer_handler.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/grit/generated_resources.h"
 #include "components/prefs/pref_service.h"
 #include "components/printing/browser/print_composite_client.h"
 #include "components/printing/browser/print_manager_utils.h"
@@ -45,6 +42,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "electron/grit/electron_resources.h"
 #include "mojo/public/cpp/system/buffer.h"
 #include "printing/buildflags/buildflags.h"
 #include "printing/metafile_skia.h"
@@ -64,6 +62,8 @@ using PrintSettingsCallback =
     base::OnceCallback<void(std::unique_ptr<PrinterQuery>)>;
 
 void ShowWarningMessageBox(const base::string16& message) {
+  LOG(ERROR) << "Invalid printer settings " << message;
+#if 0
   // Runs always on the UI thread.
   static bool is_dialog_shown = false;
   if (is_dialog_shown)
@@ -72,6 +72,7 @@ void ShowWarningMessageBox(const base::string16& message) {
   base::AutoReset<bool> auto_reset(&is_dialog_shown, true);
 
   chrome::ShowWarningMessageBox(nullptr, base::string16(), message);
+#endif
 }
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
@@ -110,12 +111,14 @@ PrintViewManagerBase::PrintViewManagerBase(content::WebContents* web_contents)
       printing_succeeded_(false),
       queue_(g_browser_process->print_job_manager()->queue()) {
   DCHECK(queue_);
+#if 0
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   printing_enabled_.Init(
       prefs::kPrintingEnabled, profile->GetPrefs(),
       base::BindRepeating(&PrintViewManagerBase::UpdatePrintingEnabled,
                           weak_ptr_factory_.GetWeakPtr()));
+#endif
 }
 
 PrintViewManagerBase::~PrintViewManagerBase() {
@@ -123,12 +126,14 @@ PrintViewManagerBase::~PrintViewManagerBase() {
   DisconnectFromCurrentPrintJob();
 }
 
-bool PrintViewManagerBase::PrintNow(content::RenderFrameHost* rfh) {
+bool PrintViewManagerBase::PrintNow(content::RenderFrameHost* rfh,
+                                    std::unique_ptr<IPC::Message> message,
+                                    CompletionCallback callback) {
   DisconnectFromCurrentPrintJob();
 
   SetPrintingRFH(rfh);
-  int32_t id = rfh->GetRoutingID();
-  return PrintNowInternal(rfh, std::make_unique<PrintMsg_PrintPages>(id));
+  callback_ = std::move(callback);
+  return PrintNowInternal(rfh, std::move(message));
 }
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
@@ -242,9 +247,9 @@ void PrintViewManagerBase::StartLocalPrintJob(
 void PrintViewManagerBase::UpdatePrintingEnabled() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   // The Unretained() is safe because ForEachFrame() is synchronous.
-  web_contents()->ForEachFrame(base::BindRepeating(
-      &PrintViewManagerBase::SendPrintingEnabled, base::Unretained(this),
-      printing_enabled_.GetValue()));
+  web_contents()->ForEachFrame(
+      base::BindRepeating(&PrintViewManagerBase::SendPrintingEnabled,
+                          base::Unretained(this), true));
 }
 
 void PrintViewManagerBase::NavigationStopped() {
@@ -347,7 +352,7 @@ void PrintViewManagerBase::OnPrintingFailed(int cookie) {
   PrintManager::OnPrintingFailed(cookie);
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
-  ShowPrintErrorDialog();
+  // ShowPrintErrorDialog();
 #endif
 
   ReleasePrinterQuery();
@@ -445,9 +450,13 @@ void PrintViewManagerBase::OnNotifyPrintJobEvent(
           content::NotificationService::NoDetails());
       break;
     }
-    case JobEventDetails::USER_INIT_DONE:
-    case JobEventDetails::DEFAULT_INIT_DONE:
     case JobEventDetails::USER_INIT_CANCELED: {
+      printing_cancelled_ = true;
+      ReleasePrintJob();
+      break;
+    }
+    case JobEventDetails::USER_INIT_DONE:
+    case JobEventDetails::DEFAULT_INIT_DONE: {
       NOTREACHED();
       break;
     }
@@ -542,8 +551,10 @@ bool PrintViewManagerBase::CreateNewPrintJob(
   DCHECK(!quit_inner_loop_);
   DCHECK(query);
 
-  // Disconnect the current |print_job_|.
-  DisconnectFromCurrentPrintJob();
+  if (callback_.is_null()) {
+    // Disconnect the current |print_job_| only when calling window.print()
+    DisconnectFromCurrentPrintJob();
+  }
 
   // We can't print if there is no renderer.
   if (!web_contents()->GetRenderViewHost() ||
@@ -557,9 +568,6 @@ bool PrintViewManagerBase::CreateNewPrintJob(
 #if defined(OS_CHROMEOS)
   print_job_->SetSource(PrintJob::Source::PRINT_PREVIEW, /*source_id=*/"");
 #endif  // defined(OS_CHROMEOS)
-
-  registrar_.Add(this, chrome::NOTIFICATION_PRINT_JOB_EVENT,
-                 content::Source<PrintJob>(print_job_.get()));
   printing_succeeded_ = false;
   return true;
 }
@@ -608,6 +616,13 @@ void PrintViewManagerBase::ReleasePrintJob() {
   content::RenderFrameHost* rfh = printing_rfh_;
   printing_rfh_ = nullptr;
 
+  if (!callback_.is_null()) {
+    std::string cb_str = "";
+    if (!printing_succeeded_)
+      cb_str = printing_cancelled_ ? "cancelled" : "failed";
+    std::move(callback_).Run(printing_succeeded_, cb_str);
+  }
+
   if (!print_job_)
     return;
 
@@ -617,8 +632,9 @@ void PrintViewManagerBase::ReleasePrintJob() {
     rfh->Send(msg.release());
   }
 
-  registrar_.Remove(this, chrome::NOTIFICATION_PRINT_JOB_EVENT,
-                    content::Source<PrintJob>(print_job_.get()));
+  if (!callback_.is_null())
+    registrar_.Remove(this, chrome::NOTIFICATION_PRINT_JOB_EVENT,
+                      content::NotificationService::AllSources());
   // Don't close the worker thread.
   print_job_ = nullptr;
 }
@@ -654,7 +670,7 @@ bool PrintViewManagerBase::RunInnerMessageLoop() {
 }
 
 bool PrintViewManagerBase::OpportunisticallyCreatePrintJob(int cookie) {
-  if (print_job_)
+  if (print_job_ && print_job_->document())
     return true;
 
   if (!cookie) {
@@ -688,6 +704,9 @@ bool PrintViewManagerBase::PrintNowInternal(
   // Don't print / print preview interstitials or crashed tabs.
   if (web_contents()->ShowingInterstitialPage() || web_contents()->IsCrashed())
     return false;
+
+  registrar_.Add(this, chrome::NOTIFICATION_PRINT_JOB_EVENT,
+                content::NotificationService::AllSources());
   return rfh->Send(message.release());
 }
 

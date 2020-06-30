@@ -41,6 +41,7 @@
 
 // The methods in this file are specific to the Mac OS X platform.
 
+#ifndef MAS_BUILD
 // Forward declare Mac SPIs.
 extern "C" {
 void _NSDrawCarbonThemeBezel(NSRect frame, BOOL enabled, BOOL flipped);
@@ -50,6 +51,7 @@ void _NSDrawCarbonThemeListBox(NSRect frame,
                                BOOL flipped,
                                BOOL always_yes);
 }
+#endif
 
 namespace blink {
 
@@ -72,10 +74,12 @@ bool ThemePainterMac::PaintTextField(const Node* node,
   // behavior change while remaining a fragile solution.
   // https://bugs.chromium.org/p/chromium/issues/detail?id=658085#c3
   if (!use_ns_text_field_cell) {
+#ifndef MAS_BUILD
     _NSDrawCarbonThemeBezel(
         CGRect(r),
         LayoutTheme::IsEnabled(node) && !LayoutTheme::IsReadOnlyControl(node),
         YES);
+#endif
     return false;
   }
 
@@ -161,10 +165,12 @@ bool ThemePainterMac::PaintTextArea(const Node* node,
                                     const PaintInfo& paint_info,
                                     const IntRect& r) {
   LocalCurrentGraphicsContext local_context(paint_info.context, r);
+#ifndef MAS_BUILD
   _NSDrawCarbonThemeListBox(
       CGRect(r),
       LayoutTheme::IsEnabled(node) && !LayoutTheme::IsReadOnlyControl(node),
       YES, YES);
+#endif
   return false;
 }
 

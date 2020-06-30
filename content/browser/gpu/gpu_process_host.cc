@@ -193,6 +193,7 @@ GpuTerminationStatus ConvertToGpuTerminationStatus(
 
 // Command-line switches to propagate to the GPU process.
 static const char* const kSwitchNames[] = {
+    switches::kDisableColorCorrectRendering,
     service_manager::switches::kDisableSeccompFilterSandbox,
     service_manager::switches::kGpuSandboxAllowSysVShm,
     service_manager::switches::kGpuSandboxFailuresFatal,

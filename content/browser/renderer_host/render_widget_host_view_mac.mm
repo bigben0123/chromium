@@ -63,6 +63,7 @@
 #include "ui/events/keycodes/dom/dom_keyboard_layout_map.h"
 #include "ui/gfx/geometry/dip_util.h"
 #include "ui/gfx/mac/coordinate_conversion.h"
+#include "ui/gl/gpu_switching_manager.h"
 
 using blink::WebInputEvent;
 using blink::WebMouseEvent;
@@ -244,8 +245,10 @@ RenderWidgetHostViewMac::~RenderWidgetHostViewMac() {
 void RenderWidgetHostViewMac::MigrateNSViewBridge(
     remote_cocoa::mojom::Application* remote_cocoa_application,
     uint64_t parent_ns_view_id) {
+#ifndef MAS_BUILD
   // Destroy the previous remote accessibility element.
   remote_window_accessible_.reset();
+#endif
 
   // Disconnect from the previous bridge (this will have the effect of
   // destroying the associated bridge), and close the binding (to allow it
@@ -486,7 +489,11 @@ void RenderWidgetHostViewMac::WasOccluded() {
     return;
 
   host()->WasHidden();
-  browser_compositor_->SetRenderWidgetHostIsHidden(true);
+  // Consider the RWHV occluded only if it is not attached to a window
+  // (e.g. unattached BrowserView). Otherwise we treat it as visible to
+  // prevent unnecessary compositor recycling.
+  const bool unattached = ![GetInProcessNSView() window];
+  browser_compositor_->SetRenderWidgetHostIsHidden(unattached);
 }
 
 void RenderWidgetHostViewMac::SetSize(const gfx::Size& size) {
@@ -1382,8 +1389,10 @@ RenderWidgetHostViewMac::AccessibilityGetNativeViewAccessible() {
 
 gfx::NativeViewAccessible
 RenderWidgetHostViewMac::AccessibilityGetNativeViewAccessibleForWindow() {
+#ifndef MAS_BUILD
   if (remote_window_accessible_)
     return remote_window_accessible_.get();
+#endif
   return [GetInProcessNSView() window];
 }
 
@@ -1423,9 +1432,11 @@ id RenderWidgetHostViewMac::GetFocusedBrowserAccessibilityElement() {
 }
 
 void RenderWidgetHostViewMac::SetAccessibilityWindow(NSWindow* window) {
+#ifndef MAS_BUILD
   // When running in-process, just use the NSView's NSWindow as its own
   // accessibility element.
   remote_window_accessible_.reset();
+#endif
 }
 
 bool RenderWidgetHostViewMac::SyncIsWidgetForMainFrame(
@@ -1906,12 +1917,14 @@ void RenderWidgetHostViewMac::StopSpeaking() {
 
 void RenderWidgetHostViewMac::SetRemoteAccessibilityWindowToken(
     const std::vector<uint8_t>& window_token) {
+#ifndef MAS_BUILD
   if (window_token.empty()) {
     remote_window_accessible_.reset();
   } else {
     remote_window_accessible_ =
         ui::RemoteAccessibility::GetRemoteElementFromToken(window_token);
   }
+#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////

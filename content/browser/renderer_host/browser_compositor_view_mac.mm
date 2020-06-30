@@ -80,6 +80,12 @@ BrowserCompositorMac::~BrowserCompositorMac() {
   DCHECK_EQ(1u, num_erased);
 }
 
+ui::Compositor* BrowserCompositorMac::GetCompositor() {
+  if (recyclable_compositor_)
+    return recyclable_compositor_->compositor();
+  return nullptr;
+}
+
 DelegatedFrameHost* BrowserCompositorMac::GetDelegatedFrameHost() {
   DCHECK(delegated_frame_host_);
   return delegated_frame_host_.get();

@@ -160,7 +160,6 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
   virtual void DispatchDidFinishDocumentLoad() = 0;
   virtual void DispatchDidFinishLoad() = 0;
 #ifndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_DISPATCH  // zhibin:patch_to_content
-                                                      // ipc
   virtual void DispatchDidNotifyEventAdded(const std::string& node_name,
                                            const std::string& event_type) {}
   #endif

@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/c++/c++.gni")
 import("//build/config/chrome_build.gni")
 import("//build/config/clang/clang.gni")
 import("//build/config/compiler/compiler.gni")
@@ -61,8 +62,12 @@ config("compiler") {
     "/FS",  # Preserve previous PDB behavior.
     "/bigobj",  # Some of our files are bigger than the regular limits.
     "/utf-8",  # Assume UTF-8 by default to avoid code page dependencies.
-    "/Zc:twoPhase",
   ]
+
+  if (use_custom_libcxx) {
+    # Work around crbug.com/969698#c6, bug in MSSTL <xxatomic>.
+    cflags += [ "/Zc:twoPhase" ]
+  }
 
   # Force C/C++ mode for the given GN detected file type. This is necessary
   # for precompiled headers where the same source file is compiled in both

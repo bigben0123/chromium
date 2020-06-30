@@ -7,10 +7,12 @@
 #include <string>
 
 #include "base/task/post_task.h"
+#if 0
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
+#endif
 #include "content/public/browser/browser_ppapi_host.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -59,6 +61,7 @@ int32_t PepperBrokerMessageFilter::OnIsAllowed(
       RenderProcessHost::FromID(render_process_id_);
   if (!render_process_host)
     return PP_ERROR_FAILED;
+#if 0
   Profile* profile =
       Profile::FromBrowserContext(render_process_host->GetBrowserContext());
   HostContentSettingsMap* content_settings =
@@ -70,5 +73,6 @@ int32_t PepperBrokerMessageFilter::OnIsAllowed(
                                           std::string());
   if (setting == CONTENT_SETTING_ALLOW)
     return PP_OK;
-  return PP_ERROR_FAILED;
+#endif
+  return PP_OK;
 }

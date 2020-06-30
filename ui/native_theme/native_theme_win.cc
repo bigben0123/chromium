@@ -559,6 +559,17 @@ SkColor NativeThemeWin::GetSystemColor(ColorId color_id,
     case kColorId_TableGroupingIndicatorColor:
       return system_colors_[SystemThemeColor::kGrayText];
 
+    // Results Tables
+    case kColorId_ResultsTableNormalBackground:
+      return system_colors_[SystemThemeColor::kWindow];
+    case kColorId_ResultsTableHoveredBackground:
+      return color_utils::AlphaBlend(system_colors_[SystemThemeColor::kWindowText],
+                                     system_colors_[SystemThemeColor::kWindow], 0.25f);
+    case kColorId_ResultsTableNormalText:
+      return system_colors_[SystemThemeColor::kWindowText];
+    case kColorId_ResultsTableDimmedText:
+      return color_utils::AlphaBlend(system_colors_[SystemThemeColor::kWindowText],
+                                     system_colors_[SystemThemeColor::kWindow], 0.5f);
     default:
       break;
   }
@@ -600,6 +611,8 @@ bool NativeThemeWin::ShouldUseDarkColors() const {
   // ...unless --force-dark-mode was specified in which case caveat emptor.
   if (UsesHighContrastColors() && !IsForcedDarkMode())
     return false;
+  if (theme_source() == ThemeSource::kForcedLight) return false;
+  if (theme_source() == ThemeSource::kForcedDark) return true;
   return NativeTheme::ShouldUseDarkColors();
 }
 

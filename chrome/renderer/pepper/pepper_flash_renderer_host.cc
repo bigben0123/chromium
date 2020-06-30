@@ -13,7 +13,9 @@
 #include "base/no_destructor.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
+#if 0
 #include "components/pdf/renderer/pepper_pdf_host.h"
+#endif
 #include "content/public/renderer/pepper_plugin_instance.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/renderer_ppapi_host.h"
@@ -133,9 +135,11 @@ bool IsSimpleHeader(const std::string& lower_case_header_name,
 }
 
 void RecordFlashNavigateUsage(FlashNavigateUsage usage) {
+#if 0
   DCHECK_NE(FLASH_NAVIGATE_USAGE_ENUM_COUNT, usage);
   UMA_HISTOGRAM_ENUMERATION(
       "Plugin.FlashNavigateUsage", usage, FLASH_NAVIGATE_USAGE_ENUM_COUNT);
+#endif
 }
 
 }  // namespace
@@ -374,6 +378,8 @@ int32_t PepperFlashRendererHost::OnIsRectTopmost(
 
 int32_t PepperFlashRendererHost::OnInvokePrinting(
     ppapi::host::HostMessageContext* host_context) {
+#if 0
   pdf::PepperPDFHost::InvokePrintingForInstance(pp_instance());
-  return PP_OK;
+#endif
+  return PP_ERROR_FAILED;
 }

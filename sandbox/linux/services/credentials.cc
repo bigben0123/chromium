@@ -352,8 +352,10 @@ pid_t Credentials::ForkAndDropCapabilitiesInChild() {
     return pid;
   }
 
+#if 0
   // Since we just forked, we are single threaded.
   PCHECK(DropAllCapabilitiesOnCurrentThread());
+#endif
   return 0;
 }
 

@@ -91,6 +91,11 @@
 #include "services/network/url_loader.h"
 #include "services/network/url_request_context_builder_mojo.h"
 
+// Electron
+#include "net/cert/caching_cert_verifier.h"
+#include "net/cert/cert_verify_proc.h"
+#include "net/cert/multi_threaded_cert_verifier.h"
+
 #if BUILDFLAG(IS_CT_SUPPORTED)
 #include "components/certificate_transparency/chrome_ct_policy_enforcer.h"
 #include "components/certificate_transparency/chrome_require_ct_delegate.h"
@@ -318,6 +323,79 @@ std::string HashesToBase64String(const net::HashValueVector& hashes) {
 }
 
 }  // namespace
+
+class RemoteCertVerifier : public net::CertVerifier {
+ public:
+  RemoteCertVerifier(std::unique_ptr<net::CertVerifier> upstream): upstream_(std::move(upstream)) {
+  }
+  ~RemoteCertVerifier() override = default;
+
+  void Bind(
+      mojo::PendingRemote<mojom::CertVerifierClient> client_info) {
+    client_.reset();
+    if (client_info.is_valid()) {
+      client_.Bind(std::move(client_info));
+    }
+  }
+
+  // CertVerifier implementation
+  int Verify(const RequestParams& params,
+             net::CertVerifyResult* verify_result,
+             net::CompletionOnceCallback callback,
+             std::unique_ptr<Request>* out_req,
+             const net::NetLogWithSource& net_log) override {
+    out_req->reset();
+
+    net::CompletionOnceCallback callback2 = base::BindOnce(
+        &RemoteCertVerifier::OnRequestFinished, base::Unretained(this),
+        params, std::move(callback), verify_result);
+    int result = upstream_->Verify(params, verify_result,
+                                   std::move(callback2), out_req, net_log);
+    if (result != net::ERR_IO_PENDING) {
+      // Synchronous completion
+    }
+
+    return result;
+  }
+
+
+  void SetConfig(const Config& config) override {
+    upstream_->SetConfig(config);
+  }
+
+  void OnRequestFinished(const RequestParams& params, net::CompletionOnceCallback callback, net::CertVerifyResult* verify_result, int error) {
+    if (client_.is_bound()) {
+      client_->Verify(error, *verify_result, params.certificate(),
+          params.hostname(), params.flags(), params.ocsp_response(),
+          base::BindOnce(&RemoteCertVerifier::OnRemoteResponse,
+            base::Unretained(this), params, verify_result, error,
+            std::move(callback)));
+    } else {
+      std::move(callback).Run(error);
+    }
+  }
+
+  void OnRemoteResponse(
+      const RequestParams& params,
+      net::CertVerifyResult* verify_result,
+      int error,
+      net::CompletionOnceCallback callback,
+      int error2,
+      const net::CertVerifyResult& verify_result2) {
+    if (error2 == net::ERR_ABORTED) {
+      // use the default
+      std::move(callback).Run(error);
+    } else {
+      // use the override
+      verify_result->Reset();
+      verify_result->verified_cert = verify_result2.verified_cert;
+      std::move(callback).Run(error2);
+    }
+  }
+ private:
+  std::unique_ptr<net::CertVerifier> upstream_;
+  mojo::Remote<mojom::CertVerifierClient> client_;
+};
 
 constexpr uint32_t NetworkContext::kMaxOutstandingRequestsPerProcess;
 constexpr bool NetworkContext::enable_resource_scheduler_;
@@ -653,6 +731,13 @@ void NetworkContext::SetClient(
     mojo::PendingRemote<mojom::NetworkContextClient> client) {
   client_.reset();
   client_.Bind(std::move(client));
+}
+
+void NetworkContext::SetCertVerifierClient(
+    mojo::PendingRemote<mojom::CertVerifierClient> client) {
+  if (remote_cert_verifier_) {
+    remote_cert_verifier_->Bind(std::move(client));
+  }
 }
 
 void NetworkContext::CreateURLLoaderFactory(
@@ -1019,6 +1104,13 @@ void NetworkContext::SetNetworkConditions(
   }
   ThrottlingController::SetConditions(throttling_profile_id,
                                       std::move(network_conditions));
+}
+
+void NetworkContext::SetUserAgent(const std::string& new_user_agent) {
+  // This may only be called on NetworkContexts created with a constructor that
+  // calls ApplyContextParamsToBuilder.
+  DCHECK(user_agent_settings_);
+  user_agent_settings_->set_user_agent(new_user_agent);
 }
 
 void NetworkContext::SetAcceptLanguage(const std::string& new_accept_language) {
@@ -1729,12 +1821,19 @@ URLRequestContextOwner NetworkContext::MakeURLRequestContext() {
                   cert_net_fetcher_, /*system_trust_store_provider=*/nullptr)));
     }
 #endif
-    if (!cert_verifier)
-      cert_verifier = net::CertVerifier::CreateDefault(cert_net_fetcher_);
+    if (!cert_verifier) {
+      auto mt_verifier = std::make_unique<net::MultiThreadedCertVerifier>(
+              net::CertVerifyProc::CreateDefault(std::move(cert_net_fetcher_)));
+      auto remote_cert_verifier = std::make_unique<RemoteCertVerifier>(std::move(mt_verifier));
+      remote_cert_verifier_ = remote_cert_verifier.get();
+      cert_verifier = std::make_unique<net::CachingCertVerifier>(std::move(remote_cert_verifier));
+    }
   }
 
-  builder.SetCertVerifier(IgnoreErrorsCertVerifier::MaybeWrapCertVerifier(
-      *command_line, nullptr, std::move(cert_verifier)));
+  cert_verifier = IgnoreErrorsCertVerifier::MaybeWrapCertVerifier(
+      *command_line, nullptr, std::move(cert_verifier));
+
+  builder.SetCertVerifier(std::move(cert_verifier));
 
   std::unique_ptr<net::NetworkDelegate> network_delegate =
       std::make_unique<NetworkServiceNetworkDelegate>(this);

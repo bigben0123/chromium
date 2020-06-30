@@ -17,6 +17,7 @@ class NativeWidgetNSWindowBridge;
 
 @protocol WindowTouchBarDelegate;
 
+#ifndef MAS_BUILD
 // Weak lets Chrome launch even if a future macOS doesn't have the below classes
 WEAK_IMPORT_ATTRIBUTE
 @interface NSNextStepFrame : NSView
@@ -33,6 +34,7 @@ REMOTE_COCOA_APP_SHIM_EXPORT
 REMOTE_COCOA_APP_SHIM_EXPORT
 @interface NativeWidgetMacNSWindowTitledFrame : NSThemeFrame
 @end
+#endif
 
 // The NSWindow used by BridgedNativeWidget. Provides hooks into AppKit that
 // can only be accomplished by overriding methods.

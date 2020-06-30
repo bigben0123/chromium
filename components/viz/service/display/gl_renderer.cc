@@ -83,6 +83,9 @@
 
 using gpu::gles2::GLES2Interface;
 
+#define PATCH_CS(color_space) \
+  (settings_->enable_color_correct_rendering ? color_space : gfx::ColorSpace())
+
 namespace viz {
 namespace {
 
@@ -561,8 +564,9 @@ void GLRenderer::DoDrawQuad(const DrawQuad* quad,
 void GLRenderer::DrawDebugBorderQuad(const DebugBorderDrawQuad* quad) {
   SetBlendEnabled(quad->ShouldDrawWithBlending());
 
-  SetUseProgram(ProgramKey::DebugBorder(), gfx::ColorSpace::CreateSRGB(),
-                current_frame()->current_render_pass->color_space);
+  SetUseProgram(ProgramKey::DebugBorder(),
+                PATCH_CS(gfx::ColorSpace::CreateSRGB()),
+                PATCH_CS(current_frame()->current_render_pass->color_space));
 
   // Use the full quad_rect for debug quads to not move the edges based on
   // partial swaps.
@@ -1485,7 +1489,8 @@ void GLRenderer::ChooseRPDQProgram(DrawRenderPassDrawQuadParams* params,
           params->use_color_matrix, tint_gl_composited_content_,
           params->apply_shader_based_rounded_corner &&
               ShouldApplyRoundedCorner(params->quad)),
-      params->contents_and_bypass_color_space, target_color_space);
+          PATCH_CS(params->contents_and_bypass_color_space),
+          PATCH_CS(target_color_space));
 }
 
 void GLRenderer::UpdateRPDQUniforms(DrawRenderPassDrawQuadParams* params) {
@@ -1956,8 +1961,8 @@ void GLRenderer::DrawSolidColorQuad(const SolidColorDrawQuad* quad,
   SetUseProgram(ProgramKey::SolidColor(use_aa ? USE_AA : NO_AA,
                                        tint_gl_composited_content_,
                                        ShouldApplyRoundedCorner(quad)),
-                quad_color_space,
-                current_frame()->current_render_pass->color_space);
+                PATCH_CS(quad_color_space),
+                PATCH_CS(current_frame()->current_render_pass->color_space));
   SetShaderColor(color, opacity);
   if (current_program_->rounded_corner_rect_location() != -1) {
     SetShaderRoundedCorner(
@@ -2112,8 +2117,8 @@ void GLRenderer::DrawContentQuadAA(const ContentDrawQuadBase* quad,
                                               : NON_PREMULTIPLIED_ALPHA,
                        false, false, tint_gl_composited_content_,
                        ShouldApplyRoundedCorner(quad)),
-      quad_resource_lock.color_space(),
-      current_frame()->current_render_pass->color_space);
+      PATCH_CS(quad_resource_lock.color_space()),
+      PATCH_CS(current_frame()->current_render_pass->color_space));
 
   if (current_program_->tint_color_matrix_location() != -1) {
     auto matrix = cc::DebugColors::TintCompositedContentColorTransformMatrix();
@@ -2209,8 +2214,8 @@ void GLRenderer::DrawContentQuadNoAA(const ContentDrawQuadBase* quad,
                        !quad->ShouldDrawWithBlending(), has_tex_clamp_rect,
                        tint_gl_composited_content_,
                        ShouldApplyRoundedCorner(quad)),
-      quad_resource_lock.color_space(),
-      current_frame()->current_render_pass->color_space);
+      PATCH_CS(quad_resource_lock.color_space()),
+      PATCH_CS(current_frame()->current_render_pass->color_space));
 
   if (current_program_->tint_color_matrix_location() != -1) {
     auto matrix = cc::DebugColors::TintCompositedContentColorTransformMatrix();
@@ -2313,7 +2318,7 @@ void GLRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
   DCHECK_NE(src_color_space, src_color_space.GetAsFullRangeRGB());
 
   gfx::ColorSpace dst_color_space =
-      current_frame()->current_render_pass->color_space;
+      PATCH_CS(current_frame()->current_render_pass->color_space);
   // Force sRGB output on Windows for overlay candidate video quads to match
   // DirectComposition behavior in case these switch between overlays and
   // compositing. See https://crbug.com/811118 for details.
@@ -2469,8 +2474,8 @@ void GLRenderer::DrawStreamVideoQuad(const StreamVideoDrawQuad* quad,
 
   SetUseProgram(ProgramKey::VideoStream(tex_coord_precision,
                                         ShouldApplyRoundedCorner(quad)),
-                lock.color_space(),
-                current_frame()->current_render_pass->color_space);
+                PATCH_CS(lock.color_space()),
+                PATCH_CS(current_frame()->current_render_pass->color_space));
 
   DCHECK_EQ(GL_TEXTURE0, GetActiveTextureUnit(gl_));
   gl_->BindTexture(GL_TEXTURE_EXTERNAL_OES, lock.texture_id());
@@ -2532,8 +2537,8 @@ void GLRenderer::FlushTextureQuadCache(BoundGeometry flush_binding) {
       draw_cache_.nearest_neighbor ? GL_NEAREST : GL_LINEAR);
 
   // Bind the program to the GL state.
-  SetUseProgram(draw_cache_.program_key, locked_quad.color_space(),
-                current_frame()->current_render_pass->color_space);
+  SetUseProgram(draw_cache_.program_key, PATCH_CS(locked_quad.color_space()),
+                PATCH_CS(current_frame()->current_render_pass->color_space));
 
   if (current_program_->rounded_corner_rect_location() != -1) {
     SetShaderRoundedCorner(
@@ -3230,7 +3235,9 @@ void GLRenderer::PrepareGeometry(BoundGeometry binding) {
 void GLRenderer::SetUseProgram(const ProgramKey& program_key_no_color,
                                const gfx::ColorSpace& src_color_space,
                                const gfx::ColorSpace& dst_color_space) {
-  DCHECK(dst_color_space.IsValid());
+  if (settings_->enable_color_correct_rendering) {
+    DCHECK(dst_color_space.IsValid());
+  }
 
   gfx::ColorSpace adjusted_color_space = src_color_space;
   float sdr_white_level = current_frame()->sdr_white_level;
@@ -3609,7 +3616,7 @@ void GLRenderer::CopyRenderPassDrawQuadToOverlayResource(
 
   *overlay_texture = FindOrCreateOverlayTexture(
       params.quad->render_pass_id, iosurface_width, iosurface_height,
-      current_frame()->root_render_pass->color_space);
+      PATCH_CS(current_frame()->root_render_pass->color_space));
   *new_bounds = gfx::RectF(updated_dst_rect.origin(),
                            gfx::SizeF((*overlay_texture)->texture.size()));
 
@@ -3827,8 +3834,8 @@ void GLRenderer::FlushOverdrawFeedback(const gfx::Rect& output_rect) {
 
   PrepareGeometry(SHARED_BINDING);
 
-  SetUseProgram(ProgramKey::DebugBorder(), gfx::ColorSpace::CreateSRGB(),
-                current_frame()->root_render_pass->color_space);
+  SetUseProgram(ProgramKey::DebugBorder(), PATCH_CS(gfx::ColorSpace::CreateSRGB()),
+                PATCH_CS(current_frame()->root_render_pass->color_space));
 
   gfx::Transform render_matrix;
   render_matrix.Translate(0.5 * output_rect.width() + output_rect.x(),
@@ -3988,3 +3995,5 @@ gfx::Size GLRenderer::GetRenderPassBackingPixelSize(
 }
 
 }  // namespace viz
+
+#undef PATCH_CS

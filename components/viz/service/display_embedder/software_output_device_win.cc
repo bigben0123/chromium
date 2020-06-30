@@ -11,6 +11,7 @@
 #include "components/viz/common/display/use_layered_window.h"
 #include "components/viz/common/resources/resource_sizes.h"
 #include "components/viz/service/display_embedder/output_device_backing.h"
+#include "components/viz/service/display_embedder/software_output_device_proxy.h"
 #include "mojo/public/cpp/system/platform_handle.h"
 #include "services/viz/privileged/mojom/compositing/layered_window_updater.mojom.h"
 #include "skia/ext/platform_canvas.h"
@@ -265,7 +266,7 @@ void SoftwareOutputDeviceWinProxy::EndPaintDelegated(
   if (!canvas_)
     return;
 
-  layered_window_updater_->Draw(base::BindOnce(
+  layered_window_updater_->Draw(damage_rect, base::BindOnce(
       &SoftwareOutputDeviceWinProxy::DrawAck, base::Unretained(this)));
   waiting_on_draw_ack_ = true;
 
@@ -297,8 +298,13 @@ std::unique_ptr<SoftwareOutputDevice> CreateSoftwareOutputDeviceWin(
     display_client->CreateLayeredWindowUpdater(
         mojo::MakeRequest(&layered_window_updater));
 
-    return std::make_unique<SoftwareOutputDeviceWinProxy>(
-        hwnd, std::move(layered_window_updater));
+    bool offscreen = false;
+    if (display_client->IsOffscreen(&offscreen) && offscreen)
+      return std::make_unique<SoftwareOutputDeviceProxy>(
+          std::move(layered_window_updater));
+    else
+      return std::make_unique<SoftwareOutputDeviceWinProxy>(
+          hwnd, std::move(layered_window_updater));
   } else {
     return std::make_unique<SoftwareOutputDeviceWinDirect>(hwnd, backing);
   }

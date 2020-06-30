@@ -877,6 +877,13 @@ v8::Local<v8::Object> WebLocalFrameImpl::GlobalProxy() const {
   return MainWorldScriptContext()->Global();
 }
 
+v8::Local<v8::Context> WebLocalFrameImpl::WorldScriptContext(
+    v8::Isolate* isolate, int world_id) const {
+  scoped_refptr<DOMWrapperWorld> world = DOMWrapperWorld::EnsureIsolatedWorld(
+      isolate, world_id);
+  return ToScriptState(GetFrame(), *world)->GetContext();
+}
+
 bool WebFrame::ScriptCanAccess(WebFrame* target) {
   return BindingSecurity::ShouldAllowAccessToFrame(
       CurrentDOMWindow(V8PerIsolateData::MainThreadIsolate()),
@@ -1965,7 +1972,6 @@ void WebLocalFrameImpl::DidNotifyEvent(const std::string& node_name,
   Client()->DidNotifyEventAdded(node_name,event_type);//voidparam not client's interface
 }
 #endif
-
 HitTestResult WebLocalFrameImpl::HitTestResultForVisualViewportPos(
     const IntPoint& pos_in_viewport) {
   IntPoint root_frame_point(

@@ -64,7 +64,11 @@ void Seatbelt::FreeError(char* errorbuf) {
 
 // static
 bool Seatbelt::IsSandboxed() {
+#ifndef MAS_BUILD
   return ::sandbox_check(getpid(), NULL, 0);
+#else
+  return true;
+#endif
 }
 
 }  // namespace sandbox

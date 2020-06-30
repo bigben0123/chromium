@@ -37,6 +37,7 @@ URLLoaderFactory::URLLoaderFactory(
       params_(std::move(params)),
       resource_scheduler_client_(std::move(resource_scheduler_client)),
       header_client_(std::move(params_->header_client)),
+      auth_client_(std::move(params_->auth_client)),
       cors_url_loader_factory_(cors_url_loader_factory) {
   DCHECK(context);
   DCHECK_NE(mojom::kInvalidProcessId, params_->process_id);
@@ -147,6 +148,7 @@ void URLLoaderFactory::CreateLoaderAndStart(
       std::move(keepalive_statistics_recorder),
       std::move(network_usage_accumulator),
       header_client_.is_bound() ? header_client_.get() : nullptr,
+      auth_client_.is_bound() ? auth_client_.get() : nullptr,
       context_->origin_policy_manager());
   cors_url_loader_factory_->OnLoaderCreated(std::move(loader));
 }

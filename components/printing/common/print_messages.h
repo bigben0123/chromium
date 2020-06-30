@@ -368,7 +368,9 @@ IPC_MESSAGE_ROUTED0(PrintMsg_PrintNodeUnderContextMenu)
 #if BUILDFLAG(ENABLE_PRINTING)
 // Tells the RenderFrame to switch the CSS to print media type, renders every
 // requested pages and switch back the CSS to display media type.
-IPC_MESSAGE_ROUTED0(PrintMsg_PrintPages)
+IPC_MESSAGE_ROUTED2(PrintMsg_PrintPages,
+                    bool /* silent print */,
+                    base::DictionaryValue /* settings */)
 
 // Like PrintMsg_PrintPages, but using the print preview document's frame/node.
 IPC_MESSAGE_ROUTED0(PrintMsg_PrintForSystemDialog)

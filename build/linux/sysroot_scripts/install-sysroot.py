@@ -37,9 +37,11 @@ except ImportError:
     from urllib2 import urlopen
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SRC_DIR = os.path.dirname(os.path.dirname(os.path.dirname(SCRIPT_DIR)))
+SYSTOORS_CONFIG_DIR = os.path.join(SRC_DIR, 'electron', 'script')
 
-URL_PREFIX = 'https://commondatastorage.googleapis.com'
-URL_PATH = 'chrome-linux-sysroot/toolchain'
+URL_PREFIX = 'http://s3.amazonaws.com'
+URL_PATH = 'gh-contractor-zcbenz/toolchain'
 
 VALID_ARCHS = ('arm', 'arm64', 'i386', 'amd64', 'mips', 'mips64el')
 
@@ -103,7 +105,7 @@ def GetSysrootDict(target_platform, target_arch):
   if target_arch not in VALID_ARCHS:
     raise Error('Unknown architecture: %s' % target_arch)
 
-  sysroots_file = os.path.join(SCRIPT_DIR, 'sysroots.json')
+  sysroots_file = os.path.join(SYSTOORS_CONFIG_DIR, 'sysroots.json')
   sysroots = json.load(open(sysroots_file))
   sysroot_key = '%s_%s' % (target_platform, target_arch)
   if sysroot_key not in sysroots:

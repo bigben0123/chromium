@@ -10,8 +10,10 @@
 #include "chrome/renderer/pepper/pepper_flash_fullscreen_host.h"
 #include "chrome/renderer/pepper/pepper_flash_menu_host.h"
 #include "chrome/renderer/pepper/pepper_flash_renderer_host.h"
+#if 0
 #include "chrome/renderer/pepper/pepper_uma_host.h"
 #include "components/pdf/renderer/pepper_pdf_host.h"
+#endif
 #include "content/public/renderer/renderer_ppapi_host.h"
 #include "ppapi/host/ppapi_host.h"
 #include "ppapi/host/resource_host.h"
@@ -86,6 +88,7 @@ ChromeRendererPepperHostFactory::CreateResourceHost(
     }
   }
 
+#if 0
   if (host_->GetPpapiHost()->permissions().HasPermission(
           ppapi::PERMISSION_PDF)) {
     switch (message.type()) {
@@ -104,6 +107,7 @@ ChromeRendererPepperHostFactory::CreateResourceHost(
       return std::make_unique<PepperUMAHost>(host_, instance, resource);
     }
   }
+#endif
 
   return nullptr;
 }

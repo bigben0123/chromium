@@ -43,6 +43,10 @@ void* ArrayBufferAllocator::AllocateUninitialized(size_t length) {
   return malloc(length);
 }
 
+void* ArrayBufferAllocator::Realloc(void* data, size_t length) {
+  return realloc(data, length);
+}
+
 void ArrayBufferAllocator::Free(void* data, size_t length) {
   free(data);
 }

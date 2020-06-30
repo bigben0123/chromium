@@ -22,6 +22,7 @@
 #include "components/keyed_service/content/browser_context_keyed_service_shutdown_notifier_factory.h"
 #include "components/printing/browser/print_manager_utils.h"
 #include "components/printing/common/print_messages.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
@@ -90,20 +91,23 @@ void PrintingMessageFilter::SetDelegateForTesting(TestDelegate* delegate) {
   g_test_delegate = delegate;
 }
 
-PrintingMessageFilter::PrintingMessageFilter(int render_process_id,
-                                             Profile* profile)
+PrintingMessageFilter::PrintingMessageFilter(
+    int render_process_id,
+    content::BrowserContext* browser_context)
     : BrowserMessageFilter(PrintMsgStart),
       render_process_id_(render_process_id),
       queue_(g_browser_process->print_job_manager()->queue()) {
   DCHECK(queue_.get());
   printing_shutdown_notifier_ =
       PrintingMessageFilterShutdownNotifierFactory::GetInstance()
-          ->Get(profile)
+          ->Get(browser_context)
           ->Subscribe(base::Bind(&PrintingMessageFilter::ShutdownOnUIThread,
                                  base::Unretained(this)));
+  #if 0
   is_printing_enabled_.Init(prefs::kPrintingEnabled, profile->GetPrefs());
   is_printing_enabled_.MoveToSequence(
       base::CreateSingleThreadTaskRunner({BrowserThread::IO}));
+  #endif
 }
 
 PrintingMessageFilter::~PrintingMessageFilter() {
@@ -138,11 +142,13 @@ bool PrintingMessageFilter::OnMessageReceived(const IPC::Message& message) {
 
 void PrintingMessageFilter::OnGetDefaultPrintSettings(IPC::Message* reply_msg) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
+#if 0
   if (!is_printing_enabled_.GetValue()) {
     // Reply with NULL query.
     OnGetDefaultPrintSettingsReply(nullptr, reply_msg);
     return;
   }
+#endif
   std::unique_ptr<PrinterQuery> printer_query = queue_->PopPrinterQuery(0);
   if (!printer_query) {
     printer_query =
@@ -228,11 +234,13 @@ void PrintingMessageFilter::OnScriptedPrintReply(
 void PrintingMessageFilter::OnUpdatePrintSettings(int document_cookie,
                                                   base::Value job_settings,
                                                   IPC::Message* reply_msg) {
+#if 0
   if (!is_printing_enabled_.GetValue()) {
     // Reply with NULL query.
     OnUpdatePrintSettingsReply(nullptr, reply_msg);
     return;
   }
+#endif
   std::unique_ptr<PrinterQuery> printer_query =
       queue_->PopPrinterQuery(document_cookie);
   if (!printer_query) {
@@ -258,7 +266,9 @@ void PrintingMessageFilter::OnUpdatePrintSettingsReply(
     std::unique_ptr<PrinterQuery> printer_query,
     IPC::Message* reply_msg) {
   PrintMsg_PrintPages_Params params;
-  if (!printer_query || printer_query->last_status() != PrintingContext::OK) {
+  // We call update without first printing from defaults,
+  // so the last printer status will still be defaulted to PrintingContext::FAILED
+  if (!printer_query) {
     params.Reset();
   } else {
     RenderParamsFromPrintSettings(printer_query->settings(), &params.params);
@@ -296,7 +306,7 @@ void PrintingMessageFilter::OnUpdatePrintSettingsReply(
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
 void PrintingMessageFilter::OnCheckForCancel(const PrintHostMsg_PreviewIds& ids,
                                              bool* cancel) {
-  *cancel = PrintPreviewUI::ShouldCancelRequest(ids);
+  *cancel = false;
 }
 #endif
 

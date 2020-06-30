@@ -11,6 +11,8 @@
 #include "base/mac/scoped_nsobject.h"
 #include "ui/base/ui_base_export.h"
 
+#ifndef MAS_BUILD
+
 @interface NSAccessibilityRemoteUIElement : NSObject
 + (void)registerRemoteUIProcessIdentifier:(int)pid;
 + (NSData*)remoteTokenForLocalUIElement:(id)element;
@@ -31,5 +33,7 @@ class UI_BASE_EXPORT RemoteAccessibility {
 };
 
 }  // namespace ui
+
+#endif  // MAS_BUILD
 
 #endif  // UI_BASE_COCOA_REMOTE_ACCESSIBILITY_API_H_

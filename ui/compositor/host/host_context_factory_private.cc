@@ -98,8 +98,12 @@ void HostContextFactoryPrivate::ConfigureCompositor(
       mojo::MakeRequest(&root_params->compositor_frame_sink_client);
   root_params->display_private =
       mojo::MakeRequest(&compositor_data.display_private);
-  compositor_data.display_client =
-      std::make_unique<HostDisplayClient>(compositor);
+  if (compositor->delegate())
+    compositor_data.display_client = compositor->delegate()->CreateHostDisplayClient(
+        compositor);
+  else
+    compositor_data.display_client =
+        std::make_unique<HostDisplayClient>(compositor);
   root_params->display_client =
       compositor_data.display_client->GetBoundPtr(resize_task_runner_)
           .PassInterface();

@@ -781,6 +781,7 @@ gfx::NativeView WebContentsViewAura::GetRenderWidgetHostViewParent() const {
 
 bool WebContentsViewAura::IsValidDragTarget(
     RenderWidgetHostImpl* target_rwh) const {
+  return true;
   return target_rwh->GetProcess()->GetID() == drag_start_process_id_ ||
       GetRenderViewHostID(web_contents_->GetRenderViewHost()) !=
       drag_start_view_id_;

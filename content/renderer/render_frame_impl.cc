@@ -2341,7 +2341,6 @@ bool RenderFrameImpl::OnMessageReceived(const IPC::Message& msg) {
 #endif
 #endif
     IPC_MESSAGE_HANDLER(UnfreezableFrameMsg_Delete, OnDeleteFrame)
- 
 
   IPC_END_MESSAGE_MAP()
 
@@ -2398,32 +2397,7 @@ void RenderFrameImpl::BindNavigationClient(
   navigation_client_impl_ = std::make_unique<NavigationClient>(this);
   navigation_client_impl_->Bind(std::move(request));
 }
-#if 0 //zhibin:patch ipc not need
-void RenderFrameImpl::OnAddEventListenerCalled(bool is_reload) {
-  TRACE_EVENT1("navigation,rail", "RenderFrameImpl::OnAddEventListenerCalled", "id",
-               routing_id_);
-  // Save the routing_id, as the RenderFrameImpl can be deleted in
-  // dispatchBeforeUnloadEvent. See https://crbug.com/666714 for details.
-  int routing_id = routing_id_;
 
-  base::TimeTicks before_unload_start_time = base::TimeTicks::Now();
-
-  // This will execute the BeforeUnload event in this frame and all of its
-  // local descendant frames, including children of remote frames.  The browser
-  // process will send separate IPCs to dispatch beforeunload in any
-  // out-of-process child frames.
-#if 0
-  bool proceed = frame_->DispatchBeforeUnloadEvent(is_reload);
-  base::TimeTicks before_unload_end_time = base::TimeTicks::Now();
-  RenderThread::Get()->Send(new FrameHostMsg_BeforeUnload_ACK(
-      routing_id, proceed, before_unload_start_time, before_unload_end_time));
-
-#endif  // 0
-  WebDocumentLoader* document_loader = frame_->GetDocumentLoader();
-  Send(new FrameMsg_Notify_addEventListener(routing_id_, is_reload)); 
-}
-
-#endif
 void RenderFrameImpl::OnBeforeUnload(bool is_reload) {
   TRACE_EVENT1("navigation,rail", "RenderFrameImpl::OnBeforeUnload",
                "id", routing_id_);

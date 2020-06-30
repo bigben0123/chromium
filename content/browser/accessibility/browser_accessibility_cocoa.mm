@@ -225,6 +225,7 @@ NSDictionary* attributeToMethodNameMap = nil;
 // VoiceOver uses -1 to mean "no limit" for AXResultsLimit.
 const int kAXResultsLimitNoLimit = -1;
 
+#ifndef MAS_BUILD
 extern "C" {
 
 // The following are private accessibility APIs required for cursor navigation
@@ -432,6 +433,7 @@ NSAttributedString* GetAttributedTextForTextMarkerRange(id marker_range) {
   AddMisspelledTextAttributes(ax_range, attributed_text);
   return attributed_text;
 }
+#endif
 
 // Returns an autoreleased copy of the AXNodeData's attribute.
 NSString* NSStringForStringAttribute(BrowserAccessibility* browserAccessibility,
@@ -699,7 +701,9 @@ NSString* const NSAccessibilityRequiredAttributeChrome = @"AXRequired";
       {NSAccessibilityEditableAncestorAttribute, @"editableAncestor"},
       {NSAccessibilityElementBusyAttribute, @"elementBusy"},
       {NSAccessibilityEnabledAttribute, @"enabled"},
+#ifndef MAS_BUILD
       {NSAccessibilityEndTextMarkerAttribute, @"endTextMarker"},
+#endif
       {NSAccessibilityExpandedAttribute, @"expanded"},
       {NSAccessibilityFocusableAncestorAttribute, @"focusableAncestor"},
       {NSAccessibilityFocusedAttribute, @"focused"},
@@ -734,13 +738,17 @@ NSString* const NSAccessibilityRequiredAttributeChrome = @"AXRequired";
       {NSAccessibilityRowsAttribute, @"rows"},
       // TODO(aboxhall): expose
       // NSAccessibilityServesAsTitleForUIElementsAttribute
+#ifndef MAS_BUILD
       {NSAccessibilityStartTextMarkerAttribute, @"startTextMarker"},
+#endif
       {NSAccessibilitySelectedAttribute, @"selected"},
       {NSAccessibilitySelectedChildrenAttribute, @"selectedChildren"},
       {NSAccessibilitySelectedTextAttribute, @"selectedText"},
       {NSAccessibilitySelectedTextRangeAttribute, @"selectedTextRange"},
+#ifndef MAS_BUILD
       {NSAccessibilitySelectedTextMarkerRangeAttribute,
        @"selectedTextMarkerRange"},
+#endif
       {NSAccessibilitySizeAttribute, @"size"},
       {NSAccessibilitySortDirectionAttribute, @"sortDirection"},
       {NSAccessibilitySubroleAttribute, @"subrole"},
@@ -1238,6 +1246,7 @@ NSString* const NSAccessibilityRequiredAttributeChrome = @"AXRequired";
                                   ax::mojom::Restriction::kDisabled];
 }
 
+#ifndef MAS_BUILD
 // Returns a text marker that points to the last character in the document that
 // can be selected with VoiceOver.
 - (id)endTextMarker {
@@ -1248,6 +1257,7 @@ NSString* const NSAccessibilityRequiredAttributeChrome = @"AXRequired";
   BrowserAccessibilityPositionInstance position = root->CreatePositionAt(0);
   return CreateTextMarker(position->CreatePositionAtEndOfAnchor());
 }
+#endif
 
 - (NSNumber*)expanded {
   if (![self instanceActive])
@@ -2002,7 +2012,9 @@ NSString* const NSAccessibilityRequiredAttributeChrome = @"AXRequired";
     return nil;
   NSMutableArray* ret = [[[NSMutableArray alloc] init] autorelease];
 
-  if (ui::IsTableLike(owner_->GetRole())) {
+  if (owner_->GetRole() == ax::mojom::Role::kTree) {
+    [self getTreeItemDescendants:ret];
+  } else if (ui::IsTableLike(owner_->GetRole())) {
     for (BrowserAccessibilityCocoa* child in [self children]) {
       if ([[child role] isEqualToString:NSAccessibilityRowRole])
         [ret addObject:child];
@@ -2119,6 +2131,7 @@ NSString* const NSAccessibilityRequiredAttributeChrome = @"AXRequired";
   return [NSValue valueWithRange:NSMakeRange(selStart, selLength)];
 }
 
+#ifndef MAS_BUILD
 - (id)selectedTextMarkerRange {
   if (![self instanceActive])
     return nil;
@@ -2154,6 +2167,7 @@ NSString* const NSAccessibilityRequiredAttributeChrome = @"AXRequired";
       CreateAXPlatformRange(*anchorObject, anchorOffset, anchorAffinity,
                             *focusObject, focusOffset, focusAffinity));
 }
+#endif
 
 - (NSValue*)size {
   if (![self instanceActive])
@@ -2186,6 +2200,7 @@ NSString* const NSAccessibilityRequiredAttributeChrome = @"AXRequired";
   return nil;
 }
 
+#ifndef MAS_BUILD
 // Returns a text marker that points to the first character in the document that
 // can be selected with VoiceOver.
 - (id)startTextMarker {
@@ -2196,6 +2211,7 @@ NSString* const NSAccessibilityRequiredAttributeChrome = @"AXRequired";
   BrowserAccessibilityPositionInstance position = root->CreatePositionAt(0);
   return CreateTextMarker(position->CreatePositionAtStartOfAnchor());
 }
+#endif
 
 // Returns a subrole based upon the role.
 - (NSString*)subrole {
@@ -2451,6 +2467,19 @@ NSString* const NSAccessibilityRequiredAttributeChrome = @"AXRequired";
   return manager->GetWindow();
 }
 
+- (void)getTreeItemDescendants:(NSMutableArray*)tree_items {
+  for (auto it = owner_->PlatformChildrenBegin();
+       it != owner_->PlatformChildrenEnd(); ++it) {
+    const BrowserAccessibilityCocoa* child =
+        ToBrowserAccessibilityCocoa(it.get());
+
+    if ([child internalRole] == ax::mojom::Role::kTreeItem) {
+      [tree_items addObject:child];
+    }
+    [child getTreeItemDescendants:tree_items];
+  }
+}
+
 - (NSString*)methodNameForAttribute:(NSString*)attribute {
   return [attributeToMethodNameMap objectForKey:attribute];
 }
@@ -2487,11 +2516,13 @@ NSString* const NSAccessibilityRequiredAttributeChrome = @"AXRequired";
   NSMutableAttributedString* attributedValue =
       [[[NSMutableAttributedString alloc] initWithString:value] autorelease];
 
+#ifndef MAS_BUILD
   if (!owner_->IsTextOnlyObject()) {
     AXPlatformRange ax_range(owner_->CreatePositionAt(0),
                              owner_->CreatePositionAt(int{text.length()}));
     AddMisspelledTextAttributes(ax_range, attributedValue);
   }
+#endif
 
   return [attributedValue attributedSubstringFromRange:range];
 }
@@ -2574,9 +2605,8 @@ NSString* const NSAccessibilityRequiredAttributeChrome = @"AXRequired";
       return ToBrowserAccessibilityCocoa(cell);
   }
 
-  if ([attribute
-          isEqualToString:
-              NSAccessibilityUIElementForTextMarkerParameterizedAttribute]) {
+#ifndef MAS_BUILD
+  if ([attribute isEqualToString:NSAccessibilityUIElementForTextMarkerParameterizedAttribute]) {
     BrowserAccessibilityPositionInstance position =
         CreatePositionFromTextMarker(parameter);
     if (!position->IsNullPosition())
@@ -2866,6 +2896,7 @@ NSString* const NSAccessibilityRequiredAttributeChrome = @"AXRequired";
 
     return CreateTextMarker(root->CreatePositionAt(index));
   }
+#endif
 
   if ([attribute isEqualToString:
                      NSAccessibilityBoundsForRangeParameterizedAttribute]) {
@@ -2899,6 +2930,7 @@ NSString* const NSAccessibilityRequiredAttributeChrome = @"AXRequired";
     return nil;
   }
 
+#ifndef MAS_BUILD
   if ([attribute
           isEqualToString:
               NSAccessibilityLineTextMarkerRangeForTextMarkerParameterizedAttribute]) {
@@ -2979,6 +3011,7 @@ NSString* const NSAccessibilityRequiredAttributeChrome = @"AXRequired";
 
     return @(child->GetIndexInParent());
   }
+#endif
 
   return nil;
 }

@@ -95,6 +95,8 @@ class CC_EXPORT LayerTreeSettings {
   bool use_rgba_4444 = false;
   bool unpremultiply_and_dither_low_bit_depth_tiles = false;
 
+  bool enable_color_correct_rendering = true;
+
   // If set to true, the compositor may selectively defer image decodes to the
   // Image Decode Service and raster tiles without images until the decode is
   // ready.

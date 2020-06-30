@@ -23,6 +23,7 @@
 #include "cc/trees/layer_tree_host_single_thread_client.h"
 #include "components/viz/common/frame_sinks/begin_frame_args.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
+#include "components/viz/host/host_display_client.h"
 #include "components/viz/host/host_frame_sink_client.h"
 #include "services/viz/privileged/mojom/compositing/vsync_parameter_observer.mojom-forward.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -194,6 +195,15 @@ class COMPOSITOR_EXPORT ContextFactory {
   virtual bool SyncTokensRequiredForDisplayCompositor() = 0;
 };
 
+class COMPOSITOR_EXPORT CompositorDelegate {
+ public:
+  virtual std::unique_ptr<viz::HostDisplayClient> CreateHostDisplayClient(
+      ui::Compositor* compositor) = 0;
+
+ protected:
+  virtual ~CompositorDelegate() {}
+};
+
 // Compositor object to take care of GPU painting.
 // A Browser compositor object is responsible for generating the final
 // displayable form of pixels comprising a single widget's contents. It draws an
@@ -232,6 +242,9 @@ class COMPOSITOR_EXPORT Compositor : public cc::LayerTreeHostClient,
 
   // Schedules a redraw of the layer tree associated with this compositor.
   void ScheduleDraw();
+
+  CompositorDelegate* delegate() const { return delegate_; }
+  void SetDelegate(CompositorDelegate* delegate) { delegate_ = delegate; }
 
   // Sets the root of the layer tree drawn by this Compositor. The root layer
   // must have no parent. The compositor's root layer is reset if the root layer
@@ -449,6 +462,8 @@ class COMPOSITOR_EXPORT Compositor : public cc::LayerTreeHostClient,
 
   ui::ContextFactory* context_factory_;
   ui::ContextFactoryPrivate* context_factory_private_;
+
+  CompositorDelegate* delegate_ = nullptr;
 
   // The root of the Layer tree drawn by this compositor.
   Layer* root_layer_ = nullptr;

@@ -243,10 +243,7 @@ void DedicatedWorker::Start() {
 
     factory_client_->CreateWorkerHost(
         script_request_url_,
-        WebSecurityOrigin(GetExecutionContext()->GetSecurityOrigin()),
         credentials_mode,
-        WebSecurityOrigin(
-            outside_fetch_client_settings_object_->GetSecurityOrigin()),
         outside_fetch_client_settings_object_->GetReferrerPolicy(),
         KURL(outside_fetch_client_settings_object_->GetOutgoingReferrer()),
         outside_fetch_client_settings_object_->GetInsecureRequestsPolicy(),
@@ -255,8 +252,7 @@ void DedicatedWorker::Start() {
     return;
   }
 
-  factory_client_->CreateWorkerHostDeprecated(
-      WebSecurityOrigin(GetExecutionContext()->GetSecurityOrigin()));
+  factory_client_->CreateWorkerHostDeprecated();
 
   if (options_->type() == "classic") {
     // Legacy code path (to be deprecated, see https://crbug.com/835717):

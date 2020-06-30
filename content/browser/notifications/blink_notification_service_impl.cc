@@ -88,9 +88,11 @@ BlinkNotificationServiceImpl::BlinkNotificationServiceImpl(
     PlatformNotificationContextImpl* notification_context,
     BrowserContext* browser_context,
     scoped_refptr<ServiceWorkerContextWrapper> service_worker_context,
+    RenderProcessHost* render_process_host,
     const url::Origin& origin,
     mojo::PendingReceiver<blink::mojom::NotificationService> receiver)
     : notification_context_(notification_context),
+      render_process_host_(render_process_host),
       browser_context_(browser_context),
       service_worker_context_(std::move(service_worker_context)),
       origin_(origin),
@@ -151,8 +153,9 @@ void BlinkNotificationServiceImpl::DisplayNonPersistentNotification(
       notification_id, std::move(event_listener_remote));
 
   GetNotificationService(browser_context_)
-      ->DisplayNotification(notification_id, origin_.GetURL(),
-                            platform_notification_data, notification_resources);
+      ->DisplayNotification(render_process_host_, notification_id,
+                            origin_.GetURL(), platform_notification_data,
+                            notification_resources);
 }
 
 void BlinkNotificationServiceImpl::CloseNonPersistentNotification(

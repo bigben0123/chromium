@@ -68,19 +68,27 @@ gfx::NativeWindow WebContentsViewGuest::GetTopLevelNativeWindow() const {
 
 void WebContentsViewGuest::OnGuestAttached(WebContentsView* parent_view) {
 #if defined(USE_AURA)
+  if (!platform_view_->GetNativeView())
+    return;
   // In aura, ScreenPositionClient doesn't work properly if we do
   // not have the native view associated with this WebContentsViewGuest in the
   // view hierarchy. We add this view as embedder's child here.
   // This would go in WebContentsViewGuest::CreateView, but that is too early to
   // access embedder_web_contents(). Therefore, we do it here.
-  parent_view->GetNativeView()->AddChild(platform_view_->GetNativeView());
+  if (parent_view->GetNativeView() != platform_view_->GetNativeView()) {
+    parent_view->GetNativeView()->AddChild(platform_view_->GetNativeView());
+  }
 #endif  // defined(USE_AURA)
 }
 
 void WebContentsViewGuest::OnGuestDetached(WebContentsView* old_parent_view) {
 #if defined(USE_AURA)
-  old_parent_view->GetNativeView()->RemoveChild(
-      platform_view_->GetNativeView());
+  if (!platform_view_->GetNativeView())
+    return;
+  if (old_parent_view->GetNativeView() != platform_view_->GetNativeView()) {
+    old_parent_view->GetNativeView()->RemoveChild(
+        platform_view_->GetNativeView());
+  }
 #endif  // defined(USE_AURA)
 }
 
@@ -132,11 +140,22 @@ RenderWidgetHostViewBase* WebContentsViewGuest::CreateViewForWidget(
         render_widget_host->GetView());
   }
 
+  RenderWidgetHost* embedder_render_widget_host =
+    guest_->embedder_web_contents()->GetRenderViewHost()->GetWidget();
+  RenderWidgetHostViewBase* embedder_render_widget_host_view =
+      static_cast<RenderWidgetHostViewBase*>(
+        embedder_render_widget_host->GetView());
   RenderWidgetHostViewBase* platform_widget =
-      platform_view_->CreateViewForWidget(render_widget_host, true);
+      embedder_render_widget_host_view->CreateViewForWidget(
+        render_widget_host,
+        embedder_render_widget_host,
+        platform_view_.get());
+  RenderWidgetHostViewGuest* guest_view = RenderWidgetHostViewGuest::Create(
+    render_widget_host, guest_, platform_widget->GetWeakPtr());
+  platform_widget->InitAsGuest(embedder_render_widget_host->GetView(),
+                               guest_view);
 
-  return RenderWidgetHostViewGuest::Create(render_widget_host, guest_,
-                                           platform_widget->GetWeakPtr());
+  return guest_view;
 }
 
 RenderWidgetHostViewBase* WebContentsViewGuest::CreateViewForChildWidget(

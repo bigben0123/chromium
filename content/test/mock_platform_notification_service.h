@@ -47,6 +47,7 @@ class MockPlatformNotificationService : public PlatformNotificationService {
 
   // PlatformNotificationService implementation.
   void DisplayNotification(
+      RenderProcessHost* render_process_host,
       const std::string& notification_id,
       const GURL& origin,
       const blink::PlatformNotificationData& notification_data,

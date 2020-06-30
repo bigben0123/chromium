@@ -60,17 +60,24 @@ def Resolve(path, exe_path, loader_path, rpaths):
   return path
 
 
-def GetSharedLibraryDependenciesLinux(binary):
+def GetSharedLibraryDependenciesLinux(binary, options):
+  if options.verbose:
+    print "GetSharedLibraryDependencies for %s" % binary
+
   """Return absolute paths to all shared library dependencies of the binary.
 
   This implementation assumes that we're running on a Linux system."""
-  ldd = subprocess.check_output(['ldd', binary])
+  p = subprocess.Popen(['ldd', binary], stdout=subprocess.PIPE)
+  ldd = p.communicate()[0]
   lib_re = re.compile('\t.* => (.+) \(.*\)$')
   result = []
   for line in ldd.splitlines():
     m = lib_re.match(line)
     if m:
       result.append(os.path.abspath(m.group(1)))
+  if options.verbose:
+    print "Done GetSharedLibraryDependencies for %s" % binary
+    print result
   return result
 
 
@@ -175,7 +182,7 @@ def GetSharedLibraryDependenciesMac(binary, exe_path):
             'ERROR: failed to resolve %s, exe_path %s, loader_path %s, '
             'rpaths %s' % (m.group(1), exe_path, loader_path,
                            ', '.join(rpaths)))
-        sys.exit(1)
+        # sys.exit(1)
   return deps
 
 
@@ -183,7 +190,7 @@ def GetSharedLibraryDependencies(options, binary, exe_path):
   """Return absolute paths to all shared library dependencies of the binary."""
   deps = []
   if options.platform == 'linux2':
-    deps = GetSharedLibraryDependenciesLinux(binary)
+    deps = GetSharedLibraryDependenciesLinux(binary, options)
   elif options.platform == 'android':
     deps = GetSharedLibraryDependenciesAndroid(binary)
   elif options.platform == 'darwin':
@@ -257,7 +264,8 @@ def CreateSymbolDir(options, output_dir, relative_hash_dir):
 
 def GenerateSymbols(options, binaries):
   """Dumps the symbols of binary and places them in the given directory."""
-
+  if options.verbose:
+    print "Generating symbols for %s " % (' '.join(binaries))
   queue = Queue.Queue()
   print_lock = threading.Lock()
 
@@ -277,8 +285,15 @@ def GenerateSymbols(options, binaries):
           reason = "Could not locate dump_syms executable."
           break
 
+        if options.verbose:
+          with print_lock:
+            print "GetBinaryInfoFromHeaderInfo for %s" % (binary)
         binary_info = GetBinaryInfoFromHeaderInfo(
             subprocess.check_output([dump_syms, '-i', binary]).splitlines()[0])
+        if options.verbose:
+          with print_lock:
+            print "Done GetBinaryInfoFromHeaderInfo for %s: %s (%s)" % (binary, binary_info.name, binary_info.hash)
+
         if not binary_info:
           should_dump_syms = False
           reason = "Could not obtain binary information."
@@ -296,8 +311,14 @@ def GenerateSymbols(options, binaries):
         # See if there is a symbol file already found next to the binary
         potential_symbol_files = glob.glob('%s.breakpad*' % binary)
         for potential_symbol_file in potential_symbol_files:
+          if options.verbose:
+            with print_lock:
+              print "Looking at %s as a potential symbol file." % (potential_symbol_file)
           with open(potential_symbol_file, 'rt') as f:
             symbol_info = GetBinaryInfoFromHeaderInfo(f.readline())
+            if options.verbose:
+              with print_lock:
+                print "Got symbol_info for %s." % (potential_symbol_file)
           if symbol_info == binary_info:
             CreateSymbolDir(options, output_dir, binary_info.hash)
             shutil.copyfile(potential_symbol_file, output_path)

@@ -20,6 +20,7 @@
 #include "components/viz/service/display_embedder/server_shared_bitmap_manager.h"
 #include "components/viz/service/display_embedder/skia_output_surface_dependency_impl.h"
 #include "components/viz/service/display_embedder/skia_output_surface_impl.h"
+#include "components/viz/service/display_embedder/software_output_device_proxy.h"
 #include "components/viz/service/display_embedder/software_output_surface.h"
 #include "components/viz/service/display_embedder/viz_process_context_provider.h"
 #include "components/viz/service/gl/gpu_service_impl.h"
@@ -33,6 +34,7 @@
 #include "gpu/ipc/scheduler_sequence.h"
 #include "gpu/ipc/service/gpu_channel_manager_delegate.h"
 #include "gpu/ipc/service/image_transport_surface.h"
+#include "services/viz/privileged/mojom/compositing/layered_window_updater.mojom.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/init/gl_factory.h"
@@ -222,6 +224,19 @@ OutputSurfaceProviderImpl::CreateSoftwareOutputDeviceForPlatform(
     mojom::DisplayClient* display_client) {
   if (headless_)
     return std::make_unique<SoftwareOutputDevice>();
+
+#if !defined(OS_MACOSX)
+  DCHECK(display_client);
+  bool offscreen = false;
+  if (display_client->IsOffscreen(&offscreen) && offscreen) {
+    mojom::LayeredWindowUpdaterPtr layered_window_updater;
+    display_client->CreateLayeredWindowUpdater(
+        mojo::MakeRequest(&layered_window_updater));
+
+    return std::make_unique<SoftwareOutputDeviceProxy>(
+        std::move(layered_window_updater));
+  }
+#endif
 
 #if defined(OS_WIN)
   return CreateSoftwareOutputDeviceWin(surface_handle, &output_device_backing_,

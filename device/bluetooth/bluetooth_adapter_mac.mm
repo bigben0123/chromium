@@ -36,6 +36,7 @@
 #include "device/bluetooth/bluetooth_low_energy_peripheral_manager_delegate.h"
 #include "device/bluetooth/bluetooth_socket_mac.h"
 
+#ifndef MAS_BUILD
 extern "C" {
 // Undocumented IOBluetooth Preference API [1]. Used by `blueutil` [2] and
 // `Karabiner` [3] to programmatically control the Bluetooth state. Calling the
@@ -49,6 +50,7 @@ extern "C" {
 // [4] https://support.apple.com/kb/PH25091
 void IOBluetoothPreferenceSetControllerPowerState(int state);
 }
+#endif
 
 namespace {
 
@@ -121,8 +123,10 @@ BluetoothAdapterMac::BluetoothAdapterMac()
       controller_state_function_(
           base::BindRepeating(&BluetoothAdapterMac::GetHostControllerState,
                               base::Unretained(this))),
+#ifndef MAS_BUILD
       power_state_function_(
           base::BindRepeating(IOBluetoothPreferenceSetControllerPowerState)),
+#endif
       should_update_name_(true),
       classic_discovery_manager_(
           BluetoothDiscoveryManagerMac::CreateClassic(this)),
@@ -303,8 +307,12 @@ void BluetoothAdapterMac::DeviceConnected(IOBluetoothDevice* device) {
 }
 
 bool BluetoothAdapterMac::SetPoweredImpl(bool powered) {
+#ifndef MAS_BUILD
   power_state_function_.Run(base::strict_cast<int>(powered));
   return true;
+#else
+  return false;
+#endif
 }
 
 void BluetoothAdapterMac::RemovePairingDelegateInternal(

@@ -12,6 +12,7 @@
 #include "third_party/khronos/GLES3/gl3.h"
 #include "third_party/skia/include/core/SkSurfaceProps.h"
 #include "ui/gfx/color_space.h"
+#include "ui/gfx/switches.h"
 
 namespace blink {
 
@@ -89,6 +90,11 @@ uint8_t CanvasColorParams::BytesPerPixel() const {
 }
 
 gfx::ColorSpace CanvasColorParams::GetSamplerGfxColorSpace() const {
+  auto* cmd_line = base::CommandLine::ForCurrentProcess();
+  if (cmd_line->HasSwitch(switches::kDisableColorCorrectRendering)) {
+    return gfx::ColorSpace();
+  }
+
   gfx::ColorSpace::PrimaryID primary_id = GetPrimaryID(color_space_);
 
   // TODO(ccameron): This needs to take into account whether or not this texture
@@ -102,6 +108,11 @@ gfx::ColorSpace CanvasColorParams::GetSamplerGfxColorSpace() const {
 }
 
 gfx::ColorSpace CanvasColorParams::GetStorageGfxColorSpace() const {
+  auto* cmd_line = base::CommandLine::ForCurrentProcess();
+  if (cmd_line->HasSwitch(switches::kDisableColorCorrectRendering)) {
+    return gfx::ColorSpace();
+  }
+
   gfx::ColorSpace::PrimaryID primary_id = GetPrimaryID(color_space_);
 
   gfx::ColorSpace::TransferID transfer_id =

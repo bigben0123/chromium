@@ -2191,6 +2191,21 @@ bool RenderFrameHostManager::InitRenderView(
 scoped_refptr<SiteInstance>
 RenderFrameHostManager::GetSiteInstanceForNavigationRequest(
     const NavigationRequest& request) {
+  BrowserContext* browser_context = nullptr;
+  scoped_refptr<SiteInstanceImpl> candidate_site_instance;
+  if (!GetContentClient()->browser()->CanUseCustomSiteInstance()) {
+    browser_context =
+        delegate_->GetControllerForRenderManager().GetBrowserContext();
+    // If the navigation can swap SiteInstances, compute the SiteInstance it
+    // should use.
+    // TODO(clamy): We should also consider as a candidate SiteInstance the
+    // speculative SiteInstance that was computed on redirects.
+    candidate_site_instance =
+        speculative_render_frame_host_
+            ? speculative_render_frame_host_->GetSiteInstance()
+            : nullptr;
+  }
+
   SiteInstance* current_site_instance = render_frame_host_->GetSiteInstance();
 
   // All children of MHTML documents must be MHTML documents. They all live in
@@ -2235,6 +2250,59 @@ RenderFrameHostManager::GetSiteInstanceForNavigationRequest(
                                               request.common_params().url);
     no_renderer_swap_allowed |=
         request.from_begin_navigation() && !can_renderer_initiate_transfer;
+
+    if (!GetContentClient()->browser()->CanUseCustomSiteInstance()) {
+      bool has_navigation_started = request.state() != NavigationRequest::NOT_STARTED;
+      bool has_response_started =
+          (request.state() == NavigationRequest::RESPONSE_STARTED ||
+          request.state() == NavigationRequest::FAILED) &&
+          !speculative_render_frame_host_;
+      // Gives user a chance to choose a custom site instance.
+      SiteInstance* affinity_site_instance = nullptr;
+      scoped_refptr<SiteInstance> overriden_site_instance;
+      bool should_register_site_instance = false;
+      ContentBrowserClient::SiteInstanceForNavigationType siteInstanceType =
+          GetContentClient()->browser()->ShouldOverrideSiteInstanceForNavigation(
+              current_frame_host(), speculative_frame_host(), browser_context,
+              request.common_params().url, has_navigation_started,
+              has_response_started, &affinity_site_instance);
+      switch (siteInstanceType) {
+        case ContentBrowserClient::SiteInstanceForNavigationType::
+            FORCE_CANDIDATE_OR_NEW:
+          overriden_site_instance =
+              candidate_site_instance
+                  ? candidate_site_instance
+                  : current_site_instance->CreateRelatedSiteInstance(
+                                              request.common_params().url);
+          should_register_site_instance = true;
+          break;
+        case ContentBrowserClient::SiteInstanceForNavigationType::FORCE_NEW:
+          overriden_site_instance = current_site_instance->CreateRelatedSiteInstance(
+              request.common_params().url);
+          should_register_site_instance = true;
+          break;
+        case ContentBrowserClient::SiteInstanceForNavigationType::FORCE_CURRENT:
+          overriden_site_instance = render_frame_host_->GetSiteInstance();
+          break;
+        case ContentBrowserClient::SiteInstanceForNavigationType::FORCE_AFFINITY:
+          DCHECK(affinity_site_instance);
+          overriden_site_instance =
+              scoped_refptr<SiteInstance>(affinity_site_instance);
+          break;
+        case ContentBrowserClient::SiteInstanceForNavigationType::ASK_CHROMIUM:
+          DCHECK(!affinity_site_instance);
+          break;
+        default:
+          break;
+      }
+      if (overriden_site_instance) {
+        if (should_register_site_instance) {
+          GetContentClient()->browser()->RegisterPendingSiteInstance(
+              render_frame_host_.get(), overriden_site_instance.get());
+        }
+        return overriden_site_instance;
+      }
+    }
   } else {
     // Subframe navigations will use the current renderer, unless specifically
     // allowed to swap processes.
@@ -2246,22 +2314,27 @@ RenderFrameHostManager::GetSiteInstanceForNavigationRequest(
   if (no_renderer_swap_allowed && !should_swap_for_error_isolation)
     return scoped_refptr<SiteInstance>(current_site_instance);
 
+  if (GetContentClient()->browser()->CanUseCustomSiteInstance()) {
   // If the navigation can swap SiteInstances, compute the SiteInstance it
   // should use.
   // TODO(clamy): We should also consider as a candidate SiteInstance the
   // speculative SiteInstance that was computed on redirects.
-  SiteInstanceImpl* candidate_site_instance =
+  candidate_site_instance =
       speculative_render_frame_host_
           ? speculative_render_frame_host_->GetSiteInstance()
           : nullptr;
+  }
 
   scoped_refptr<SiteInstance> dest_site_instance = GetSiteInstanceForNavigation(
       request.common_params().url, request.source_site_instance(),
-      request.dest_site_instance(), candidate_site_instance,
+      request.dest_site_instance(), candidate_site_instance.get(),
       request.common_params().transition,
       request.state() == NavigationRequest::FAILED,
       request.restore_type() != RestoreType::NONE, request.is_view_source(),
       was_server_redirect);
+
+  GetContentClient()->browser()->RegisterPendingSiteInstance(
+      render_frame_host_.get(), dest_site_instance.get());
 
   return dest_site_instance;
 }

@@ -180,6 +180,12 @@ source_set("audio") {
       "mac/scoped_audio_unit.cc",
       "mac/scoped_audio_unit.h",
     ]
+    if (is_mas_build) {
+      sources -= [
+        "mac/coreaudio_dispatch_override.cc",
+        "mac/coreaudio_dispatch_override.h",
+      ]
+    }
     libs += [
       "AudioToolbox.framework",
       "AudioUnit.framework",

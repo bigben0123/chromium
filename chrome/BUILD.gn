@@ -1613,7 +1613,7 @@ if (is_chrome_branded && !is_android) {
   }
 }
 
-if (!is_android) {
+if (!is_android && !is_electron_build) {
   chrome_paks("packed_resources") {
     if (is_mac) {
       output_dir = "$root_gen_dir/repack"
@@ -1634,6 +1634,12 @@ if (!is_android) {
         ":default_apps",
       ]
     }
+  }
+}
+
+if (is_electron_build) {
+  group("packed_resources") {
+    public_deps = [ "//electron:packed_resources" ]
   }
 }
 

@@ -336,6 +336,7 @@ URLLoader::URLLoader(
     base::WeakPtr<KeepaliveStatisticsRecorder> keepalive_statistics_recorder,
     base::WeakPtr<NetworkUsageAccumulator> network_usage_accumulator,
     mojom::TrustedURLLoaderHeaderClient* url_loader_header_client,
+    mojom::TrustedURLLoaderAuthClient* url_loader_auth_client,
     mojom::OriginPolicyManager* origin_policy_manager)
     : url_request_context_(url_request_context),
       network_service_client_(network_service_client),
@@ -384,6 +385,11 @@ URLLoader::URLLoader(
     // Make sure the loader dies if |header_client_| has an error, otherwise
     // requests can hang.
     header_client_.set_disconnect_handler(
+        base::BindOnce(&URLLoader::OnConnectionError, base::Unretained(this)));
+  }
+  if (url_loader_auth_client) {
+    url_loader_auth_client->OnLoaderCreated(request_id_, auth_client_.BindNewPipeAndPassReceiver());
+    auth_client_.set_disconnect_handler(
         base::BindOnce(&URLLoader::OnConnectionError, base::Unretained(this)));
   }
   if (want_raw_headers_) {
@@ -819,7 +825,7 @@ void URLLoader::OnReceivedRedirect(net::URLRequest* url_request,
 
 void URLLoader::OnAuthRequired(net::URLRequest* url_request,
                                const net::AuthChallengeInfo& auth_info) {
-  if (!network_context_client_) {
+  if (!network_context_client_ && !auth_client_) {
     OnAuthCredentials(base::nullopt);
     return;
   }
@@ -835,10 +841,18 @@ void URLLoader::OnAuthRequired(net::URLRequest* url_request,
   if (url_request->response_headers())
     head.headers = url_request->response_headers();
   head.auth_challenge_info = auth_info;
-  network_context_client_->OnAuthRequired(
-      fetch_window_id_, factory_params_->process_id, render_frame_id_,
-      request_id_, url_request_->url(), first_auth_attempt_, auth_info, head,
-      auth_challenge_responder_receiver_.BindNewPipeAndPassRemote());
+
+  if (auth_client_) {
+    auth_client_->OnAuthRequired(
+        fetch_window_id_, factory_params_->process_id, render_frame_id_,
+        request_id_, url_request_->url(), first_auth_attempt_, auth_info, head,
+        auth_challenge_responder_receiver_.BindNewPipeAndPassRemote());
+  } else {
+    network_context_client_->OnAuthRequired(
+        fetch_window_id_, factory_params_->process_id, render_frame_id_,
+        request_id_, url_request_->url(), first_auth_attempt_, auth_info, head,
+        auth_challenge_responder_receiver_.BindNewPipeAndPassRemote());
+  }
 
   auth_challenge_responder_receiver_.set_disconnect_handler(
       base::BindOnce(&URLLoader::DeleteSelf, base::Unretained(this)));

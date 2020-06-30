@@ -16,6 +16,7 @@
 #include "base/trace_event/trace_event.h"
 #include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/icc_profile.h"
+#include "ui/gfx/switches.h"
 
 namespace gfx {
 
@@ -186,6 +187,11 @@ IOSurfaceRef CreateIOSurface(const gfx::Size& size,
 
   // Ensure that all IOSurfaces start as sRGB.
   CGColorSpaceRef color_space = base::mac::GetSRGBColorSpace();
+  auto* cmd_line = base::CommandLine::ForCurrentProcess();
+  if (cmd_line->HasSwitch(switches::kDisableColorCorrectRendering)) {
+    color_space = base::mac::GetSystemColorSpace();
+  }
+
   base::ScopedCFTypeRef<CFDataRef> color_space_icc(
       CGColorSpaceCopyICCProfile(color_space));
   IOSurfaceSetValue(surface, CFSTR("IOSurfaceColorSpace"), color_space_icc);
@@ -197,6 +203,14 @@ IOSurfaceRef CreateIOSurface(const gfx::Size& size,
 
 void IOSurfaceSetColorSpace(IOSurfaceRef io_surface,
                             const ColorSpace& color_space) {
+  auto* cmd_line = base::CommandLine::ForCurrentProcess();
+  if (cmd_line->HasSwitch(switches::kDisableColorCorrectRendering)) {
+    base::ScopedCFTypeRef<CFDataRef> system_icc(
+        CGColorSpaceCopyICCProfile(base::mac::GetSystemColorSpace()));
+    IOSurfaceSetValue(io_surface, CFSTR("IOSurfaceColorSpace"), system_icc);
+    return;
+  }
+
   // Special-case sRGB.
   if (color_space == ColorSpace::CreateSRGB()) {
     base::ScopedCFTypeRef<CFDataRef> srgb_icc(

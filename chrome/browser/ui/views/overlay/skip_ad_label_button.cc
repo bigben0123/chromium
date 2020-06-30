@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/views/overlay/skip_ad_label_button.h"
 
-#include "chrome/grit/generated_resources.h"
+#include "electron/grit/electron_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/views/background.h"

@@ -26,7 +26,6 @@ CFTypeID SecKeyGetTypeID();
 #if !defined(OS_IOS)
 CFTypeID SecACLGetTypeID();
 CFTypeID SecTrustedApplicationGetTypeID();
-Boolean _CFIsObjC(CFTypeID typeID, CFTypeRef obj);
 #endif
 }  // extern "C"
 
@@ -315,8 +314,7 @@ NSFont* CFToNSCast(CTFontRef cf_val) {
       const_cast<NSFont*>(reinterpret_cast<const NSFont*>(cf_val));
   DCHECK(!cf_val ||
          CTFontGetTypeID() == CFGetTypeID(cf_val) ||
-         (_CFIsObjC(CTFontGetTypeID(), cf_val) &&
-          [ns_val isKindOfClass:[NSFont class]]));
+         ([ns_val isKindOfClass:[NSFont class]]));
   return ns_val;
 }
 
@@ -383,9 +381,6 @@ CFCast<CTFontRef>(const CFTypeRef& cf_val) {
   if (CFGetTypeID(cf_val) == CTFontGetTypeID()) {
     return (CTFontRef)(cf_val);
   }
-
-  if (!_CFIsObjC(CTFontGetTypeID(), cf_val))
-    return NULL;
 
   id<NSObject> ns_val = reinterpret_cast<id>(const_cast<void*>(cf_val));
   if ([ns_val isKindOfClass:[NSFont class]]) {

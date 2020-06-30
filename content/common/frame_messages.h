@@ -1039,11 +1039,9 @@ IPC_MESSAGE_ROUTED1(FrameHostMsg_DidFinishLoad,
                     GURL /* validated_url */)
 
 #ifndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_CALLED  // zhibin:patch_message ipc
-//notifies the browser that a addEventListener js executed.
 IPC_MESSAGE_ROUTED2(FrameHostMsg_DidAddEventListenerCalled,
                     std::string /* node_name */, std::string /* event_type */)
 #endif
-
 // Initiates a download based on user actions like 'ALT+click'.
 IPC_MESSAGE_CONTROL(FrameHostMsg_DownloadUrl, FrameHostMsg_DownloadUrl_Params)
 

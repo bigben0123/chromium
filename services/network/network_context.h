@@ -80,6 +80,7 @@ class DomainReliabilityMonitor;
 
 namespace network {
 class CertVerifierWithTrustAnchors;
+class RemoteCertVerifier;
 class CookieManager;
 class ExpectCTReporter;
 class HostResolver;
@@ -168,6 +169,8 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
   // mojom::NetworkContext implementation:
   void SetClient(
       mojo::PendingRemote<mojom::NetworkContextClient> client) override;
+  void SetCertVerifierClient(
+      mojo::PendingRemote<mojom::CertVerifierClient> client) override;
   void CreateURLLoaderFactory(mojom::URLLoaderFactoryRequest request,
                               mojom::URLLoaderFactoryParamsPtr params) override;
   void ResetURLLoaderFactories() override;
@@ -215,6 +218,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
   void CloseIdleConnections(CloseIdleConnectionsCallback callback) override;
   void SetNetworkConditions(const base::UnguessableToken& throttling_profile_id,
                             mojom::NetworkConditionsPtr conditions) override;
+  void SetUserAgent(const std::string& new_user_agent) override;
   void SetAcceptLanguage(const std::string& new_accept_language) override;
   void SetEnableReferrers(bool enable_referrers) override;
 #if defined(OS_CHROMEOS)
@@ -559,6 +563,8 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
   // certificates.
   std::unique_ptr<network::NSSTempCertsCacheChromeOS> nss_temp_certs_cache_;
 #endif
+
+  RemoteCertVerifier* remote_cert_verifier_ = nullptr;
 
   // CertNetFetcher used by the context's CertVerifier. May be nullptr if
   // CertNetFetcher is not used by the current platform.

@@ -313,9 +313,11 @@ NativeWidgetNSWindowBridge::NativeWidgetNSWindowBridge(
       bridge_mojo_binding_(this) {
   DCHECK(GetIdToWidgetImplMap().find(id_) == GetIdToWidgetImplMap().end());
   GetIdToWidgetImplMap().insert(std::make_pair(id_, this));
+  display::Screen::GetScreen()->AddObserver(this);
 }
 
 NativeWidgetNSWindowBridge::~NativeWidgetNSWindowBridge() {
+  display::Screen::GetScreen()->RemoveObserver(this);
   // The delegate should be cleared already. Note this enforces the precondition
   // that -[NSWindow close] is invoked on the hosted window before the
   // destructor is called.
@@ -554,10 +556,12 @@ void NativeWidgetNSWindowBridge::CreateContentView(uint64_t ns_view_id,
   // this should be treated as an error and caught early.
   CHECK(bridged_view_);
 
+#ifndef MAS_BUILD
   // Send the accessibility tokens for the NSView now that it exists.
   host_->SetRemoteAccessibilityTokens(
       ui::RemoteAccessibility::GetTokenForLocalElement(window_),
       ui::RemoteAccessibility::GetTokenForLocalElement(bridged_view_));
+#endif
 
   // Beware: This view was briefly removed (in favor of a bare CALayer) in
   // crrev/c/1236675. The ordering of unassociated layers relative to NSView
@@ -1096,7 +1100,17 @@ DragDropClient* NativeWidgetNSWindowBridge::drag_drop_client() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// NativeWidgetNSWindowBridge, ui::CATransactionObserver
+// NativeWidgetNSWindowBridge, display::DisplayObserver:
+
+void NativeWidgetNSWindowBridge::OnDisplayAdded(
+    const display::Display& display) {
+  UpdateWindowDisplay();
+}
+
+void NativeWidgetNSWindowBridge::OnDisplayRemoved(
+    const display::Display& display) {
+  UpdateWindowDisplay();
+}
 
 void NativeWidgetNSWindowBridge::OnDisplayMetricsChanged(
     const display::Display& display,

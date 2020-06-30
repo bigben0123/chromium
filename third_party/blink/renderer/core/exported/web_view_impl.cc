@@ -3499,10 +3499,17 @@ PageScheduler* WebViewImpl::Scheduler() const {
   return GetPage()->GetPageScheduler();
 }
 
+void WebViewImpl::SetSchedulerThrottling(bool allowed) {
+  DCHECK(GetPage());
+  scheduler_throttling_allowed_ = allowed;
+  GetPage()->GetPageScheduler()->SetPageVisible(allowed ? !IsHidden() : true);
+}
+
 void WebViewImpl::SetIsHidden(bool hidden, bool is_initial_state) {
   DCHECK(GetPage());
   GetPage()->SetIsHidden(hidden, is_initial_state);
-  GetPage()->GetPageScheduler()->SetPageVisible(!hidden);
+  GetPage()->GetPageScheduler()->SetPageVisible(
+      scheduler_throttling_allowed_ ? !hidden : true);
 }
 
 bool WebViewImpl::IsHidden() {

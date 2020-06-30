@@ -368,6 +368,10 @@ bool SiteInstanceImpl::HasRelatedSiteInstance(const GURL& url) {
   return browsing_instance_->HasSiteInstance(url);
 }
 
+scoped_refptr<SiteInstance> SiteInstanceImpl::CreateRelatedSiteInstance(const GURL& url) {
+  return browsing_instance_->CreateSiteInstanceForURL(url);
+}
+
 scoped_refptr<SiteInstance> SiteInstanceImpl::GetRelatedSiteInstance(
     const GURL& url) {
   return browsing_instance_->GetSiteInstanceForURL(

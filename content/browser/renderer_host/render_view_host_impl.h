@@ -101,6 +101,7 @@ class CONTENT_EXPORT RenderViewHostImpl
   void SetWebUIProperty(const std::string& name,
                         const std::string& value) override;
   void SyncRendererPrefs() override;
+  void SetSchedulerThrottling(bool allowed) override;
   WebPreferences GetWebkitPreferences() override;
   void UpdateWebkitPreferences(const WebPreferences& prefs) override;
   void OnWebkitPreferencesChanged() override;

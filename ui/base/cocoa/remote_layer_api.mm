@@ -12,6 +12,7 @@
 namespace ui {
 
 bool RemoteLayerAPISupported() {
+#ifndef MAS_BUILD
   static bool disabled_at_command_line =
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableRemoteCoreAnimation);
@@ -46,6 +47,9 @@ bool RemoteLayerAPISupported() {
 
   // If everything is there, we should be able to use the API.
   return true;
+#else
+  return false;
+#endif  // MAS_BUILD
 }
 
 }  // namespace

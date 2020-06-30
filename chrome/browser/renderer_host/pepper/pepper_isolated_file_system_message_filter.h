@@ -20,7 +20,9 @@
 #include "storage/browser/fileapi/isolated_context.h"
 #include "url/gurl.h"
 
+#if 0
 class Profile;
+#endif
 
 namespace content {
 class BrowserPpapiHost;
@@ -54,6 +56,7 @@ class PepperIsolatedFileSystemMessageFilter
 
   ~PepperIsolatedFileSystemMessageFilter() override;
 
+#if 0
   Profile* GetProfile();
 
   // Returns filesystem id of isolated filesystem if valid, or empty string
@@ -61,10 +64,13 @@ class PepperIsolatedFileSystemMessageFilter
   // allows access on that thread.
   storage::IsolatedContext::ScopedFSHandle CreateCrxFileSystem(
       Profile* profile);
+#endif
 
   int32_t OnOpenFileSystem(ppapi::host::HostMessageContext* context,
                            PP_IsolatedFileSystemType_Private type);
+#if 0
   int32_t OpenCrxFileSystem(ppapi::host::HostMessageContext* context);
+#endif
   int32_t OpenPluginPrivateFileSystem(ppapi::host::HostMessageContext* context);
 
   const int render_process_id_;
@@ -75,8 +81,10 @@ class PepperIsolatedFileSystemMessageFilter
   // Not owned by this object.
   ppapi::host::PpapiHost* ppapi_host_;
 
+#if 0
   // Set of origins that can use CrxFs private APIs from NaCl.
   std::set<std::string> allowed_crxfs_origins_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(PepperIsolatedFileSystemMessageFilter);
 };

@@ -1814,6 +1814,12 @@ const gfx::ColorSpace& LayerTreeHostImpl::GetRasterColorSpace() const {
 
 const gfx::ColorSpace& LayerTreeHostImpl::GetRasterColorSpaceAndId(
     int* id) const {
+  if (!settings_.enable_color_correct_rendering) {
+    static gfx::ColorSpace invalid_color_space;
+    *id = -1;
+    return invalid_color_space;
+  }
+
   const gfx::ColorSpace* result = nullptr;
   // The pending tree will have the most recently updated color space, so
   // prefer that.

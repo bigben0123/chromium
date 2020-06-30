@@ -492,7 +492,6 @@ void LocalFrameClientImpl::DispatchDidNotifyEventAdded(
   web_frame_->DidNotifyEvent(node_name,event_type);
 }
 #endif
-
 void LocalFrameClientImpl::DispatchDidChangeThemeColor() {
   if (web_frame_->Client())
     web_frame_->Client()->DidChangeThemeColor();

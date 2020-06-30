@@ -24,6 +24,10 @@ struct PrintHostMsg_ScriptedPrint_Params;
 struct PrintMsg_Print_Params;
 class Profile;
 
+namespace content {
+class BrowserContext;
+}
+
 namespace printing {
 
 class PrintQueriesQueue;
@@ -44,7 +48,8 @@ class PrintingMessageFilter : public content::BrowserMessageFilter {
 
   static void SetDelegateForTesting(TestDelegate* delegate);
 
-  PrintingMessageFilter(int render_process_id, Profile* profile);
+  PrintingMessageFilter(int render_process_id,
+                        content::BrowserContext* browser_context);
 
   // content::BrowserMessageFilter:
   bool OnMessageReceived(const IPC::Message& message) override;

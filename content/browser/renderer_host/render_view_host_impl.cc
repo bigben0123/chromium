@@ -416,6 +416,10 @@ void RenderViewHostImpl::SetBackgroundOpaque(bool opaque) {
   Send(new ViewMsg_SetBackgroundOpaque(GetRoutingID(), opaque));
 }
 
+void RenderViewHostImpl::SetSchedulerThrottling(bool allowed) {
+  Send(new ViewMsg_SetSchedulerThrottling(GetRoutingID(), allowed));
+}
+
 bool RenderViewHostImpl::IsMainFrameActive() {
   return is_active();
 }

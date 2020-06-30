@@ -406,6 +406,7 @@ class WebView {
   // Scheduling -----------------------------------------------------------
 
   virtual PageScheduler* Scheduler() const = 0;
+  virtual void SetSchedulerThrottling(bool allowed) = 0;
 
   // Visibility -----------------------------------------------------------
 

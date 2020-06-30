@@ -60,6 +60,8 @@ class CONTENT_EXPORT BrowserCompositorMac : public DelegatedFrameHostClient,
   // These will not return nullptr until Destroy is called.
   DelegatedFrameHost* GetDelegatedFrameHost();
 
+  ui::Layer* GetRootLayer() { return root_layer_.get(); }
+
   // Force a new surface id to be allocated. Returns true if the
   // RenderWidgetHostImpl sent the resulting surface id to the renderer.
   bool ForceNewSurfaceId();
@@ -68,6 +70,7 @@ class CONTENT_EXPORT BrowserCompositorMac : public DelegatedFrameHostClient,
   // no valid frame is available.
   const gfx::CALayerParams* GetLastCALayerParams() const;
 
+  ui::Compositor* GetCompositor();
   void DidCreateNewRendererCompositorFrameSink(
       viz::mojom::CompositorFrameSinkClient* renderer_compositor_frame_sink);
   void OnDidNotProduceFrame(const viz::BeginFrameAck& ack);

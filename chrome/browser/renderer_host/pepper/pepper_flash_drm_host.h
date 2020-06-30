@@ -11,7 +11,9 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#if 0
 #include "chrome/browser/renderer_host/pepper/device_id_fetcher.h"
+#endif
 #include "ppapi/host/host_message_context.h"
 #include "ppapi/host/resource_host.h"
 
@@ -49,7 +51,9 @@ class PepperFlashDRMHost : public ppapi::host::ResourceHost {
                    const std::string& id,
                    int32_t result);
 
+#if 0
   scoped_refptr<DeviceIDFetcher> fetcher_;
+#endif
   scoped_refptr<MonitorFinder> monitor_finder_;
 
   base::WeakPtrFactory<PepperFlashDRMHost> weak_factory_{this};

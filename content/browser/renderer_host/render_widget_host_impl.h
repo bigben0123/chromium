@@ -183,6 +183,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   // RenderWidgetHostImpl.
   static RenderWidgetHostImpl* From(RenderWidgetHost* rwh);
 
+  // Electron: Prevents the widget from getting hidden.
+  bool disable_hidden_ = false;
+
   void set_hung_renderer_delay(const base::TimeDelta& delay) {
     hung_renderer_delay_ = delay;
   }

@@ -38,6 +38,7 @@
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "printing/buildflags/buildflags.h"
 #include "printing/metafile_skia.h"
+#include "printing/print_settings.h"
 #include "printing/units.h"
 #include "third_party/blink/public/common/frame/frame_owner_element_type.h"
 #include "third_party/blink/public/common/frame/sandbox_flags.h"
@@ -1125,7 +1126,8 @@ void PrintRenderFrameHelper::ScriptedPrint(bool user_initiated) {
     web_frame->DispatchBeforePrintEvent();
     if (!weak_this)
       return;
-    Print(web_frame, blink::WebNode(), PrintRequestType::kScripted);
+    Print(web_frame, blink::WebNode(), PrintRequestType::kScripted,
+          false /* silent */, base::DictionaryValue() /* new_settings */);
     if (weak_this)
       web_frame->DispatchAfterPrintEvent();
   }
@@ -1173,7 +1175,9 @@ void PrintRenderFrameHelper::OnDestruct() {
   delete this;
 }
 
-void PrintRenderFrameHelper::OnPrintPages() {
+void PrintRenderFrameHelper::OnPrintPages(
+    bool silent,
+    const base::DictionaryValue& settings) {
   if (ipc_nesting_level_ > 1)
     return;
 
@@ -1186,7 +1190,8 @@ void PrintRenderFrameHelper::OnPrintPages() {
   // If we are printing a PDF extension frame, find the plugin node and print
   // that instead.
   auto plugin = delegate_->GetPdfElement(frame);
-  Print(frame, plugin, PrintRequestType::kRegular);
+  Print(frame, plugin, PrintRequestType::kRegular,
+        silent, settings);
   if (weak_this)
     frame->DispatchAfterPrintEvent();
   // WARNING: |this| may be gone at this point. Do not do any more work here and
@@ -1203,7 +1208,7 @@ void PrintRenderFrameHelper::OnPrintForSystemDialog() {
   }
   auto weak_this = weak_ptr_factory_.GetWeakPtr();
   Print(frame, print_preview_context_.source_node(),
-        PrintRequestType::kRegular);
+        PrintRequestType::kRegular, false, base::DictionaryValue());
   if (weak_this)
     frame->DispatchAfterPrintEvent();
   // WARNING: |this| may be gone at this point. Do not do any more work here and
@@ -1239,6 +1244,8 @@ void PrintRenderFrameHelper::OnPrintPreview(
   if (ipc_nesting_level_ > 1)
     return;
 
+  blink::WebLocalFrame* frame = render_frame()->GetWebFrame();
+  print_preview_context_.InitWithFrame(frame);
   print_preview_context_.OnPrintPreview();
 
   UMA_HISTOGRAM_ENUMERATION("PrintPreview.PreviewEvent",
@@ -1631,7 +1638,9 @@ void PrintRenderFrameHelper::PrintNode(const blink::WebNode& node) {
 
     auto self = weak_ptr_factory_.GetWeakPtr();
     Print(duplicate_node.GetDocument().GetFrame(), duplicate_node,
-          PrintRequestType::kRegular);
+          PrintRequestType::kRegular,
+          false /* silent */,
+          base::DictionaryValue() /* new_settings */);
     // Check if |this| is still valid.
     if (!self)
       return;
@@ -1642,7 +1651,9 @@ void PrintRenderFrameHelper::PrintNode(const blink::WebNode& node) {
 
 void PrintRenderFrameHelper::Print(blink::WebLocalFrame* frame,
                                    const blink::WebNode& node,
-                                   PrintRequestType print_request_type) {
+                                   PrintRequestType print_request_type,
+                                   bool silent,
+                                   const base::DictionaryValue& settings) {
   // If still not finished with earlier print request simply ignore.
   if (prep_frame_view_)
     return;
@@ -1650,7 +1661,7 @@ void PrintRenderFrameHelper::Print(blink::WebLocalFrame* frame,
   FrameReference frame_ref(frame);
 
   int expected_page_count = 0;
-  if (!CalculateNumberOfPages(frame, node, &expected_page_count)) {
+  if (!CalculateNumberOfPages(frame, node, &expected_page_count, settings)) {
     DidFinishPrinting(FAIL_PRINT_INIT);
     return;  // Failed to init print page settings.
   }
@@ -1670,8 +1681,11 @@ void PrintRenderFrameHelper::Print(blink::WebLocalFrame* frame,
 
     PrintMsg_PrintPages_Params print_settings;
     auto self = weak_ptr_factory_.GetWeakPtr();
-    GetPrintSettingsFromUser(frame_ref.GetFrame(), node, expected_page_count,
-                             print_request_type, &print_settings);
+    if (silent)
+      print_settings = *print_pages_params_.get();
+    else
+      GetPrintSettingsFromUser(frame_ref.GetFrame(), node, expected_page_count,
+                               print_request_type, &print_settings);
     // Check if |this| is still valid.
     if (!self)
       return;
@@ -1878,10 +1892,23 @@ std::vector<int> PrintRenderFrameHelper::GetPrintedPages(
   return printed_pages;
 }
 
-bool PrintRenderFrameHelper::InitPrintSettings(bool fit_to_paper_size) {
+bool PrintRenderFrameHelper::InitPrintSettings(
+    bool fit_to_paper_size,
+    const base::DictionaryValue& new_settings) {
   PrintMsg_PrintPages_Params settings;
-  Send(new PrintHostMsg_GetDefaultPrintSettings(routing_id(),
-                                                &settings.params));
+  if (new_settings.empty()) {
+    // Send the default IPC message if caller is window.print()
+    Send(new PrintHostMsg_GetDefaultPrintSettings(routing_id(),
+                                                  &settings.params));
+  } else {
+    // Send the update IPC message if caller is webContents.print()
+    bool canceled = false;
+    Send(new PrintHostMsg_UpdatePrintSettings(
+        routing_id(), 0, new_settings, &settings, &canceled));
+    if (canceled)
+      return false;
+  }
+
   // Check if the printer returned any settings, if the settings is empty, we
   // can safely assume there are no printer drivers configured. So we safely
   // terminate.
@@ -1901,12 +1928,14 @@ bool PrintRenderFrameHelper::InitPrintSettings(bool fit_to_paper_size) {
   return result;
 }
 
-bool PrintRenderFrameHelper::CalculateNumberOfPages(blink::WebLocalFrame* frame,
-                                                    const blink::WebNode& node,
-                                                    int* number_of_pages) {
+bool PrintRenderFrameHelper::CalculateNumberOfPages(
+    blink::WebLocalFrame* frame,
+    const blink::WebNode& node,
+    int* number_of_pages,
+    const base::DictionaryValue& settings) {
   DCHECK(frame);
   bool fit_to_paper_size = !IsPrintingNodeOrPdfFrame(frame, node);
-  if (!InitPrintSettings(fit_to_paper_size)) {
+  if (!InitPrintSettings(fit_to_paper_size, settings)) {
     notify_browser_of_print_failure_ = false;
     Send(new PrintHostMsg_ShowInvalidPrinterSettingsError(routing_id()));
     return false;

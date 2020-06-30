@@ -314,6 +314,7 @@ class CORE_EXPORT WebViewImpl final : public WebView,
   PaintLayerCompositor* Compositor() const;
 
   PageScheduler* Scheduler() const override;
+  void SetSchedulerThrottling(bool allowed) override;
   void SetIsHidden(bool hidden, bool is_initial_state) override;
   bool IsHidden() override;
 
@@ -689,6 +690,8 @@ class CORE_EXPORT WebViewImpl final : public WebView,
   // https://crbug.com/992315. Somehow we're synchronously calling
   // WebViewImpl::Close while handling an input event.
   bool debug_inside_input_handling_ = false;
+
+  bool scheduler_throttling_allowed_ = true;
 
   FloatSize elastic_overscroll_;
 

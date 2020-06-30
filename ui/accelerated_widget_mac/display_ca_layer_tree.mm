@@ -98,6 +98,7 @@ void DisplayCALayerTree::UpdateCALayerTree(
 }
 
 void DisplayCALayerTree::GotCALayerFrame(uint32_t ca_context_id) {
+#ifndef MAS_BUILD
   // Early-out if the remote layer has not changed.
   if ([remote_layer_ contextId] == ca_context_id)
     return;
@@ -122,6 +123,9 @@ void DisplayCALayerTree::GotCALayerFrame(uint32_t ca_context_id) {
     [io_surface_layer_ removeFromSuperlayer];
     io_surface_layer_.reset();
   }
+#else
+  NOTREACHED() << "Remote layer is being used in MAS build";
+#endif
 }
 
 void DisplayCALayerTree::GotIOSurfaceFrame(

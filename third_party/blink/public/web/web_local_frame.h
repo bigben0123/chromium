@@ -356,6 +356,9 @@ class WebLocalFrame : public WebFrame {
   // be calling this API.
   virtual v8::Local<v8::Context> MainWorldScriptContext() const = 0;
 
+  virtual v8::Local<v8::Context> WorldScriptContext(
+      v8::Isolate* isolate, int world_id) const = 0;
+
   // Executes script in the context of the current page and returns the value
   // that the script evaluated to with callback. Script execution can be
   // suspend.

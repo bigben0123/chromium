@@ -93,8 +93,6 @@ PrintingContext::Result PrintingContext::UsePdfSettings() {
 
 PrintingContext::Result PrintingContext::UpdatePrintSettings(
     base::Value job_settings) {
-  ResetSettings();
-
   if (!PrintSettingsFromJobSettings(job_settings, settings_.get())) {
     NOTREACHED();
     return OnError();

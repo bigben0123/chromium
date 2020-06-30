@@ -489,7 +489,7 @@ class TransformStreamNative::DefaultSinkWriteAlgorithm final
           }
 
           // 4. Assert: state is "writable".
-          DCHECK(writable->IsWritable());
+          CHECK(writable->IsWritable());
 
           // 5. Return ! TransformStreamDefaultControllerPerformTransform(
           //    controller, chunk).

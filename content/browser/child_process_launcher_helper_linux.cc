@@ -54,6 +54,18 @@ bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
     const int sandbox_fd = SandboxHostLinux::GetInstance()->GetChildSocket();
     options->fds_to_remap.push_back(
         std::make_pair(sandbox_fd, service_manager::GetSandboxFD()));
+
+    // (For Electron), if we're launching without zygote, that means we're
+    // launching an unsandboxed process (since all sandboxed processes are
+    // forked from the zygote). Relax the allow_new_privs option to permit
+    // launching suid processes from unsandboxed renderers.
+    service_manager::ZygoteHandle zygote_handle =
+        base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoZygote)
+            ? nullptr
+            : delegate_->GetZygote();
+    if (!zygote_handle) {
+      options->allow_new_privs = true;
+    }
   }
 
   options->environment = delegate_->GetEnvironment();

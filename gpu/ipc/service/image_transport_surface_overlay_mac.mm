@@ -63,6 +63,7 @@ ImageTransportSurfaceOverlayMacBase<
 template <typename BaseClass>
 bool ImageTransportSurfaceOverlayMacBase<BaseClass>::Initialize(
     gl::GLSurfaceFormat format) {
+#ifndef MAS_BUILD
   // Create the CAContext to send this to the GPU process, and the layer for
   // the context.
   if (use_remote_layer_api_) {
@@ -71,6 +72,7 @@ bool ImageTransportSurfaceOverlayMacBase<BaseClass>::Initialize(
         [CAContext contextWithCGSConnection:connection_id options:@{}] retain]);
     [ca_context_ setLayer:ca_layer_tree_coordinator_->GetCALayerForDisplay()];
   }
+#endif
   return true;
 }
 
@@ -136,7 +138,9 @@ ImageTransportSurfaceOverlayMacBase<BaseClass>::SwapBuffersInternal(
                          "GLImpl", static_cast<int>(gl::GetGLImplementation()),
                          "width", pixel_size_.width());
     if (use_remote_layer_api_) {
+#ifndef MAS_BUILD
       params.ca_layer_params.ca_context_id = [ca_context_ contextId];
+#endif
     } else {
       IOSurfaceRef io_surface =
           ca_layer_tree_coordinator_->GetIOSurfaceForDisplay();

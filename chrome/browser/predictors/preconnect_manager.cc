@@ -70,7 +70,7 @@ PreresolveJob::PreresolveJob(PreresolveJob&& other) = default;
 PreresolveJob::~PreresolveJob() = default;
 
 PreconnectManager::PreconnectManager(base::WeakPtr<Delegate> delegate,
-                                     Profile* profile)
+                                     content::BrowserContext* profile)
     : delegate_(std::move(delegate)),
       profile_(profile),
       inflight_preresolves_count_(0) {
@@ -317,11 +317,13 @@ network::mojom::NetworkContext* PreconnectManager::GetNetworkContext() const {
   if (network_context_)
     return network_context_;
 
+#if 0
   if (profile_->AsTestingProfile()) {
     // We're testing and |network_context_| wasn't set. Return nullptr to avoid
     // hitting the network.
     return nullptr;
   }
+#endif
 
   return content::BrowserContext::GetDefaultStoragePartition(profile_)
       ->GetNetworkContext();

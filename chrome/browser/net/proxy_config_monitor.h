@@ -40,11 +40,12 @@ class ProxyConfigMonitor : public net::ProxyConfigService::Observer,
 
 {
  public:
+#if 0
   // Creates a ProxyConfigMonitor that gets proxy settings from |profile| and
   // watches for changes. The created ProxyConfigMonitor must be destroyed
   // before |profile|.
   explicit ProxyConfigMonitor(Profile* profile);
-
+#endif
   // Creates a ProxyConfigMonitor that gets proxy settings from the
   // |local_state|, for use with NetworkContexts not
   // associated with a profile. Must be destroyed before |local_state|.
@@ -91,7 +92,6 @@ class ProxyConfigMonitor : public net::ProxyConfigService::Observer,
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   mojo::BindingSet<network::mojom::ProxyErrorClient> error_binding_set_;
-  Profile* profile_ = nullptr;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(ProxyConfigMonitor);

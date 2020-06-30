@@ -20,7 +20,9 @@
 #include "ui/gl/gl_surface_egl.h"
 #endif
 
+#ifndef MAS_BUILD
 @class CAContext;
+#endif
 @class CALayer;
 
 namespace ui {
@@ -97,7 +99,9 @@ class ImageTransportSurfaceOverlayMacBase : public BaseClass,
   base::WeakPtr<ImageTransportSurfaceDelegate> delegate_;
 
   bool use_remote_layer_api_;
+#ifndef MAS_BUILD
   base::scoped_nsobject<CAContext> ca_context_;
+#endif
   std::unique_ptr<ui::CALayerTreeCoordinator> ca_layer_tree_coordinator_;
 
   gfx::Size pixel_size_;

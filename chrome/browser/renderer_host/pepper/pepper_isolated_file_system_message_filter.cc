@@ -8,17 +8,21 @@
 
 #include "base/stl_util.h"
 #include "base/task/post_task.h"
+#if 0
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pepper_permission_util.h"
+#endif
 #include "content/public/browser/browser_ppapi_host.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/render_view_host.h"
+#if 0
 #include "extensions/buildflags/buildflags.h"
+#endif
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/host/dispatch_host_message.h"
 #include "ppapi/host/host_message_context.h"
@@ -27,12 +31,11 @@
 #include "ppapi/shared_impl/file_system_util.h"
 #include "storage/browser/fileapi/isolated_context.h"
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if 0
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
-#endif
 
 namespace {
 
@@ -42,6 +45,7 @@ const char* kPredefinedAllowedCrxFsOrigins[] = {
 };
 
 }  // namespace
+#endif
 
 // static
 PepperIsolatedFileSystemMessageFilter*
@@ -69,8 +73,10 @@ PepperIsolatedFileSystemMessageFilter::PepperIsolatedFileSystemMessageFilter(
       profile_directory_(profile_directory),
       document_url_(document_url),
       ppapi_host_(ppapi_host) {
+#if 0
   for (size_t i = 0; i < base::size(kPredefinedAllowedCrxFsOrigins); ++i)
     allowed_crxfs_origins_.insert(kPredefinedAllowedCrxFsOrigins[i]);
+#endif
 }
 
 PepperIsolatedFileSystemMessageFilter::
@@ -95,6 +101,7 @@ int32_t PepperIsolatedFileSystemMessageFilter::OnResourceMessageReceived(
   return PP_ERROR_FAILED;
 }
 
+#if 0
 Profile* PepperIsolatedFileSystemMessageFilter::GetProfile() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   ProfileManager* profile_manager = g_browser_process->profile_manager();
@@ -121,6 +128,7 @@ PepperIsolatedFileSystemMessageFilter::CreateCrxFileSystem(Profile* profile) {
   return storage::IsolatedContext::ScopedFSHandle();
 #endif
 }
+#endif
 
 int32_t PepperIsolatedFileSystemMessageFilter::OnOpenFileSystem(
     ppapi::host::HostMessageContext* context,
@@ -129,7 +137,7 @@ int32_t PepperIsolatedFileSystemMessageFilter::OnOpenFileSystem(
     case PP_ISOLATEDFILESYSTEMTYPE_PRIVATE_INVALID:
       break;
     case PP_ISOLATEDFILESYSTEMTYPE_PRIVATE_CRX:
-      return OpenCrxFileSystem(context);
+      return PP_ERROR_NOTSUPPORTED;
     case PP_ISOLATEDFILESYSTEMTYPE_PRIVATE_PLUGINPRIVATE:
       return OpenPluginPrivateFileSystem(context);
   }
@@ -139,6 +147,7 @@ int32_t PepperIsolatedFileSystemMessageFilter::OnOpenFileSystem(
   return PP_ERROR_FAILED;
 }
 
+#if 0
 int32_t PepperIsolatedFileSystemMessageFilter::OpenCrxFileSystem(
     ppapi::host::HostMessageContext* context) {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -179,6 +188,7 @@ int32_t PepperIsolatedFileSystemMessageFilter::OpenCrxFileSystem(
   return PP_ERROR_NOTSUPPORTED;
 #endif
 }
+#endif
 
 int32_t PepperIsolatedFileSystemMessageFilter::OpenPluginPrivateFileSystem(
     ppapi::host::HostMessageContext* context) {

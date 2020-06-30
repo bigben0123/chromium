@@ -131,11 +131,11 @@ class PRINTING_EXPORT PrintingContext {
 
   int job_id() const { return job_id_; }
 
- protected:
-  explicit PrintingContext(Delegate* delegate);
-
   // Reinitializes the settings for object reuse.
   void ResetSettings();
+
+ protected:
+  explicit PrintingContext(Delegate* delegate);
 
   // Does bookkeeping when an error occurs.
   PrintingContext::Result OnError();

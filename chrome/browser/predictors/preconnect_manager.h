@@ -22,6 +22,10 @@
 
 class Profile;
 
+namespace content {
+class BrowserContext;
+}
+
 namespace network {
 namespace mojom {
 class NetworkContext;
@@ -138,7 +142,7 @@ class PreconnectManager {
 
   static const size_t kMaxInflightPreresolves = 3;
 
-  PreconnectManager(base::WeakPtr<Delegate> delegate, Profile* profile);
+  PreconnectManager(base::WeakPtr<Delegate> delegate, content::BrowserContext* profile);
   virtual ~PreconnectManager();
 
   // Starts preconnect and preresolve jobs keyed by |url|.
@@ -196,7 +200,7 @@ class PreconnectManager {
   network::mojom::NetworkContext* GetNetworkContext() const;
 
   base::WeakPtr<Delegate> delegate_;
-  Profile* const profile_;
+  content::BrowserContext* const profile_;
   std::list<PreresolveJobId> queued_jobs_;
   PreresolveJobMap preresolve_jobs_;
   std::map<std::string, std::unique_ptr<PreresolveInfo>> preresolve_info_;

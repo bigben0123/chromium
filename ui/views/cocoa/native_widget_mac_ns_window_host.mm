@@ -213,6 +213,7 @@ uint64_t g_last_bridged_native_widget_id = 0;
 
 }  // namespace
 
+#ifndef MAS_BUILD
 // A gfx::CALayerParams may pass the content to be drawn across processes via
 // either an IOSurface (sent as mach port) or a CAContextID (which is an
 // integer). For historical reasons, software compositing uses IOSurfaces.
@@ -266,6 +267,8 @@ class NativeWidgetMacNSWindowHost::IOSurfaceToRemoteLayerInterceptor {
   base::scoped_nsobject<CAContext> ca_context_;
   base::scoped_nsobject<CALayer> io_surface_layer_;
 };
+
+#endif  // MAS_BUILD
 
 // static
 NativeWidgetMacNSWindowHost* NativeWidgetMacNSWindowHost::GetFromNativeWindow(
@@ -348,14 +351,22 @@ gfx::NativeViewAccessible
 NativeWidgetMacNSWindowHost::GetNativeViewAccessibleForNSView() const {
   if (in_process_ns_window_bridge_)
     return in_process_ns_window_bridge_->ns_view();
+#ifndef MAS_BUILD
   return remote_view_accessible_.get();
+#else
+  return nullptr;
+#endif
 }
 
 gfx::NativeViewAccessible
 NativeWidgetMacNSWindowHost::GetNativeViewAccessibleForNSWindow() const {
   if (in_process_ns_window_bridge_)
     return in_process_ns_window_bridge_->ns_window();
+#ifndef MAS_BUILD
   return remote_window_accessible_.get();
+#else
+  return nullptr;
+#endif
 }
 
 remote_cocoa::mojom::NativeWidgetNSWindow*
@@ -1191,6 +1202,7 @@ void NativeWidgetMacNSWindowHost::OnFocusWindowToolbar() {
 void NativeWidgetMacNSWindowHost::SetRemoteAccessibilityTokens(
     const std::vector<uint8_t>& window_token,
     const std::vector<uint8_t>& view_token) {
+#ifndef MAS_BUILD
   remote_window_accessible_ =
       ui::RemoteAccessibility::GetRemoteElementFromToken(window_token);
   remote_view_accessible_ =
@@ -1198,14 +1210,17 @@ void NativeWidgetMacNSWindowHost::SetRemoteAccessibilityTokens(
   [remote_view_accessible_ setWindowUIElement:remote_window_accessible_.get()];
   [remote_view_accessible_
       setTopLevelUIElement:remote_window_accessible_.get()];
+#endif
 }
 
 bool NativeWidgetMacNSWindowHost::GetRootViewAccessibilityToken(
     int64_t* pid,
     std::vector<uint8_t>* token) {
+#ifndef MAS_BUILD
   *pid = getpid();
   id element_id = GetNativeViewAccessible();
   *token = ui::RemoteAccessibility::GetTokenForLocalElement(element_id);
+#endif
   return true;
 }
 
@@ -1472,6 +1487,7 @@ void NativeWidgetMacNSWindowHost::AcceleratedWidgetCALayerParamsUpdated() {
   const gfx::CALayerParams* ca_layer_params =
       compositor_->widget()->GetCALayerParams();
   if (ca_layer_params) {
+#ifndef MAS_BUILD
     // Replace IOSurface mach ports with CAContextIDs only when using the
     // out-of-process bridge (to reduce risk, because this workaround is being
     // merged to late-life-cycle release branches) and when an IOSurface
@@ -1488,8 +1504,11 @@ void NativeWidgetMacNSWindowHost::AcceleratedWidgetCALayerParamsUpdated() {
           &updated_ca_layer_params);
       remote_ns_window_ptr_->SetCALayerParams(updated_ca_layer_params);
     } else {
+#endif  // MAS_BUILD
       GetNSWindowMojo()->SetCALayerParams(*ca_layer_params);
+#ifndef MAS_BUILD
     }
+#endif  // MAS_BUILD
   }
 
   // Take this opportunity to update the VSync parameters, if needed.

@@ -62,6 +62,7 @@
   X("dwrite")                                                            \
   X("DXVA Decoding")                                                     \
   X("EarlyJava")                                                         \
+  X("electron")                                                          \
   X("evdev")                                                             \
   X("event")                                                             \
   X("exo")                                                               \

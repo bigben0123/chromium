@@ -246,6 +246,7 @@ class DnsConfigServicePosix::Watcher {
 
   bool Watch() {
     bool success = true;
+#ifndef MAS_BUILD
     if (!config_watcher_.Watch(base::Bind(&Watcher::OnConfigChanged,
                                           base::Unretained(this)))) {
       LOG(ERROR) << "DNS config watch failed to start.";
@@ -267,6 +268,7 @@ class DnsConfigServicePosix::Watcher {
                                 DNS_CONFIG_WATCH_MAX);
     }
 #endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
+#endif
     return success;
   }
 

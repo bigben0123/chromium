@@ -128,6 +128,9 @@ class PpapiPluginSandboxedProcessLauncherDelegate
   service_manager::ZygoteHandle GetZygote() override {
     const base::CommandLine& browser_command_line =
         *base::CommandLine::ForCurrentProcess();
+    if (browser_command_line.HasSwitch(service_manager::switches::kNoSandbox)) {
+      return nullptr;
+    }
     base::CommandLine::StringType plugin_launcher = browser_command_line
         .GetSwitchValueNative(switches::kPpapiPluginLauncher);
     if (is_broker_ || !plugin_launcher.empty())

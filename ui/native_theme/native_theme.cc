@@ -40,6 +40,8 @@ NativeTheme::NativeTheme()
 NativeTheme::~NativeTheme() = default;
 
 bool NativeTheme::ShouldUseDarkColors() const {
+  if (theme_source() == ThemeSource::kForcedLight) return false;
+  if (theme_source() == ThemeSource::kForcedDark) return true;
   return should_use_dark_colors_;
 }
 

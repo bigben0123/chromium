@@ -8,9 +8,11 @@
 #include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#if 0
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
+#endif
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_ppapi_host.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -42,6 +44,7 @@ using content::RenderProcessHost;
 
 namespace {
 
+#if 0
 // Get the CookieSettings on the UI thread for the given render process ID.
 scoped_refptr<content_settings::CookieSettings> GetCookieSettings(
     int render_process_id) {
@@ -55,6 +58,7 @@ scoped_refptr<content_settings::CookieSettings> GetCookieSettings(
   }
   return NULL;
 }
+#endif
 
 void PepperBindConnectorRequest(
     service_manager::mojom::ConnectorRequest connector_request) {
@@ -70,7 +74,9 @@ PepperFlashBrowserHost::PepperFlashBrowserHost(BrowserPpapiHost* host,
                                                PP_Instance instance,
                                                PP_Resource resource)
     : ResourceHost(host->GetPpapiHost(), instance, resource),
+#if 0
       host_(host),
+#endif
       delay_timer_(FROM_HERE,
                    base::TimeDelta::FromSeconds(45),
                    this,
@@ -123,6 +129,7 @@ int32_t PepperFlashBrowserHost::OnGetLocalTimeZoneOffset(
 
 int32_t PepperFlashBrowserHost::OnGetLocalDataRestrictions(
     ppapi::host::HostMessageContext* context) {
+#if 0
   // Getting the Flash LSO settings requires using the CookieSettings which
   // belong to the profile which lives on the UI thread. We lazily initialize
   // |cookie_settings_| by grabbing the reference from the UI thread and then
@@ -143,9 +150,11 @@ int32_t PepperFlashBrowserHost::OnGetLocalDataRestrictions(
                    context->MakeReplyMessageContext(), document_url,
                    plugin_url));
   }
-  return PP_OK_COMPLETIONPENDING;
+#endif
+  return PP_FLASHLSORESTRICTIONS_IN_MEMORY;
 }
 
+#if 0
 void PepperFlashBrowserHost::GetLocalDataRestrictions(
     ppapi::host::ReplyMessageContext reply_context,
     const GURL& document_url,
@@ -174,6 +183,7 @@ void PepperFlashBrowserHost::GetLocalDataRestrictions(
             PpapiPluginMsg_Flash_GetLocalDataRestrictionsReply(
                 static_cast<int32_t>(restrictions)));
 }
+#endif
 
 device::mojom::WakeLock* PepperFlashBrowserHost::GetWakeLock() {
   // Here is a lazy binding, and will not reconnect after connection error.

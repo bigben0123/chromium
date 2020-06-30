@@ -21,6 +21,11 @@ DesktopMediaListBase::DesktopMediaListBase(base::TimeDelta update_period)
 
 DesktopMediaListBase::~DesktopMediaListBase() {}
 
+void DesktopMediaListBase::AddObserver(DesktopMediaListObserver* observer) {
+  DCHECK(!observer_);
+  observer_ = observer;
+}
+
 void DesktopMediaListBase::SetUpdatePeriod(base::TimeDelta period) {
   DCHECK(!observer_);
   update_period_ = period;
@@ -34,10 +39,7 @@ void DesktopMediaListBase::SetViewDialogWindowId(DesktopMediaID dialog_id) {
   view_dialog_id_ = dialog_id;
 }
 
-void DesktopMediaListBase::StartUpdating(DesktopMediaListObserver* observer) {
-  DCHECK(!observer_);
-
-  observer_ = observer;
+void DesktopMediaListBase::StartUpdating() {
   Refresh();
 }
 
@@ -52,6 +54,11 @@ const DesktopMediaList::Source& DesktopMediaListBase::GetSource(
   return sources_[index];
 }
 
+const std::vector<DesktopMediaList::Source>& DesktopMediaListBase::GetSources()
+    const {
+  return sources_;
+}
+
 DesktopMediaID::Type DesktopMediaListBase::GetMediaListType() const {
   return type_;
 }
@@ -63,6 +70,12 @@ DesktopMediaListBase::SourceDescription::SourceDescription(
 
 void DesktopMediaListBase::UpdateSourcesList(
     const std::vector<SourceDescription>& new_sources) {
+  // Notify observer when there was no new source captured.
+  if (new_sources.empty()) {
+    observer_->OnSourceUnchanged(this);
+    return;
+  }
+
   typedef std::set<DesktopMediaID> SourceSet;
   SourceSet new_source_set;
   for (size_t i = 0; i < new_sources.size(); ++i) {
@@ -135,6 +148,8 @@ void DesktopMediaListBase::UpdateSourceThumbnail(DesktopMediaID id,
 }
 
 void DesktopMediaListBase::ScheduleNextRefresh() {
+  if (!observer_->ShouldScheduleNextRefresh(this))
+    return;
   base::PostDelayedTask(FROM_HERE, {BrowserThread::UI},
                         base::BindOnce(&DesktopMediaListBase::Refresh,
                                        weak_factory_.GetWeakPtr()),

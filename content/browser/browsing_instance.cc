@@ -83,6 +83,13 @@ scoped_refptr<SiteInstanceImpl> BrowsingInstance::GetSiteInstanceForURL(
   return instance;
 }
 
+scoped_refptr<SiteInstanceImpl> BrowsingInstance::CreateSiteInstanceForURL(
+    const GURL& url) {
+  scoped_refptr<SiteInstanceImpl> instance = new SiteInstanceImpl(this);
+  instance->SetSite(url);
+  return instance;
+}
+
 void BrowsingInstance::GetSiteAndLockForURL(const GURL& url,
                                             bool allow_default_instance,
                                             GURL* site_url,

@@ -9,16 +9,19 @@
 
 #include "base/mac/mac_logging.h"
 
+#if !defined(MAS_BUILD)
 extern "C" {
 OSStatus SetApplicationIsDaemon(Boolean isDaemon);
 void _LSSetApplicationLaunchServicesServerConnectionStatus(
     uint64_t flags,
     bool (^connection_allowed)(CFDictionaryRef options));
 }  // extern "C"
+#endif
 
 namespace sandbox {
 
 void DisableLaunchServices() {
+  #if !defined(MAS_BUILD)
   // Allow the process to continue without a LaunchServices ASN. The
   // INIT_Process function in HIServices will abort if it cannot connect to
   // launchservicesd to get an ASN. By setting this flag, HIServices skips
@@ -32,6 +35,7 @@ void DisableLaunchServices() {
       0, ^bool(CFDictionaryRef options) {
         return false;
       });
+  #endif
 }
 
 }  // namespace sandbox

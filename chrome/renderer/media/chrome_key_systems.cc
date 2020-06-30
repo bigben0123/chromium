@@ -15,7 +15,9 @@
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#if 0
 #include "chrome/renderer/chrome_render_thread_observer.h"
+#endif
 #include "components/cdm/renderer/external_clear_key_key_system_properties.h"
 #include "components/cdm/renderer/widevine_key_system_properties.h"
 #include "content/public/renderer/render_thread.h"
@@ -194,12 +196,14 @@ static SupportedCodecs GetSupportedCodecs(
 // Returns persistent-license session support.
 static EmeSessionTypeSupport GetPersistentLicenseSupport(
     bool supported_by_the_cdm) {
+#if 0
   // Do not support persistent-license if the process cannot persist data.
   // TODO(crbug.com/457487): Have a better plan on this. See bug for details.
   if (ChromeRenderThreadObserver::is_incognito_process()) {
     DVLOG(2) << __func__ << ": Not supported in incognito process.";
     return EmeSessionTypeSupport::NOT_SUPPORTED;
   }
+#endif
 
   if (!supported_by_the_cdm) {
     DVLOG(2) << __func__ << ": Not supported by the CDM.";

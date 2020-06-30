@@ -218,6 +218,7 @@
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/ui_base_switches_util.h"
 #include "ui/display/display_switches.h"
+#include "ui/gfx/switches.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/native_theme/native_theme_features.h"
 #include "url/url_constants.h"
@@ -389,6 +390,17 @@ class RendererSandboxedProcessLauncherDelegate
   {
   }
 
+#if BUILDFLAG(USE_ZYGOTE_HANDLE)
+  RendererSandboxedProcessLauncherDelegate(bool use_zygote)
+      : use_zygote_(use_zygote)
+#if defined(OS_WIN)
+      , renderer_code_integrity_enabled_(
+            GetContentClient()->browser()->IsRendererCodeIntegrityEnabled())
+#endif
+  {
+  }
+#endif
+
   ~RendererSandboxedProcessLauncherDelegate() override {}
 
 #if defined(OS_WIN)
@@ -410,6 +422,9 @@ class RendererSandboxedProcessLauncherDelegate
 
 #if BUILDFLAG(USE_ZYGOTE_HANDLE)
   service_manager::ZygoteHandle GetZygote() override {
+    if (!use_zygote_) {
+      return nullptr;
+    }
     const base::CommandLine& browser_command_line =
         *base::CommandLine::ForCurrentProcess();
     base::CommandLine::StringType renderer_prefix =
@@ -424,9 +439,12 @@ class RendererSandboxedProcessLauncherDelegate
     return service_manager::SANDBOX_TYPE_RENDERER;
   }
 
-#if defined(OS_WIN)
  private:
+#if defined(OS_WIN)
   const bool renderer_code_integrity_enabled_;
+#endif
+#if BUILDFLAG(USE_ZYGOTE_HANDLE)
+  bool use_zygote_ = true;
 #endif
 };
 
@@ -1687,11 +1705,18 @@ bool RenderProcessHostImpl::Init() {
       cmd_line->PrependWrapper(renderer_prefix);
     AppendRendererCommandLine(cmd_line.get());
 
+#if BUILDFLAG(USE_ZYGOTE_HANDLE)
+    bool use_zygote = !cmd_line->HasSwitch(switches::kNoZygote);
+    auto delegate = std::make_unique<RendererSandboxedProcessLauncherDelegate>(use_zygote);
+#else
+    auto delegate = std::make_unique<RendererSandboxedProcessLauncherDelegate>();
+#endif
+
     // Spawn the child process asynchronously to avoid blocking the UI thread.
     // As long as there's no renderer prefix, we can use the zygote process
     // at this stage.
     child_process_launcher_ = std::make_unique<ChildProcessLauncher>(
-        std::make_unique<RendererSandboxedProcessLauncherDelegate>(),
+        std::move(delegate),
         std::move(cmd_line), GetID(), this, std::move(mojo_invitation_),
         base::BindRepeating(&RenderProcessHostImpl::OnMojoError, id_));
     channel_->Pause();
@@ -2879,6 +2904,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
   // Propagate the following switches to the renderer command line (along
   // with any associated values) if present in the browser command line.
   static const char* const kSwitchNames[] = {
+    switches::kDisableColorCorrectRendering,
     network::switches::kNoReferrers,
     network::switches::kExplicitlyAllowedPorts,
     service_manager::switches::kDisableInProcessStackTraces,

@@ -75,7 +75,8 @@ class GIN_EXPORT IsolateHolder {
       AccessMode access_mode,
       AllowAtomicsWaitMode atomics_wait_mode,
       IsolateType isolate_type,
-      IsolateCreationMode isolate_creation_mode = IsolateCreationMode::kNormal);
+      IsolateCreationMode isolate_creation_mode = IsolateCreationMode::kNormal,
+      v8::Isolate* isolate = nullptr);
   ~IsolateHolder();
 
   // Should be invoked once before creating IsolateHolder instances to
@@ -91,7 +92,8 @@ class GIN_EXPORT IsolateHolder {
   // reference pointers. Otherwise, it can be nullptr.
   static void Initialize(ScriptMode mode,
                          v8::ArrayBuffer::Allocator* allocator,
-                         const intptr_t* reference_table = nullptr);
+                         const intptr_t* reference_table = nullptr,
+                         bool create_v8_platform = true);
 
   v8::Isolate* isolate() { return isolate_; }
 

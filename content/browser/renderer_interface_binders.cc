@@ -246,7 +246,7 @@ void RendererInterfaceBinders::InitializeParameterizedBinderRegistry() {
          RenderProcessHost* host, const url::Origin& origin) {
         static_cast<StoragePartitionImpl*>(host->GetStoragePartition())
             ->GetPlatformNotificationContext()
-            ->CreateService(origin, std::move(request));
+            ->CreateService(host, origin, std::move(request));
       }));
   parameterized_binder_registry_.AddInterface(
       base::BindRepeating(&QuotaDispatcherHost::CreateForWorker));

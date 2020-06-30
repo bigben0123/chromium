@@ -73,6 +73,7 @@
 #include "content/renderer/ime_event_guard.h"
 #include "content/renderer/internal_document_state_data.h"
 #include "content/renderer/loader/request_extra_data.h"
+#include "content/renderer/loader/web_url_request_util.h"
 #include "content/renderer/media/audio/audio_device_factory.h"
 #include "content/renderer/media/webrtc/peer_connection_dependency_factory.h"
 #include "content/renderer/media/webrtc/rtc_peer_connection_handler.h"
@@ -1236,6 +1237,8 @@ bool RenderViewImpl::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(RenderViewImpl, message)
     IPC_MESSAGE_HANDLER(ViewMsg_SetPageScale, OnSetPageScale)
     IPC_MESSAGE_HANDLER(ViewMsg_SetInitialFocus, OnSetInitialFocus)
+    IPC_MESSAGE_HANDLER(ViewMsg_SetSchedulerThrottling,
+                        OnSetSchedulerThrottling)
     IPC_MESSAGE_HANDLER(ViewMsg_UpdateTargetURL_ACK, OnUpdateTargetURLAck)
     IPC_MESSAGE_HANDLER(ViewMsg_UpdateWebPreferences, OnUpdateWebPreferences)
     IPC_MESSAGE_HANDLER(ViewMsg_ClosePage, OnClosePage)
@@ -1323,6 +1326,8 @@ WebView* RenderViewImpl::CreateView(
         blink::mojom::Referrer::From(GetReferrerFromRequest(creator, request));
   }
   params->features = ConvertWebWindowFeaturesToMojoWindowFeatures(features);
+
+  params->body = GetRequestBodyForWebURLRequest(request);
 
   // We preserve this information before sending the message since |params| is
   // moved on send.
@@ -1878,6 +1883,12 @@ void RenderViewImpl::OnSetPageScale(float page_scale_factor) {
   if (!webview())
     return;
   webview()->SetPageScaleFactor(page_scale_factor);
+}
+
+void RenderViewImpl::OnSetSchedulerThrottling(bool allowed) {
+  if (!webview())
+    return;
+  webview()->SetSchedulerThrottling(allowed);
 }
 
 void RenderViewImpl::UpdateZoomLevel(double zoom_level) {

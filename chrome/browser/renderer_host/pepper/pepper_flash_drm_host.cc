@@ -20,6 +20,7 @@
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/common/pepper_plugin_info.h"
+#include "net/base/network_interfaces.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/host/dispatch_host_message.h"
 #include "ppapi/host/host_message_context.h"
@@ -127,7 +128,9 @@ PepperFlashDRMHost::PepperFlashDRMHost(BrowserPpapiHost* host,
   content::ChildProcessSecurityPolicy::GetInstance()->GrantReadFile(
       render_process_id, voucher_file);
 
+#if 0
   fetcher_ = new DeviceIDFetcher(render_process_id);
+#endif
   monitor_finder_ = new MonitorFinder(render_process_id, render_frame_id);
   monitor_finder_->GetMonitor();
 }
@@ -150,12 +153,18 @@ int32_t PepperFlashDRMHost::OnResourceMessageReceived(
 
 int32_t PepperFlashDRMHost::OnHostMsgGetDeviceID(
     ppapi::host::HostMessageContext* context) {
+#if 0
   if (!fetcher_->Start(base::Bind(&PepperFlashDRMHost::GotDeviceID,
                                   weak_factory_.GetWeakPtr(),
                                   context->MakeReplyMessageContext()))) {
     return PP_ERROR_INPROGRESS;
   }
-  return PP_OK_COMPLETIONPENDING;
+#endif
+  static std::string id;
+  if (id.empty())
+    id = net::GetHostName();
+  context->reply_msg = PpapiPluginMsg_FlashDRM_GetDeviceIDReply(id);
+  return PP_OK;
 }
 
 int32_t PepperFlashDRMHost::OnHostMsgGetHmonitor(
@@ -184,6 +193,7 @@ int32_t PepperFlashDRMHost::OnHostMsgMonitorIsExternal(
   return PP_OK;
 }
 
+#if 0
 void PepperFlashDRMHost::GotDeviceID(
     ppapi::host::ReplyMessageContext reply_context,
     const std::string& id,
@@ -196,3 +206,4 @@ void PepperFlashDRMHost::GotDeviceID(
   host()->SendReply(reply_context,
                     PpapiPluginMsg_FlashDRM_GetDeviceIDReply(id));
 }
+#endif

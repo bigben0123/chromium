@@ -104,7 +104,7 @@ class LegacyCacheStorage::CacheLoader {
         cache_storage_(cache_storage),
         origin_(origin),
         owner_(owner) {
-    DCHECK(!origin_.opaque());
+    // DCHECK(!origin_.opaque());
   }
 
   virtual ~CacheLoader() {}

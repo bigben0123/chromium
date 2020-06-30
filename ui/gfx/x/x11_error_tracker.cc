@@ -24,7 +24,7 @@ namespace gfx {
 X11ErrorTracker::X11ErrorTracker() {
   // This is a non-exhaustive check for incorrect usage. It disallows nested
   // X11ErrorTracker instances on the same thread.
-  DCHECK(g_handler == NULL);
+  // DCHECK(g_handler == NULL);
   g_handler = this;
   XSync(GetXDisplay(), False);
   old_handler_ = XSetErrorHandler(X11ErrorHandler);

@@ -113,10 +113,12 @@ bool StorageAreaMap::SetItemInternal(const String& key,
   size_t new_quota_used = quota_used_ - old_item_size + new_item_size;
   size_t new_memory_used = memory_used_ - old_item_memory + new_item_memory;
 
+#if 0
   // Only check quota if the size is increasing, this allows
   // shrinking changes to pre-existing files that are over budget.
   if (check_quota && new_item_size > old_item_size && new_quota_used > quota_)
     return false;
+#endif
 
   keys_values_.Set(key, value);
   ResetKeyIterator();

@@ -28,7 +28,9 @@
 #include "ui/views/window/dialog_observer.h"
 
 @class NativeWidgetMacNSWindow;
+#ifndef MAS_BUILD
 @class NSAccessibilityRemoteUIElement;
+#endif
 @class NSView;
 
 namespace remote_cocoa {
@@ -409,11 +411,13 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
   // process.
   remote_cocoa::mojom::NativeWidgetNSWindowAssociatedPtr remote_ns_window_ptr_;
 
+#ifndef MAS_BUILD
   // Remote accessibility objects corresponding to the NSWindow and its root
   // NSView.
   base::scoped_nsobject<NSAccessibilityRemoteUIElement>
       remote_window_accessible_;
   base::scoped_nsobject<NSAccessibilityRemoteUIElement> remote_view_accessible_;
+#endif
 
   // Used to force the NSApplication's focused accessibility element to be the
   // views::Views accessibility tree when the NSView for this is focused.
@@ -446,11 +450,13 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
   // Display link for getting vsync info for |display_|.
   scoped_refptr<ui::DisplayLinkMac> display_link_;
 
+#ifndef MAS_BUILD
   // Structure to avoid sending IOSurface mach ports over mojo.
   // https://crbug.com/942213
   class IOSurfaceToRemoteLayerInterceptor;
   std::unique_ptr<IOSurfaceToRemoteLayerInterceptor>
       io_surface_to_remote_layer_interceptor_;
+#endif
 
   // The geometry of the window and its contents view, in screen coordinates.
   gfx::Rect window_bounds_in_screen_;

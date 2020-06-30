@@ -84,6 +84,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) URLLoader
       base::WeakPtr<KeepaliveStatisticsRecorder> keepalive_statistics_recorder,
       base::WeakPtr<NetworkUsageAccumulator> network_usage_accumulator,
       mojom::TrustedURLLoaderHeaderClient* url_loader_header_client,
+      mojom::TrustedURLLoaderAuthClient* url_loader_auth_client,
       mojom::OriginPolicyManager* origin_policy_manager);
   ~URLLoader() override;
 
@@ -361,6 +362,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) URLLoader
   base::Optional<base::UnguessableToken> fetch_window_id_;
 
   mojo::Remote<mojom::TrustedHeaderClient> header_client_;
+  mojo::Remote<mojom::TrustedAuthClient> auth_client_;
 
   std::unique_ptr<FileOpenerForUpload> file_opener_for_upload_;
 

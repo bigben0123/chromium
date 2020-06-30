@@ -136,6 +136,11 @@ class CONTENT_EXPORT BrowsingInstance final
       const GURL& url,
       bool allow_default_instance);
 
+  // Create a new SiteInstance for the given URL bound the current
+  // BrowsingInstance.
+  scoped_refptr<SiteInstanceImpl> CreateSiteInstanceForURL(
+      const GURL& url);
+
   // Adds the given SiteInstance to our map, to ensure that we do not create
   // another SiteInstance for the same site.
   void RegisterSiteInstance(SiteInstanceImpl* site_instance);

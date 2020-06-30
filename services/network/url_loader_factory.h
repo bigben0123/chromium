@@ -70,6 +70,7 @@ class URLLoaderFactory : public mojom::URLLoaderFactory {
   mojom::URLLoaderFactoryParamsPtr params_;
   scoped_refptr<ResourceSchedulerClient> resource_scheduler_client_;
   mojo::Remote<mojom::TrustedURLLoaderHeaderClient> header_client_;
+  mojo::Remote<mojom::TrustedURLLoaderAuthClient> auth_client_;
 
   // |cors_url_loader_factory_| owns this.
   cors::CorsURLLoaderFactory* cors_url_loader_factory_;

@@ -9,6 +9,7 @@
 #include "components/remote_cocoa/app_shim/native_widget_ns_window_bridge.h"
 #include "components/remote_cocoa/common/native_widget_ns_window_host.mojom.h"
 
+#ifndef MAS_BUILD
 @interface NSWindow (PrivateBrowserNativeWidgetAPI)
 + (Class)frameViewClassForStyleMask:(NSUInteger)windowStyle;
 @end
@@ -69,10 +70,13 @@
 
 @end
 
+#endif  // MAS_BUILD
+
 @implementation BrowserNativeWidgetWindow
 
 // NSWindow (PrivateAPI) overrides.
 
+#ifndef MAS_BUILD
 + (Class)frameViewClassForStyleMask:(NSUInteger)windowStyle {
   // - NSThemeFrame and its subclasses will be nil if it's missing at runtime.
   if ([BrowserWindowFrame class])
@@ -86,6 +90,8 @@
 - (BOOL)_usesCustomDrawing {
   return NO;
 }
+
+#endif  // MAS_BUILD
 
 // Handle "Move focus to the window toolbar" configured in System Preferences ->
 // Keyboard -> Shortcuts -> Keyboard. Usually Ctrl+F5. The argument (|unknown|)

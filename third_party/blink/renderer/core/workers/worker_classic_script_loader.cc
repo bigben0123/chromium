@@ -308,7 +308,6 @@ void WorkerClassicScriptLoader::ProcessContentSecurityPolicy(
   // document (which is implemented in WorkerMessagingProxy, and
   // m_contentSecurityPolicy should be left as nullptr to inherit the policy).
   if (!response.CurrentRequestUrl().ProtocolIs("blob") &&
-      !response.CurrentRequestUrl().ProtocolIs("file") &&
       !response.CurrentRequestUrl().ProtocolIs("filesystem")) {
     content_security_policy_ = MakeGarbageCollected<ContentSecurityPolicy>();
     content_security_policy_->SetOverrideURLForSelf(

@@ -767,7 +767,6 @@ class CONTENT_EXPORT RenderFrameImpl
                    blink::WebHistoryCommitType commit_type) override;
   void DidFinishLoad() override;
 #ifndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_DISPATCH  // zhibin:patch_to_content
-                                                      // voidParam
   void DidNotifyEventAdded(const std::string& node_name,
                            const std::string& event_type) override;
   #endif

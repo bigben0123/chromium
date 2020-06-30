@@ -45,7 +45,9 @@ class ScopedPasswordInputEnabler;
 
 @protocol RenderWidgetHostViewMacDelegate;
 
+#ifndef MAS_BUILD
 @class NSAccessibilityRemoteUIElement;
+#endif
 @class RenderWidgetHostViewCocoa;
 
 namespace content {
@@ -645,10 +647,12 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // EnsureSurfaceSynchronizedForWebTest().
   uint32_t latest_capture_sequence_number_ = 0u;
 
+#ifndef MAS_BUILD
   // Remote accessibility objects corresponding to the NSWindow that this is
   // displayed to the user in.
   base::scoped_nsobject<NSAccessibilityRemoteUIElement>
       remote_window_accessible_;
+#endif
 
   // Used to force the NSApplication's focused accessibility element to be the
   // content::BrowserAccessibilityCocoa accessibility tree when the NSView for

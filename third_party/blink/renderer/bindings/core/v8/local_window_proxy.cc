@@ -205,10 +205,9 @@ void LocalWindowProxy::Initialize() {
                  GetFrame()->IsMainFrame());
     MainThreadDebugger::Instance()->ContextCreated(script_state_, GetFrame(),
                                                    origin);
+    InstallConditionalFeatures();
     GetFrame()->Client()->DidCreateScriptContext(context, world_->GetWorldId());
   }
-
-  InstallConditionalFeatures();
 
   // This needs to go after everything else since it accesses the window object.
   InitializeV8ExtrasBinding(script_state_);

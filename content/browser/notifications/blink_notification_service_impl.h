@@ -40,6 +40,7 @@ class CONTENT_EXPORT BlinkNotificationServiceImpl
       PlatformNotificationContextImpl* notification_context,
       BrowserContext* browser_context,
       scoped_refptr<ServiceWorkerContextWrapper> service_worker_context,
+      RenderProcessHost* render_process_host,
       const url::Origin& origin,
       mojo::PendingReceiver<blink::mojom::NotificationService> receiver);
   ~BlinkNotificationServiceImpl() override;
@@ -99,6 +100,7 @@ class CONTENT_EXPORT BlinkNotificationServiceImpl
   // The notification context that owns this service instance.
   PlatformNotificationContextImpl* notification_context_;
 
+  RenderProcessHost* render_process_host_;
   BrowserContext* browser_context_;
 
   scoped_refptr<ServiceWorkerContextWrapper> service_worker_context_;

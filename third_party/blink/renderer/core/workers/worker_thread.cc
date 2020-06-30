@@ -663,6 +663,12 @@ void WorkerThread::PrepareForShutdownOnWorkerThread() {
     nested_runner_->QuitNow();
   }
 
+  {
+    v8::HandleScope handle_scope(GetIsolate());
+    Platform::Current()->WorkerContextWillDestroy(
+        GlobalScope()->ScriptController()->GetContext());
+  }
+
   if (WorkerThreadDebugger* debugger = WorkerThreadDebugger::From(GetIsolate()))
     debugger->WorkerThreadDestroyed(this);
 

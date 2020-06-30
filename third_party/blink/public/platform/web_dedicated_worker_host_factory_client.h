@@ -18,7 +18,6 @@ class SingleThreadTaskRunner;
 
 namespace blink {
 
-class WebSecurityOrigin;
 class WebURL;
 class WebWorkerFetchContext;
 
@@ -31,16 +30,13 @@ class WebDedicatedWorkerHostFactoryClient {
   // Requests the creation of DedicatedWorkerHost in the browser process.
   // For non-PlzDedicatedWorker. This will be removed once PlzDedicatedWorker is
   // enabled by default.
-  virtual void CreateWorkerHostDeprecated(
-      const blink::WebSecurityOrigin& script_origin) = 0;
+  virtual void CreateWorkerHostDeprecated() = 0;
   // For PlzDedicatedWorker.
   // TODO(nhiroki): Pack |fetch_client_*| into some struct like
   // WebFetchClientSettingsObject.
   virtual void CreateWorkerHost(
       const blink::WebURL& script_url,
-      const blink::WebSecurityOrigin& script_origin,
       network::mojom::CredentialsMode credentials_mode,
-      const blink::WebSecurityOrigin& fetch_client_security_origin,
       network::mojom::ReferrerPolicy fetch_client_referrer_policy,
       const blink::WebURL& fetch_client_outgoing_referrer,
       const blink::WebInsecureRequestPolicy

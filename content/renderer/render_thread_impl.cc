@@ -1509,7 +1509,7 @@ bool RenderThreadImpl::IsGpuMemoryBufferCompositorResourcesEnabled() {
 }
 
 bool RenderThreadImpl::IsElasticOverscrollEnabled() {
-  return is_elastic_overscroll_enabled_;
+  return base::CommandLine::ForCurrentProcess()->HasSwitch("scroll-bounce");
 }
 
 bool RenderThreadImpl::IsUseZoomForDSFEnabled() {

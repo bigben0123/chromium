@@ -13,6 +13,7 @@
 
 #include "ui/base/ui_base_export.h"
 
+#ifndef MAS_BUILD
 // The CGSConnectionID is used to create the CAContext in the process that is
 // going to share the CALayers that it is rendering to another process to
 // display.
@@ -49,6 +50,8 @@ typedef uint32_t CAContextID;
 @end
 
 #endif // __OBJC__
+
+#endif // MAS_BUILD
 
 namespace ui {
 

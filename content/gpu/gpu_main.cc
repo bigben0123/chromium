@@ -236,6 +236,10 @@ int GpuMain(const MainFunctionParams& parameters) {
 
   logging::SetLogMessageHandler(GpuProcessLogMessageHandler);
 
+  auto* client = GetContentClient()->gpu();
+  if (client)
+    client->PreCreateMessageLoop();
+
   // We are experiencing what appear to be memory-stomp issues in the GPU
   // process. These issues seem to be impacting the task executor and listeners
   // registered to it. Create the task executor on the heap to guard against
@@ -286,8 +290,10 @@ int GpuMain(const MainFunctionParams& parameters) {
         std::make_unique<base::SingleThreadTaskExecutor>(
             base::MessagePumpType::NS_RUNLOOP);
 
+#ifndef MAS_BUILD
     // Tell LaunchServices to continue without a connection to the daemon.
     _LSSetApplicationLaunchServicesServerConnectionStatus(0, nullptr);
+#endif
 #else
     main_thread_task_executor =
         std::make_unique<base::SingleThreadTaskExecutor>(
@@ -347,7 +353,6 @@ int GpuMain(const MainFunctionParams& parameters) {
   GpuProcess gpu_process(io_thread_priority);
 #endif
 
-  auto* client = GetContentClient()->gpu();
   if (client)
     client->PostIOThreadCreated(gpu_process.io_task_runner());
 

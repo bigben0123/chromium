@@ -924,6 +924,12 @@ void RendererBlinkPlatformImpl::WillStopWorkerThread() {
   WorkerThreadRegistry::Instance()->WillStopCurrentWorkerThread();
 }
 
+void RendererBlinkPlatformImpl::WorkerContextWillDestroy(
+    const v8::Local<v8::Context>& worker) {
+  GetContentClient()->renderer()->WillDestroyWorkerContextOnWorkerThread(
+      worker);
+}
+
 void RendererBlinkPlatformImpl::WorkerContextCreated(
     const v8::Local<v8::Context>& worker) {
   GetContentClient()->renderer()->DidInitializeWorkerContextOnWorkerThread(

@@ -98,8 +98,10 @@ v8::Local<v8::Function> V8ObjectConstructor::CreateInterfaceObject(
     bool get_prototype_value =
         interface_object->Get(context, V8AtomicString(isolate, "prototype"))
             .ToLocal(&prototype_value);
-    CHECK(get_prototype_value);
-    CHECK(prototype_value->IsObject());
+    // CHECK(get_prototype_value);
+    // CHECK(prototype_value->IsObject());
+    if (!get_prototype_value || !prototype_value->IsObject())
+      return v8::Local<v8::Function>();
 
     prototype_object = prototype_value.As<v8::Object>();
   }

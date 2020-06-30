@@ -30,17 +30,17 @@ class VIZ_HOST_EXPORT HostDisplayClient : public mojom::DisplayClient {
   mojom::DisplayClientPtr GetBoundPtr(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
- private:
+ protected:
   // mojom::DisplayClient implementation:
 #if defined(OS_MACOSX)
   void OnDisplayReceivedCALayerParams(
       const gfx::CALayerParams& ca_layer_params) override;
 #endif
 
-#if defined(OS_WIN)
+  void IsOffscreen(IsOffscreenCallback callback) override;
+
   void CreateLayeredWindowUpdater(
       mojom::LayeredWindowUpdaterRequest request) override;
-#endif
 
 #if defined(USE_X11)
   void DidCompleteSwapWithNewSize(const gfx::Size& size) override;

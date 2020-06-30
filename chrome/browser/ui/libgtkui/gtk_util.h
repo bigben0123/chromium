@@ -11,6 +11,7 @@
 #include "ui/base/glib/scoped_gobject.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/window/frame_buttons.h"
+#include "chrome/browser/ui/libgtkui/libgtkui_export.h"
 
 namespace aura {
 class Window;
@@ -33,10 +34,10 @@ namespace libgtkui {
 
 extern const color_utils::HSL kDefaultTintFrameIncognito;
 
-void GtkInitFromCommandLine(const base::CommandLine& command_line);
+LIBGTKUI_EXPORT void GtkInitFromCommandLine(const base::CommandLine& command_line);
 
 // Returns the name of the ".desktop" file associated with our running process.
-std::string GetDesktopName(base::Environment* env);
+LIBGTKUI_EXPORT std::string GetDesktopName(base::Environment* env);
 
 GdkModifierType GetGdkModifierForAccelerator(
     const ui::Accelerator& accelerator);
@@ -49,7 +50,7 @@ void TurnButtonBlue(GtkWidget* button);
 
 // Sets |dialog| as transient for |parent|, which will keep it on top and center
 // it above |parent|. Do nothing if |parent| is nullptr.
-void SetGtkTransientForAura(GtkWidget* dialog, aura::Window* parent);
+LIBGTKUI_EXPORT void SetGtkTransientForAura(GtkWidget* dialog, aura::Window* parent);
 
 // Gets the transient parent aura window for |dialog|.
 aura::Window* GetAuraTransientParent(GtkWidget* dialog);
@@ -155,7 +156,7 @@ void ApplyCssToContext(GtkStyleContext* context, const std::string& css);
 
 // Get the 'color' property from the style context created by
 // GetStyleContextFromCss(|css_selector|).
-SkColor GetFgColor(const std::string& css_selector);
+LIBGTKUI_EXPORT SkColor GetFgColor(const std::string& css_selector);
 
 ScopedCssProvider GetCssProvider(const std::string& css);
 
@@ -168,7 +169,7 @@ void RenderBackground(const gfx::Size& size,
 // Renders a background from the style context created by
 // GetStyleContextFromCss(|css_selector|) into a 24x24 bitmap and
 // returns the average color.
-SkColor GetBgColor(const std::string& css_selector);
+LIBGTKUI_EXPORT SkColor GetBgColor(const std::string& css_selector);
 
 // Renders the border from the style context created by
 // GetStyleContextFromCss(|css_selector|) into a 24x24 bitmap and

@@ -142,6 +142,7 @@ class WTF_EXPORT ArrayBufferContents {
   void CopyTo(ArrayBufferContents& other);
 
   static void* AllocateMemoryOrNull(size_t, InitializationPolicy);
+  static void* Realloc(void* data, size_t);
   static void FreeMemory(void*);
   static DataHandle CreateDataHandle(size_t, InitializationPolicy);
   static void Initialize(

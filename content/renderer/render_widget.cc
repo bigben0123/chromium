@@ -2891,6 +2891,9 @@ cc::LayerTreeSettings RenderWidget::GenerateLayerTreeSettings(
   settings.main_frame_before_activation_enabled =
       cmd.HasSwitch(cc::switches::kEnableMainFrameBeforeActivation);
 
+  settings.enable_color_correct_rendering =
+    !cmd.HasSwitch(switches::kDisableColorCorrectRendering);
+
   // Checkerimaging is not supported for synchronous single-threaded mode, which
   // is what the renderer uses if its not threaded.
   settings.enable_checker_imaging =

@@ -6,6 +6,7 @@
 #define UI_GFX_CA_LAYER_PARAMS_H_
 
 #include "build/build_config.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/gfx_export.h"
 
@@ -40,6 +41,8 @@ struct GFX_EXPORT CALayerParams {
 #if defined(OS_MACOSX) && !defined(OS_IOS)
   gfx::ScopedRefCountedIOSurfaceMachPort io_surface_mach_port;
 #endif
+
+  gfx::Rect damage;
 
   // The geometry of the frame.
   gfx::Size pixel_size;

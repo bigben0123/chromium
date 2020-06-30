@@ -1211,8 +1211,10 @@ NavigationType NavigationControllerImpl::ClassifyNavigation(
     return NAVIGATION_TYPE_NEW_SUBFRAME;
   }
 
-  // We only clear the session history when navigating to a new page.
-  DCHECK(!params.history_list_was_cleared);
+  // Electron does its own book keeping of navigation entries and we
+  // expect content to not track any, by clearing history list for
+  // all navigations.
+  // DCHECK(!params.history_list_was_cleared);
 
   if (rfh->GetParent()) {
     // All manual subframes would be did_create_new_entry and handled above, so
@@ -1464,7 +1466,10 @@ void NavigationControllerImpl::RendererDidNavigateToNewPage(
     new_entry->GetFavicon() = GetLastCommittedEntry()->GetFavicon();
   }
 
-  DCHECK(!params.history_list_was_cleared || !replace_entry);
+  // Electron does its own book keeping of navigation entries and we
+  // expect content to not track any, by clearing history list for
+  // all navigations.
+  // DCHECK(!params.history_list_was_cleared || !replace_entry);
   // The browser requested to clear the session history when it initiated the
   // navigation. Now we know that the renderer has updated its state accordingly
   // and it is safe to also clear the browser side history.

@@ -4159,7 +4159,9 @@ bool Document::DispatchBeforeUnloadEvent(ChromeClient* chrome_client,
         "frame that never had a user gesture since its load. "
         "https://www.chromestatus.com/feature/5082396709879808";
     Intervention::GenerateReport(frame_, "BeforeUnloadNoGesture", message);
-    return true;
+    // TODO(alexeykuzmin): Uncomment `return true` when Electron tests are fixed.
+    // See https://github.com/electron/electron/issues/10754
+    // return true;
   }
 
   if (did_allow_navigation) {

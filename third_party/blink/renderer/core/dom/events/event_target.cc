@@ -541,13 +541,13 @@ bool EventTarget::AddEventListenerInternal(
     LocalDOMWindow* executing_window = ExecutingWindow();
     LocalFrame* frame = executing_window->GetFrame();
     String node_name = ToNode() ? ToNode()->nodeName() : InterfaceName();
-
+//    node_name=this.HasId() ? this.IdForStyleResolution()
+//                 : this.HasClass() ? "ClassNames()" : node_name;
     frame->Client()->DispatchDidNotifyEventAdded(
         node_name.Utf8(),
         event_type.GetString().Utf8());
   }
 #endif
-
   RegisteredEventListener registered_listener;
   bool added = EnsureEventTargetData().event_listener_map.Add(
       event_type, listener, options, &registered_listener);

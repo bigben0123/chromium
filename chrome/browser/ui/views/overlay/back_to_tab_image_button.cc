@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/views/overlay/back_to_tab_image_button.h"
 
-#include "chrome/grit/generated_resources.h"
+#include "electron/grit/electron_resources.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/color_palette.h"

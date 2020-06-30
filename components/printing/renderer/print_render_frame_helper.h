@@ -193,7 +193,8 @@ class PrintRenderFrameHelper
   bool OnMessageReceived(const IPC::Message& message) override;
 
   // Message handlers ---------------------------------------------------------
-  void OnPrintPages();
+  void OnPrintPages(bool silent,
+                    const base::DictionaryValue& settings);
   void OnPrintForSystemDialog();
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   void OnInitiatePrintPreview(bool has_selection);
@@ -243,7 +244,9 @@ class PrintRenderFrameHelper
   // WARNING: |this| may be gone after this method returns.
   void Print(blink::WebLocalFrame* frame,
              const blink::WebNode& node,
-             PrintRequestType print_request_type);
+             PrintRequestType print_request_type,
+             bool silent,
+             const base::DictionaryValue& settings);
 
   // Notification when printing is done - signal tear-down/free resources.
   void DidFinishPrinting(PrintingResult result);
@@ -252,12 +255,14 @@ class PrintRenderFrameHelper
 
   // Initialize print page settings with default settings.
   // Used only for native printing workflow.
-  bool InitPrintSettings(bool fit_to_paper_size);
+  bool InitPrintSettings(bool fit_to_paper_size,
+                         const base::DictionaryValue& settings);
 
   // Calculate number of pages in source document.
   bool CalculateNumberOfPages(blink::WebLocalFrame* frame,
                               const blink::WebNode& node,
-                              int* number_of_pages);
+                              int* number_of_pages,
+                              const base::DictionaryValue& settings);
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   // Set options for print preset from source PDF document.

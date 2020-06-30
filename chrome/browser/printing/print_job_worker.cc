@@ -21,12 +21,12 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/printing/print_job.h"
-#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "electron/grit/electron_resources.h"
 #include "printing/print_job_constants.h"
 #include "printing/printed_document.h"
 #include "printing/printing_utils.h"
@@ -203,9 +203,14 @@ void PrintJobWorker::SetSettingsFromPOD(
 void PrintJobWorker::UpdatePrintSettings(base::Value new_settings,
                                          SettingsCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  PrintingContext::Result result =
-      printing_context_->UpdatePrintSettings(std::move(new_settings));
-  GetSettingsDone(std::move(callback), result);
+  // Reset settings from previous print job
+  printing_context_->ResetSettings();
+  PrintingContext::Result get_default_result = printing_context_->UseDefaultSettings();
+  if (get_default_result == PrintingContext::Result::OK) {
+    PrintingContext::Result update_result =
+            printing_context_->UpdatePrintSettings(std::move(new_settings));
+    GetSettingsDone(std::move(callback), update_result);
+  }
 }
 
 #if defined(OS_CHROMEOS)
@@ -221,6 +226,13 @@ void PrintJobWorker::UpdatePrintSettingsFromPOD(
 
 void PrintJobWorker::GetSettingsDone(SettingsCallback callback,
                                      PrintingContext::Result result) {
+  if (result == PrintingContext::CANCEL) {
+    print_job_->PostTask(
+      FROM_HERE,
+      base::BindOnce(&NotificationCallback, base::RetainedRef(print_job_),
+                    JobEventDetails::USER_INIT_CANCELED, 0,
+                    base::RetainedRef(document_)));
+  }
   std::move(callback).Run(printing_context_->TakeAndResetSettings(), result);
 }
 

@@ -55,6 +55,8 @@ const IDNTestCase kIdnCases[] = {
     {"www.google.com.", L"www.google.com.", true},
     {".", L".", true},
     {"", L"", true},
+    // Invalid IDN
+    {"xn--example-.com", L"xn--example-.com", false},
     // IDN
     // Hanzi (Traditional Chinese)
     {"xn--1lq90ic7f1rc.cn", L"\x5317\x4eac\x5927\x5b78.cn", true},

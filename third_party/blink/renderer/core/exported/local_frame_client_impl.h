@@ -115,7 +115,6 @@ class LocalFrameClientImpl final : public LocalFrameClient {
   void DispatchDidFinishDocumentLoad() override;
   void DispatchDidFinishLoad() override;
 #ifndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_DISPATCH  // zhibin:patch_to_content
-                                                      // ipc 
   void DispatchDidNotifyEventAdded(const std::string& node_name,
                                    const std::string& event_type) override;
  #endif

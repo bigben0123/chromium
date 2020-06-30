@@ -18,6 +18,10 @@ class DesktopMediaListObserver {
                              int new_index) = 0;
   virtual void OnSourceNameChanged(DesktopMediaList* list, int index) = 0;
   virtual void OnSourceThumbnailChanged(DesktopMediaList* list, int index) = 0;
+  virtual void OnSourceUnchanged(DesktopMediaList* list) = 0;
+  // Return value indicates whether the observer should continue listening
+  // for capture updates.
+  virtual bool ShouldScheduleNextRefresh(DesktopMediaList* list) = 0;
 
  protected:
   virtual ~DesktopMediaListObserver() {}

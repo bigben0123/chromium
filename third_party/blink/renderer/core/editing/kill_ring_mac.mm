@@ -27,6 +27,7 @@
 
 namespace blink {
 
+#ifndef MAS_BUILD
 extern "C" {
 
 // Kill ring calls. Would be better to use NSKillRing.h, but that's not
@@ -39,38 +40,53 @@ NSString* _NSYankFromKillRing();
 void _NSNewKillRingSequence();
 void _NSSetKillRingToYankedState();
 }
+#endif
 
 static void InitializeKillRingIfNeeded() {
   static bool initialized_kill_ring = false;
   if (!initialized_kill_ring) {
     initialized_kill_ring = true;
+#ifndef MAS_BUILD
     _NSInitializeKillRing();
+#endif
   }
 }
 
 void KillRing::Append(const String& string) {
   InitializeKillRingIfNeeded();
+#ifndef MAS_BUILD
   _NSAppendToKillRing(string);
+#endif
 }
 
 void KillRing::Prepend(const String& string) {
   InitializeKillRingIfNeeded();
+#ifndef MAS_BUILD
   _NSPrependToKillRing(string);
+#endif
 }
 
 String KillRing::Yank() {
   InitializeKillRingIfNeeded();
+#ifndef MAS_BUILD
   return _NSYankFromKillRing();
+#else
+  return "";
+#endif
 }
 
 void KillRing::StartNewSequence() {
   InitializeKillRingIfNeeded();
+#ifndef MAS_BUILD
   _NSNewKillRingSequence();
+#endif
 }
 
 void KillRing::SetToYankedState() {
   InitializeKillRingIfNeeded();
+#ifndef MAS_BUILD
   _NSSetKillRingToYankedState();
+#endif
 }
 
 }  // namespace blink

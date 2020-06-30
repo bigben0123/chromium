@@ -730,9 +730,9 @@ void ClipboardWin::WriteBitmapFromHandle(HBITMAP source_hbitmap,
 }
 
 void ClipboardWin::WriteToClipboard(unsigned int format, HANDLE handle) {
-  DCHECK(clipboard_owner_->hwnd() != nullptr);
+  // DCHECK(clipboard_owner_->hwnd() != nullptr);
   if (handle && !::SetClipboardData(format, handle)) {
-    DCHECK(ERROR_CLIPBOARD_NOT_OPEN != GetLastError());
+    // DCHECK(ERROR_CLIPBOARD_NOT_OPEN != GetLastError());
     FreeData(format, handle);
   }
 }

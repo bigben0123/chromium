@@ -121,6 +121,11 @@ class CONTENT_EXPORT SiteInstance : public base::RefCounted<SiteInstance> {
   //   corresponds to a site URL with the host "example.com".
   virtual const GURL& GetSiteURL() = 0;
 
+  // Create a SiteInstance for the given URL that shares the current
+  // BrowsingInstance.
+  virtual scoped_refptr<SiteInstance> CreateRelatedSiteInstance(
+    const GURL& url) = 0;
+
   // Gets a SiteInstance for the given URL that shares the current
   // BrowsingInstance, creating a new SiteInstance if necessary.  This ensures
   // that a BrowsingInstance only has one SiteInstance per site, so that pages

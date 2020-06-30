@@ -78,9 +78,12 @@ class BrowserPluginGuestDelegate;
 class InterstitialPage;
 class RenderFrameHost;
 class RenderViewHost;
+class RenderViewHostDelegateView;
 class RenderWidgetHost;
 class RenderWidgetHostView;
+class RenderWidgetHostViewBase;
 class WebContentsDelegate;
+class WebContentsView;
 struct CustomContextMenuContext;
 struct DropData;
 struct MHTMLGenerationParams;
@@ -215,6 +218,10 @@ class WebContents : public PageNavigator,
       // during a navigation.
       kInitializeAndWarmupRendererProcess,
     } desired_renderer_state;
+
+    // Optionally specify the view and delegate view.
+    content::WebContentsView* view = nullptr;
+    content::RenderViewHostDelegateView* delegate_view = nullptr;
 
     // Sandboxing flags set on the new WebContents.
     blink::WebSandboxFlags starting_sandbox_flags;

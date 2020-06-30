@@ -46,6 +46,8 @@ class VIEWS_EXPORT HWNDMessageHandlerDelegate {
   // True if the widget associated with this window has a non-client view.
   virtual bool HasNonClientView() const = 0;
 
+  virtual bool HasNativeFrame() const;
+
   // Returns who we want to be drawing the frame. Either the system (Windows)
   // will handle it or Chrome will custom draw it.
   virtual FrameMode GetFrameMode() const = 0;

@@ -44,6 +44,21 @@
 
 namespace content {
 
+bool ContentBrowserClient::CanUseCustomSiteInstance() {
+  return false;
+}
+
+ContentBrowserClient::SiteInstanceForNavigationType ContentBrowserClient::ShouldOverrideSiteInstanceForNavigation(
+    content::RenderFrameHost* current_rfh,
+    content::RenderFrameHost* speculative_rfh,
+    content::BrowserContext* browser_context,
+    const GURL& url,
+    bool has_navigation_started,
+    bool has_request_started,
+    content::SiteInstance** affinity_site_instance) const {
+  return SiteInstanceForNavigationType::ASK_CHROMIUM;
+}
+
 std::unique_ptr<BrowserMainParts> ContentBrowserClient::CreateBrowserMainParts(
     const MainFunctionParams& parameters) {
   return nullptr;
@@ -489,6 +504,8 @@ bool ContentBrowserClient::CanCreateWindow(
     const std::string& frame_name,
     WindowOpenDisposition disposition,
     const blink::mojom::WindowFeatures& features,
+    const std::vector<std::string>& additional_features,
+    const scoped_refptr<network::ResourceRequestBody>& body,
     bool user_gesture,
     bool opener_suppressed,
     bool* no_javascript_access) {

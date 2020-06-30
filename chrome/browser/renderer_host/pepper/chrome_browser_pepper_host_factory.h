@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_RENDERER_HOST_PEPPER_CHROME_BROWSER_PEPPER_HOST_FACTORY_H_
 #define CHROME_BROWSER_RENDERER_HOST_PEPPER_CHROME_BROWSER_PEPPER_HOST_FACTORY_H_
 
+#include "base/component_export.h"
 #include "base/macros.h"
 #include "ppapi/host/host_factory.h"
 
@@ -12,7 +13,8 @@ namespace content {
 class BrowserPpapiHost;
 }  // namespace content
 
-class ChromeBrowserPepperHostFactory : public ppapi::host::HostFactory {
+class COMPONENT_EXPORT(PEPPER_FLASH) ChromeBrowserPepperHostFactory
+    : public ppapi::host::HostFactory {
  public:
   // Non-owning pointer to the filter must outlive this class.
   explicit ChromeBrowserPepperHostFactory(content::BrowserPpapiHost* host);

@@ -178,6 +178,7 @@ class RenderFrameHost;
 class RenderProcessHost;
 class RenderViewHost;
 class ResourceContext;
+class ResourceRequestBody;
 class SerialDelegate;
 class SiteInstance;
 class SpeechRecognitionManagerDelegate;
@@ -204,7 +205,44 @@ struct WebPreferences;
 // the observer interfaces.)
 class CONTENT_EXPORT ContentBrowserClient {
  public:
+  // Identifies the type of site instance to use for a navigation.
+  enum SiteInstanceForNavigationType {
+    // Use either the candidate site instance or, if it doesn't exist
+    // a new, unrelated site instance for the navigation.
+    FORCE_CANDIDATE_OR_NEW = 0,
+
+    // Use the current site instance for the navigation.
+    FORCE_CURRENT,
+
+    // Use a new, unrelated site instance.
+    FORCE_NEW,
+
+    // Use the provided affinity site instance for the navigation.
+    FORCE_AFFINITY,
+
+    // Delegate the site instance creation to Chromium.
+    ASK_CHROMIUM
+  };
+
   virtual ~ContentBrowserClient() {}
+
+  // Electron: Allows disabling the below ShouldOverride patch
+  virtual bool CanUseCustomSiteInstance();
+
+  // Electron: Allows overriding the SiteInstance when navigating.
+  virtual SiteInstanceForNavigationType ShouldOverrideSiteInstanceForNavigation(
+      content::RenderFrameHost* current_rfh,
+      content::RenderFrameHost* speculative_rfh,
+      content::BrowserContext* browser_context,
+      const GURL& url,
+      bool has_navigation_started,
+      bool has_request_started,
+      content::SiteInstance** affinity_site_instance) const;
+
+  // Electron: Registers a pending site instance during a navigation.
+  virtual void RegisterPendingSiteInstance(
+      content::RenderFrameHost* rfh,
+      content::SiteInstance* pending_site_instance) {}
 
   // Allows the embedder to set any number of custom BrowserMainParts
   // implementations for the browser startup code. See comments in
@@ -771,6 +809,8 @@ class CONTENT_EXPORT ContentBrowserClient {
       const std::string& frame_name,
       WindowOpenDisposition disposition,
       const blink::mojom::WindowFeatures& features,
+      const std::vector<std::string>& additional_features,
+      const scoped_refptr<network::ResourceRequestBody>& body,
       bool user_gesture,
       bool opener_suppressed,
       bool* no_javascript_access);

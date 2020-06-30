@@ -130,6 +130,11 @@ void* ArrayBufferContents::AllocateMemoryOrNull(size_t size,
   return AllocateMemoryWithFlags(size, policy, base::PartitionAllocReturnNull);
 }
 
+void* ArrayBufferContents::Realloc(void* data, size_t size) {
+  return Partitions::ArrayBufferPartition()->Realloc(data, size,
+      WTF_HEAP_PROFILER_TYPE_NAME(ArrayBufferContents));
+}
+
 void ArrayBufferContents::FreeMemory(void* data) {
   Partitions::ArrayBufferPartition()->Free(data);
 }

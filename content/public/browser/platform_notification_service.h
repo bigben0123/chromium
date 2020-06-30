@@ -27,6 +27,8 @@ struct PlatformNotificationData;
 
 namespace content {
 
+class RenderProcessHost;
+
 // The service using which notifications can be presented to the user. There
 // should be a unique instance of the PlatformNotificationService depending
 // on the browsing context being used.
@@ -41,6 +43,7 @@ class CONTENT_EXPORT PlatformNotificationService {
   // Displays the notification described in |notification_data| to the user.
   // This method must be called on the UI thread.
   virtual void DisplayNotification(
+      RenderProcessHost* render_process_host,
       const std::string& notification_id,
       const GURL& origin,
       const blink::PlatformNotificationData& notification_data,

@@ -7,6 +7,8 @@
 
 namespace switches {
 
+const char kDisableColorCorrectRendering[] = "disable-color-correct-rendering";
+
 // Force disables font subpixel positioning. This affects the character glyph
 // sharpness, kerning, hinting and layout.
 const char kDisableFontSubpixelPositioning[] =

@@ -107,6 +107,9 @@ class CONTENT_EXPORT RenderViewHost : public IPC::Sender {
   // RenderViewHostDelegate.
   virtual void SyncRendererPrefs() = 0;
 
+  // Disable/Enable scheduler throttling.
+  virtual void SetSchedulerThrottling(bool allowed) = 0;
+
   // TODO(mustaq): Replace "Webkit" from the following three method names.
   //
   // Returns the current WebKit preferences. Note: WebPreferences is cached, so

@@ -24,9 +24,11 @@ namespace content {
 class BrowserPpapiHost;
 }
 
+#if 0
 namespace content_settings {
 class CookieSettings;
 }
+#endif
 
 class GURL;
 
@@ -50,15 +52,19 @@ class PepperFlashBrowserHost : public ppapi::host::ResourceHost {
       const base::Time& t);
   int32_t OnGetLocalDataRestrictions(ppapi::host::HostMessageContext* context);
 
+#if 0
   void GetLocalDataRestrictions(
       ppapi::host::ReplyMessageContext reply_context,
       const GURL& document_url,
       const GURL& plugin_url,
       scoped_refptr<content_settings::CookieSettings> cookie_settings);
+#endif
 
   device::mojom::WakeLock* GetWakeLock();
 
+#if 0
   content::BrowserPpapiHost* host_;
+#endif
   int render_process_id_;
 
   // Requests a wake lock to prevent going to sleep, and a timer to cancel it
@@ -66,8 +72,10 @@ class PepperFlashBrowserHost : public ppapi::host::ResourceHost {
   mojo::Remote<device::mojom::WakeLock> wake_lock_;
   base::DelayTimer delay_timer_;
 
+#if 0
   // For fetching the Flash LSO settings.
   scoped_refptr<content_settings::CookieSettings> cookie_settings_;
+#endif
   base::WeakPtrFactory<PepperFlashBrowserHost> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(PepperFlashBrowserHost);

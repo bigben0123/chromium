@@ -2141,6 +2141,12 @@ void WebContentsImpl::Init(const WebContents::CreateParams& params) {
   std::string unique_name;
   frame_tree_.root()->SetFrameName(params.main_frame_name, unique_name);
 
+  if (params.view && params.delegate_view) {
+    view_.reset(params.view);
+    render_view_host_delegate_view_ = params.delegate_view;
+  }
+
+  if (!view_) {
   WebContentsViewDelegate* delegate =
       GetContentClient()->browser()->GetWebContentsViewDelegate(this);
 
@@ -2156,6 +2162,7 @@ void WebContentsImpl::Init(const WebContents::CreateParams& params) {
           &render_view_host_delegate_view_);
     }
   }
+  }  //  !view_
   CHECK(render_view_host_delegate_view_);
   CHECK(view_.get());
 
@@ -3080,12 +3087,22 @@ void WebContentsImpl::ShowCreatedWidget(int process_id,
     return;
 
   // GetOutermostWebContents() returns |this| if there are no outer WebContents.
+  auto* outer_web_contents = GetOuterWebContents();
+  auto* outermost_web_contents = GetOutermostWebContents();
   RenderWidgetHostView* view =
-      GetOutermostWebContents()->GetRenderWidgetHostView();
+      outermost_web_contents->GetRenderWidgetHostView();
+  // It's not entirely obvious why we need the transform only in the case where
+  // the outer webcontents is not the same as the outermost webcontents. It may
+  // be due to the fact that oopifs that are children of the mainframe get
+  // correct values for their screenrects, but deeper cross-process frames do
+  // not. Hopefully this can be resolved with https://crbug.com/928825.
+  // Handling these cases separately is needed for http://crbug.com/1015298.
+  bool needs_transform = this != outermost_web_contents &&
+                         outermost_web_contents != outer_web_contents;
 
   gfx::Rect transformed_rect(initial_rect);
   RenderWidgetHostView* this_view = GetRenderWidgetHostView();
-  if (this_view != view) {
+  if (needs_transform) {
     // We need to transform the coordinates of initial_rect.
     gfx::Point origin =
         this_view->TransformPointToRootCoordSpace(initial_rect.origin());
@@ -6406,8 +6423,10 @@ void WebContentsImpl::FocusOwningWebContents(
   if (!GuestMode::IsCrossProcessFrameGuest(this) && browser_plugin_guest_)
     return;
 
+  RenderWidgetHostImpl* main_frame_widget_host =
+      GetMainFrame()->GetRenderWidgetHost();
   RenderWidgetHostImpl* focused_widget =
-      GetFocusedRenderWidgetHost(render_widget_host);
+      GetFocusedRenderWidgetHost(main_frame_widget_host);
 
   if (focused_widget != render_widget_host &&
       (!focused_widget ||

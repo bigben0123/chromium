@@ -39,6 +39,10 @@ class CONTENT_EXPORT ContentGpuClient {
  public:
   virtual ~ContentGpuClient() {}
 
+  // Allows the embedder to perform platform-specific initialization before
+  // creating the message loop.
+  virtual void PreCreateMessageLoop() {}
+
   // Initializes the registry. |registry| will be passed to a ConnectionFilter
   // (which lives on the IO thread). Unlike other childthreads, the client must
   // register additional interfaces on this registry rather than just creating

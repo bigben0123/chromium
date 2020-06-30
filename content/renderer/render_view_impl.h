@@ -450,6 +450,7 @@ class CONTENT_EXPORT RenderViewImpl : public blink::WebViewClient,
   void OnSetRendererPrefs(
       const blink::mojom::RendererPreferences& renderer_prefs);
   void OnSetWebUIProperty(const std::string& name, const std::string& value);
+  void OnSetSchedulerThrottling(bool allowed);
   void OnSuppressDialogsUntilSwapOut();
   void OnUpdateTargetURLAck();
   void OnUpdateWebPreferences(const WebPreferences& prefs);

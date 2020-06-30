@@ -39,12 +39,15 @@ DedicatedWorkerHost::DedicatedWorkerHost(
     int worker_process_id,
     int ancestor_render_frame_id,
     int creator_render_frame_id,
-    const url::Origin& origin,
+    const url::Origin& creator_origin,
     mojo::PendingReceiver<blink::mojom::DedicatedWorkerHost> host)
     : worker_process_id_(worker_process_id),
       ancestor_render_frame_id_(ancestor_render_frame_id),
       creator_render_frame_id_(creator_render_frame_id),
-      origin_(origin),
+      creator_origin_(creator_origin),
+      // TODO(https://crbug.com/1058759): Calculate the worker origin based on
+      // the worker script URL.
+      worker_origin_(creator_origin),
       host_receiver_(this, std::move(host)) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   RegisterMojoInterfaces();
@@ -66,7 +69,7 @@ void DedicatedWorkerHost::GetInterface(
     return;
 
   BindWorkerInterface(interface_name, std::move(interface_pipe),
-                      worker_process_host, origin_);
+                      worker_process_host, creator_origin_);
 }
 
 void DedicatedWorkerHost::BindBrowserInterfaceBrokerReceiver(
@@ -96,7 +99,6 @@ void DedicatedWorkerHost::LifecycleStateChanged(
 
 void DedicatedWorkerHost::StartScriptLoad(
     const GURL& script_url,
-    const url::Origin& request_initiator_origin,
     network::mojom::CredentialsMode credentials_mode,
     blink::mojom::FetchClientSettingsObjectPtr
         outside_fetch_client_settings_object,
@@ -205,7 +207,7 @@ void DedicatedWorkerHost::StartScriptLoad(
 
   WorkerScriptFetchInitiator::Start(
       worker_process_id_, script_url, creator_render_frame_host,
-      request_initiator_origin, network_isolation_key_, credentials_mode,
+      creator_origin_, network_isolation_key_, credentials_mode,
       std::move(outside_fetch_client_settings_object), ResourceType::kWorker,
       storage_partition_impl->GetServiceWorkerContext(),
       service_worker_handle_.get(),
@@ -323,7 +325,7 @@ DedicatedWorkerHost::CreateNetworkFactoryForSubresources(
   GetContentClient()->browser()->WillCreateURLLoaderFactory(
       storage_partition_impl->browser_context(),
       /*frame=*/nullptr, worker_process_id_,
-      ContentBrowserClient::URLLoaderFactoryType::kWorkerSubResource, origin_,
+      ContentBrowserClient::URLLoaderFactoryType::kWorkerSubResource, worker_origin_,
       &default_factory_receiver, &default_header_client,
       bypass_redirect_checks);
 
@@ -331,7 +333,7 @@ DedicatedWorkerHost::CreateNetworkFactoryForSubresources(
   // here.
 
   worker_process_host->CreateURLLoaderFactory(
-      origin_, ancestor_render_frame_host->cross_origin_embedder_policy(),
+      worker_origin_, ancestor_render_frame_host->cross_origin_embedder_policy(),
       /*preferences=*/nullptr, network_isolation_key_,
       std::move(default_header_client), std::move(default_factory_receiver));
 
@@ -366,7 +368,7 @@ void DedicatedWorkerHost::CreateWebSocketConnector(
   }
   mojo::MakeSelfOwnedReceiver(
       std::make_unique<WebSocketConnectorImpl>(
-          worker_process_id_, ancestor_render_frame_id_, origin_),
+          worker_process_id_, ancestor_render_frame_id_, worker_origin_),
       std::move(receiver));
 }
 
@@ -376,7 +378,7 @@ void DedicatedWorkerHost::CreateNestedDedicatedWorker(
   CreateDedicatedWorkerHostFactory(worker_process_id_,
                                    ancestor_render_frame_id_,
                                    /*creator_render_frame_id=*/MSG_ROUTING_NONE,
-                                   origin_, std::move(receiver));
+                                   worker_origin_, std::move(receiver));
 }
 
 void DedicatedWorkerHost::BindFileSystemManager(
@@ -385,7 +387,7 @@ void DedicatedWorkerHost::BindFileSystemManager(
   RenderProcessHost* worker_process_host = GetProcessHost();
   if (!worker_process_host)
     return;
-  worker_process_host->BindFileSystemManager(GetOrigin(), std::move(receiver));
+  worker_process_host->BindFileSystemManager(worker_origin_, std::move(receiver));
 }
 
 void DedicatedWorkerHost::CreateIdleManager(
@@ -426,17 +428,16 @@ class DedicatedWorkerHostFactoryImpl final
   DedicatedWorkerHostFactoryImpl(int creator_process_id,
                                  int ancestor_render_frame_id,
                                  int creator_render_frame_id,
-                                 const url::Origin& parent_context_origin)
+                                 const url::Origin& creator_origin)
       : creator_process_id_(creator_process_id),
         ancestor_render_frame_id_(ancestor_render_frame_id),
         creator_render_frame_id_(creator_render_frame_id),
-        parent_context_origin_(parent_context_origin) {
+        creator_origin_(creator_origin) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
   }
 
   // blink::mojom::DedicatedWorkerHostFactory:
   void CreateWorkerHost(
-      const url::Origin& origin,
       service_manager::mojom::InterfaceProviderRequest request,
       mojo::PendingReceiver<blink::mojom::BrowserInterfaceBroker>
           broker_receiver,
@@ -448,13 +449,9 @@ class DedicatedWorkerHostFactoryImpl final
       return;
     }
 
-    // TODO(crbug.com/729021): Once |parent_context_origin_| no longer races
-    // with the request for |DedicatedWorkerHostFactory|, enforce that
-    // the worker's origin either matches the origin of the creating context
-    // (Document or DedicatedWorkerGlobalScope), or is unique.
     auto host = std::make_unique<DedicatedWorkerHost>(
         creator_process_id_, ancestor_render_frame_id_,
-        creator_render_frame_id_, origin, std::move(host_receiver));
+        creator_render_frame_id_, creator_origin_, std::move(host_receiver));
     host->BindBrowserInterfaceBrokerReceiver(std::move(broker_receiver));
     mojo::MakeStrongBinding(std::move(host),
                             FilterRendererExposedInterfaces(
@@ -465,7 +462,6 @@ class DedicatedWorkerHostFactoryImpl final
   // PlzDedicatedWorker:
   void CreateWorkerHostAndStartScriptLoad(
       const GURL& script_url,
-      const url::Origin& request_initiator_origin,
       network::mojom::CredentialsMode credentials_mode,
       blink::mojom::FetchClientSettingsObjectPtr
           outside_fetch_client_settings_object,
@@ -482,14 +478,9 @@ class DedicatedWorkerHostFactoryImpl final
 
     // Create a worker host that will start a new dedicated worker in the
     // renderer process whose ID is |creator_process_id_|.
-    //
-    // TODO(crbug.com/729021): Once |parent_context_origin_| no longer races
-    // with the request for |DedicatedWorkerHostFactory|, enforce that
-    // the worker's origin either matches the origin of the creating context
-    // (Document or DedicatedWorkerGlobalScope), or is unique.
     auto host = std::make_unique<DedicatedWorkerHost>(
         creator_process_id_, ancestor_render_frame_id_,
-        creator_render_frame_id_, request_initiator_origin,
+        creator_render_frame_id_, creator_origin_,
         std::move(host_receiver));
     mojo::PendingRemote<blink::mojom::BrowserInterfaceBroker> broker;
     host->BindBrowserInterfaceBrokerReceiver(
@@ -507,7 +498,7 @@ class DedicatedWorkerHostFactoryImpl final
     remote_client->OnWorkerHostCreated(std::move(interface_provider),
                                        std::move(broker));
     host_raw->StartScriptLoad(
-        script_url, request_initiator_origin, credentials_mode,
+        script_url, credentials_mode,
         std::move(outside_fetch_client_settings_object),
         std::move(blob_url_token), std::move(remote_client));
   }
@@ -518,7 +509,7 @@ class DedicatedWorkerHostFactoryImpl final
   const int ancestor_render_frame_id_;
   const int creator_render_frame_id_;
 
-  const url::Origin parent_context_origin_;
+  const url::Origin creator_origin_;
 
   DISALLOW_COPY_AND_ASSIGN(DedicatedWorkerHostFactoryImpl);
 };
@@ -529,12 +520,12 @@ void CreateDedicatedWorkerHostFactory(
     int creator_process_id,
     int ancestor_render_frame_id,
     int creator_render_frame_id,
-    const url::Origin& origin,
+    const url::Origin& creator_origin,
     mojo::PendingReceiver<blink::mojom::DedicatedWorkerHostFactory> receiver) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   mojo::MakeSelfOwnedReceiver(std::make_unique<DedicatedWorkerHostFactoryImpl>(
                                   creator_process_id, ancestor_render_frame_id,
-                                  creator_render_frame_id, origin),
+                                  creator_render_frame_id, creator_origin),
                               std::move(receiver));
 }
 

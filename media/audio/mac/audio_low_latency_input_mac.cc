@@ -33,19 +33,23 @@
 
 namespace {
 extern "C" {
+#ifndef MAS_BUILD
 // See:
 // https://trac.webkit.org/browser/webkit/trunk/Source/WebCore/PAL/pal/spi/cf/CoreAudioSPI.h?rev=228264
 OSStatus AudioDeviceDuck(AudioDeviceID inDevice,
                          Float32 inDuckedLevel,
                          const AudioTimeStamp* __nullable inStartTime,
                          Float32 inRampDuration) __attribute__((weak_import));
+#endif
 }
 
 void UndoDucking(AudioDeviceID output_device_id) {
+#ifndef MAS_BUILD
   if (AudioDeviceDuck != nullptr) {
     // Ramp the volume back up over half a second.
     AudioDeviceDuck(output_device_id, 1.0, nullptr, 0.5);
   }
+#endif
 }
 
 }  // namespace

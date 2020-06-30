@@ -28,6 +28,7 @@ bool SandboxCompiler::InsertStringParam(const std::string& key,
 }
 
 bool SandboxCompiler::CompileAndApplyProfile(std::string* error) {
+#ifndef MAS_BUILD
   char* error_internal = nullptr;
   std::vector<const char*> params;
 
@@ -44,6 +45,7 @@ bool SandboxCompiler::CompileAndApplyProfile(std::string* error) {
     sandbox::Seatbelt::FreeError(error_internal);
     return false;
   }
+#endif
   return true;
 }
 

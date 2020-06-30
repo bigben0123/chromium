@@ -52,7 +52,8 @@ IsolateHolder::IsolateHolder(
     AccessMode access_mode,
     AllowAtomicsWaitMode atomics_wait_mode,
     IsolateType isolate_type,
-    IsolateCreationMode isolate_creation_mode)
+    IsolateCreationMode isolate_creation_mode,
+    v8::Isolate* isolate)
     : access_mode_(access_mode), isolate_type_(isolate_type) {
   DCHECK(task_runner);
   DCHECK(task_runner->BelongsToCurrentThread());
@@ -60,7 +61,11 @@ IsolateHolder::IsolateHolder(
   v8::ArrayBuffer::Allocator* allocator = g_array_buffer_allocator;
   CHECK(allocator) << "You need to invoke gin::IsolateHolder::Initialize first";
 
-  isolate_ = v8::Isolate::Allocate();
+  if (!isolate) {
+    isolate_ = v8::Isolate::Allocate();
+  } else {
+    isolate_ = isolate;
+  }
   isolate_data_.reset(
       new PerIsolateData(isolate_, allocator, access_mode_, task_runner));
   if (isolate_creation_mode == IsolateCreationMode::kCreateSnapshot) {
@@ -98,9 +103,10 @@ IsolateHolder::~IsolateHolder() {
 // static
 void IsolateHolder::Initialize(ScriptMode mode,
                                v8::ArrayBuffer::Allocator* allocator,
-                               const intptr_t* reference_table) {
+                               const intptr_t* reference_table,
+                               bool create_v8_platform) {
   CHECK(allocator);
-  V8Initializer::Initialize(mode);
+  V8Initializer::Initialize(mode, create_v8_platform);
   g_array_buffer_allocator = allocator;
   g_reference_table = reference_table;
 }

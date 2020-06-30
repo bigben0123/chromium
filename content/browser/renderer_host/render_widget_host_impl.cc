@@ -676,6 +676,9 @@ void RenderWidgetHostImpl::WasHidden() {
   if (is_hidden_)
     return;
 
+  if (disable_hidden_)
+    return;
+
   RejectMouseLockOrUnlockIfNecessary();
 
   TRACE_EVENT0("renderer_host", "RenderWidgetHostImpl::WasHidden");

@@ -647,6 +647,10 @@ class ArrayBufferAllocator : public v8::ArrayBuffer::Allocator {
         size, WTF::ArrayBufferContents::kDontInitialize);
   }
 
+  void* Realloc(void* data, size_t size) override {
+    return WTF::ArrayBufferContents::Realloc(data, size);
+  }
+
   void Free(void* data, size_t size) override {
     WTF::ArrayBufferContents::FreeMemory(data);
   }

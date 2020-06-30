@@ -8,15 +8,19 @@
 #include <utility>
 
 #include "build/build_config.h"
+#if 0
 #include "chrome/browser/platform_util.h"
+#endif
 #include "ui/gfx/geometry/vector2d.h"
 
 #if defined(OS_ANDROID)
 #include "ui/android/view_android.h"
 #include "ui/android/window_android.h"
 #else  // defined(OS_ANDROID)
+#if 0
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#endif
 #include "ui/views/widget/widget.h"
 #endif  // !defined(OS_ANDROID)
 
@@ -176,14 +180,14 @@ gfx::Rect PopupViewCommon::GetWindowBounds(gfx::NativeView container_view) {
       views::Widget::GetTopLevelWidgetForNativeView(container_view);
   if (widget)
     return widget->GetWindowBoundsInScreen();
-
+#if 0
   // If the widget is null, try to get these bounds from a browser window. This
   // is common on Mac when the window is drawn using Cocoa.
   gfx::NativeWindow window = platform_util::GetTopLevel(container_view);
   Browser* browser = chrome::FindBrowserWithWindow(window);
   if (browser)
     return browser->window()->GetBounds();
-
+#endif
   // If the browser is null, simply return an empty rect. The most common reason
   // to end up here is that the NativeView has been destroyed externally, which
   // can happen at any time. This happens fairly commonly on Windows (e.g., at

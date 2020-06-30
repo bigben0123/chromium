@@ -204,12 +204,14 @@ enum LoadV8FileResult {
 }  // namespace
 
 // static
-void V8Initializer::Initialize(IsolateHolder::ScriptMode mode) {
+void V8Initializer::Initialize(IsolateHolder::ScriptMode mode,
+                               bool create_v8_platform) {
   static bool v8_is_initialized = false;
   if (v8_is_initialized)
     return;
 
-  v8::V8::InitializePlatform(V8Platform::Get());
+  if (create_v8_platform)
+    v8::V8::InitializePlatform(V8Platform::Get());
 
   if (!base::FeatureList::IsEnabled(features::kV8OptimizeJavascript)) {
     // We avoid explicitly passing --opt if kV8OptimizeJavascript is enabled

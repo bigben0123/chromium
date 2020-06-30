@@ -213,6 +213,7 @@ void TtsControllerDelegateImpl::UpdateUtteranceDefaultsFromPrefs(
 const PrefService* TtsControllerDelegateImpl::GetPrefService(
     content::TtsUtterance* utterance) {
   const PrefService* prefs = nullptr;
+#if 0
   // The utterance->GetBrowserContext() is null in tests.
   if (utterance->GetBrowserContext()) {
     const Profile* profile =
@@ -220,6 +221,7 @@ const PrefService* TtsControllerDelegateImpl::GetPrefService(
     if (profile)
       prefs = profile->GetPrefs();
   }
+#endif
   return prefs;
 }
 

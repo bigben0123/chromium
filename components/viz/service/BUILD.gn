@@ -118,6 +118,8 @@ viz_component("service") {
     "display_embedder/output_surface_provider_impl.h",
     "display_embedder/server_shared_bitmap_manager.cc",
     "display_embedder/server_shared_bitmap_manager.h",
+    "display_embedder/software_output_device_proxy.cc",
+    "display_embedder/software_output_device_proxy.h",
     "display_embedder/software_output_surface.cc",
     "display_embedder/software_output_surface.h",
     "display_embedder/viz_process_context_provider.cc",

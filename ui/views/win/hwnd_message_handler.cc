@@ -347,6 +347,10 @@ constexpr int kSynthesizedMouseMessagesTimeDifference = 500;
 
 }  // namespace
 
+bool HWNDMessageHandlerDelegate::HasNativeFrame() const {
+  return false;
+}
+
 // A scoping class that prevents a window from being able to redraw in response
 // to invalidations that may occur within it for the lifetime of the object.
 //
@@ -398,6 +402,7 @@ class HWNDMessageHandler::ScopedRedrawLock {
         cancel_unlock_(false),
         should_lock_(owner_->IsVisible() && !owner->HasChildRenderingWindow() &&
                      ::IsWindow(hwnd_) &&
+                     !owner_->HasNativeFrame() &&
                      (!(GetWindowLong(hwnd_, GWL_STYLE) & WS_CAPTION) ||
                       !ui::win::IsAeroGlassEnabled())) {
     if (should_lock_)
@@ -1006,6 +1011,10 @@ bool HWNDMessageHandler::HasChildRenderingWindow() {
   // software rendering.
   return gfx::RenderingWindowManager::GetInstance()->HasValidChildWindow(
       hwnd());
+}
+
+bool HWNDMessageHandler::HasNativeFrame() {
+  return delegate_->HasNativeFrame();
 }
 
 std::unique_ptr<aura::ScopedEnableUnadjustedMouseEvents>
@@ -2041,6 +2050,15 @@ LRESULT HWNDMessageHandler::OnPointerEvent(UINT message,
   if (!get_pointer_type || !get_pointer_type(pointer_id, &pointer_type)) {
     SetMsgHandled(FALSE);
     return -1;
+  }
+
+  // Pen may also send non client pointer messages, treat them as normal
+  // touch events so they can be properly handled.
+  if (pointer_type == PT_PEN &&
+      (message == WM_NCPOINTERDOWN ||
+       message == WM_NCPOINTERUP ||
+       message == WM_NCPOINTERUPDATE)) {
+    pointer_type = PT_TOUCH;
   }
 
   switch (pointer_type) {

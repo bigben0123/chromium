@@ -45,6 +45,11 @@ def ChmodGnFile(path_to_exe):
            stat.S_IROTH | stat.S_IXOTH)
 
 def main():
+  # NB. on Electron's CI we check out the macOS source on Linux. Bypass this
+  # check as it's not relevant on Electron CI and it gets confused.
+  if os.environ.get('CI') is not None:
+    return 0
+
   parser = argparse.ArgumentParser()
   parser.add_argument('version',
           help='CIPD "git_revision:XYZ" label for GN to sync to')

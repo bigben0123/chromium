@@ -477,7 +477,9 @@ bool OutOfProcessInstance::Init(uint32_t argc,
   std::string document_url = document_url_var.AsString();
   base::StringPiece document_url_piece(document_url);
   is_print_preview_ = IsPrintPreviewUrl(document_url_piece);
-  if (!document_url_piece.starts_with(kChromeExtension) && !is_print_preview_)
+  if (!document_url_piece.starts_with(kChromeExtension) &&
+      !document_url_piece.starts_with("chrome://pdf-viewer") &&
+      !is_print_preview_)
     return false;
 
   // Check if the plugin is full frame. This is passed in from JS.

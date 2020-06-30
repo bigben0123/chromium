@@ -44,6 +44,7 @@ class NativeWidgetBridgeOwner : public NativeWidgetNSWindowHostHelper {
 
   // NativeWidgetNSWindowHostHelper:
   id GetNativeViewAccessible() override {
+#ifndef MAS_BUILD
     if (!remote_accessibility_element_) {
       int64_t browser_pid = 0;
       std::vector<uint8_t> element_token;
@@ -54,6 +55,9 @@ class NativeWidgetBridgeOwner : public NativeWidgetNSWindowHostHelper {
           ui::RemoteAccessibility::GetRemoteElementFromToken(element_token);
     }
     return remote_accessibility_element_.get();
+#else
+    return nil;
+#endif
   }
   void DispatchKeyEvent(ui::KeyEvent* event) override {
     bool event_handled = false;
@@ -91,8 +95,10 @@ class NativeWidgetBridgeOwner : public NativeWidgetNSWindowHostHelper {
   mojom::TextInputHostAssociatedPtr text_input_host_ptr_;
 
   std::unique_ptr<NativeWidgetNSWindowBridge> bridge_;
+#ifndef MAS_BUILD
   base::scoped_nsobject<NSAccessibilityRemoteUIElement>
       remote_accessibility_element_;
+#endif
 };
 
 }  // namespace

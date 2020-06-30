@@ -347,8 +347,8 @@ v8::Local<v8::Promise> WritableStreamDefaultWriter::CloseWithErrorPropagation(
   }
 
   //  6. Assert: state is "writable" or "erroring".
-  DCHECK(state == WritableStreamNative::kWritable ||
-         state == WritableStreamNative::kErroring);
+  CHECK(state == WritableStreamNative::kWritable ||
+        state == WritableStreamNative::kErroring);
 
   //  7. Return ! WritableStreamDefaultWriterClose(writer).
   return Close(script_state, writer);
@@ -539,11 +539,11 @@ v8::Local<v8::Promise> WritableStreamDefaultWriter::Close(
   }
 
   //  5. Assert: state is "writable" or "erroring".
-  DCHECK(state == WritableStreamNative::kWritable ||
-         state == WritableStreamNative::kErroring);
+  CHECK(state == WritableStreamNative::kWritable ||
+        state == WritableStreamNative::kErroring);
 
   //  6. Assert: ! WritableStreamCloseQueuedOrInFlight(stream) is false.
-  DCHECK(!WritableStreamNative::CloseQueuedOrInFlight(stream));
+  CHECK(!WritableStreamNative::CloseQueuedOrInFlight(stream));
 
   //  7. Let promise be a new promise.
   auto* promise = MakeGarbageCollected<StreamPromiseResolver>(script_state);

@@ -21,6 +21,7 @@ typedef std::map<base::string16, base::NullableString16> DOMStorageValuesMap;
 
 // The quota for each storage area.
 // This value is enforced in renderer processes and the browser process.
+// However, Electron's dom_storage_limits.patch removes the code that checks this limit.
 const size_t kPerStorageAreaQuota = 10 * 1024 * 1024;
 
 // In the browser process we allow some overage to

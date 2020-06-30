@@ -15,7 +15,9 @@
 #import "ui/base/cocoa/window_size_constants.h"
 
 @interface NSWindow (Private)
+#ifndef MAS_BUILD
 + (Class)frameViewClassForStyleMask:(NSWindowStyleMask)windowStyle;
+#endif
 - (BOOL)hasKeyAppearance;
 - (long long)_resizeDirectionForMouseLocation:(CGPoint)location;
 
@@ -56,6 +58,8 @@
 }
 @end
 
+#ifndef MAS_BUILD
+
 @implementation NativeWidgetMacNSWindowTitledFrame
 - (void)mouseDown:(NSEvent*)event {
   if (self.window.isMovable)
@@ -76,6 +80,8 @@
   return NO;
 }
 @end
+
+#endif  // MAS_BUILD
 
 @implementation NativeWidgetMacNSWindow {
  @private
@@ -154,6 +160,8 @@
 
 // NSWindow overrides.
 
+#ifndef MAS_BUILD
+
 + (Class)frameViewClassForStyleMask:(NSWindowStyleMask)windowStyle {
   if (windowStyle & NSWindowStyleMaskTitled) {
     if (Class customFrame = [NativeWidgetMacNSWindowTitledFrame class])
@@ -164,6 +172,8 @@
   }
   return [super frameViewClassForStyleMask:windowStyle];
 }
+
+#endif
 
 - (BOOL)_isTitleHidden {
   bool shouldShowWindowTitle = YES;

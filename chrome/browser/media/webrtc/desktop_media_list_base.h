@@ -24,12 +24,14 @@ class DesktopMediaListBase : public DesktopMediaList {
   ~DesktopMediaListBase() override;
 
   // DesktopMediaList interface.
+  void AddObserver(DesktopMediaListObserver* observer) override;
   void SetUpdatePeriod(base::TimeDelta period) override;
   void SetThumbnailSize(const gfx::Size& thumbnail_size) override;
   void SetViewDialogWindowId(content::DesktopMediaID dialog_id) override;
-  void StartUpdating(DesktopMediaListObserver* observer) override;
+  void StartUpdating() override;
   int GetSourceCount() const override;
   const Source& GetSource(int index) const override;
+  const std::vector<Source>& GetSources() const override;
   content::DesktopMediaID::Type GetMediaListType() const override;
 
   static uint32_t GetImageHash(const gfx::Image& image);

@@ -13,6 +13,7 @@
 #include "components/viz/common/features.h"
 #include "components/viz/common/switches.h"
 #include "ui/base/ui_base_switches.h"
+#include "ui/gfx/switches.h"
 
 #if defined(OS_MACOSX)
 #include "ui/base/cocoa/remote_layer_api.h"
@@ -49,6 +50,8 @@ bool GetSwitchValueAsInt(const base::CommandLine* command_line,
 RendererSettings CreateRendererSettings() {
   RendererSettings renderer_settings;
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  renderer_settings.enable_color_correct_rendering =
+      !command_line->HasSwitch(switches::kDisableColorCorrectRendering);
   renderer_settings.partial_swap_enabled =
       !command_line->HasSwitch(switches::kUIDisablePartialSwap);
 #if defined(OS_MACOSX)

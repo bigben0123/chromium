@@ -1505,7 +1505,7 @@ void BrowserMainLoop::MainMessageLoopRun() {
   NOTREACHED();
 #else
   base::RunLoop run_loop;
-  parts_->PreDefaultMainMessageLoopRun(run_loop.QuitClosure());
+  parts_->PreDefaultMainMessageLoopRun(run_loop.QuitWhenIdleClosure());
   run_loop.Run();
 #endif
 }

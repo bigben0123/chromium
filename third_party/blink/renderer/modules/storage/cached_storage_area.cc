@@ -107,11 +107,13 @@ bool CachedStorageArea::SetItem(const String& key,
                                 Source* source) {
   DCHECK(areas_->Contains(source));
 
+#if 0
   // A quick check to reject obviously overbudget items to avoid priming the
   // cache.
   if ((key.length() + value.length()) * 2 >
       mojom::blink::StorageArea::kPerStorageAreaQuota)
     return false;
+#endif
 
   EnsureLoaded();
   String old_value;

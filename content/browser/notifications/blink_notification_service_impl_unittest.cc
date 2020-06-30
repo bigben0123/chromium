@@ -138,7 +138,7 @@ class BlinkNotificationServiceImplTest : public ::testing::Test {
 
     notification_service_ = std::make_unique<BlinkNotificationServiceImpl>(
         notification_context_.get(), &browser_context_,
-        embedded_worker_helper_->context_wrapper(),
+        embedded_worker_helper_->context_wrapper(), nullptr,
         url::Origin::Create(GURL(kTestOrigin)),
         notification_service_remote_.BindNewPipeAndPassReceiver());
 

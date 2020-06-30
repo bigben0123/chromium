@@ -196,7 +196,7 @@ void UtilityServiceFactory::RunService(
 std::unique_ptr<service_manager::Service>
 UtilityServiceFactory::CreateAudioService(
     mojo::PendingReceiver<service_manager::mojom::Service> receiver) {
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(MAS_BUILD)
   // Don't connect to launch services when running sandboxed
   // (https://crbug.com/874785).
   if (base::FeatureList::IsEnabled(
