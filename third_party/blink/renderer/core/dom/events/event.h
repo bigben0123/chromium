@@ -270,8 +270,13 @@ class CORE_EXPORT Event : public ScriptWrappable {
     return true;
   }
 
+#ifndef CONFIG_NO_FAKE_IS_TRUST  // zhibin: always be true
+  bool isTrusted() const { return true; }
+  void SetTrusted(bool value) { is_trusted_ = true; }
+#else
   bool isTrusted() const { return is_trusted_; }
   void SetTrusted(bool value) { is_trusted_ = value; }
+#endif
 
   void SetComposed(bool composed) {
     DCHECK(!IsBeingDispatched());
