@@ -540,12 +540,23 @@ bool EventTarget::AddEventListenerInternal(
   {
     LocalDOMWindow* executing_window = ExecutingWindow();
     LocalFrame* frame = executing_window->GetFrame();
-    String node_name = ToNode() ? ToNode()->nodeName() : InterfaceName();
-//    node_name=this.HasId() ? this.IdForStyleResolution()
-//                 : this.HasClass() ? "ClassNames()" : node_name;
-    frame->Client()->DispatchDidNotifyEventAdded(
+    Node* node = ToNode();
+
+//  String node_name = node ? node->nodeName() : InterfaceName();    
+
+    if (node && node->IsElementNode()) {
+      Element* ele = static_cast<Element*>(node);
+      AtomicString old_id = ele->IdForStyleResolution();
+      frame->Client()->DispatchDidNotifyEventAdded(
+          old_id.GetString().Utf8(), event_type.GetString().Utf8());
+    }
+    /*  don't send built-in addEventListener  
+    else{
+      frame->Client()->DispatchDidNotifyEventAdded(
         node_name.Utf8(),
         event_type.GetString().Utf8());
+    }
+    */  
   }
 #endif
   RegisteredEventListener registered_listener;
