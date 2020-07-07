@@ -535,30 +535,47 @@ bool EventTarget::AddEventListenerInternal(
                               argv.data());
   }
 
-#ifndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_DISPATCH  // zhibin:patch_to_content
-                                                      // start call
+#if 0//ndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_DISPATCH  // zhibin:patch_to_content
   {
     LocalDOMWindow* executing_window = ExecutingWindow();
-    LocalFrame* frame = executing_window->GetFrame();
     Node* node = ToNode();
 
 //  String node_name = node ? node->nodeName() : InterfaceName();    
 
     if (node && node->IsElementNode()) {
-      Element* ele = static_cast<Element*>(node);
+      auto* ele = DynamicTo<Element>(node);
+
       AtomicString old_id = ele->IdForStyleResolution();
+      LocalFrame* frame = executing_window->GetFrame();
       frame->Client()->DispatchDidNotifyEventAdded(
           old_id.GetString().Utf8(), event_type.GetString().Utf8());
+    
     }
     /*  don't send built-in addEventListener  
     else{
       frame->Client()->DispatchDidNotifyEventAdded(
         node_name.Utf8(),
-        event_type.GetString().Utf8());
+        event_type.GetString().Utf8());     
     }
-    */  
+    */
   }
 #endif
+
+ #ifndef CUST_NO_EVENT_NOTIFY_ADD_EVENT_LISTENER  // zhibin:call js
+  {
+    LocalDOMWindow* executing_window = ExecutingWindow();
+    Node* node = ToNode();
+    if (node && node->IsElementNode()) {
+      //auto* ele = DynamicTo<Element>(node);
+
+      /* call to js */
+      Event* ce = Event::CreateBubble(event_interface_names::kCustomEvent);
+      ce->SetType("cust_event_notify_add_event_listener");
+      executing_window->DispatchEvent(*ce, this);
+    }
+  }
+#endif
+
   RegisteredEventListener registered_listener;
   bool added = EnsureEventTargetData().event_listener_map.Add(
       event_type, listener, options, &registered_listener);
@@ -845,7 +862,7 @@ DispatchEventResult EventTarget::FireEventListeners(Event& event) {
 #if DCHECK_IS_ON()
   DCHECK(!EventDispatchForbiddenScope::IsEventDispatchForbidden());
 #endif
-  DCHECK(event.WasInitialized());
+ // DCHECK(event.WasInitialized());
 
   EventTargetData* d = GetEventTargetData();
   if (!d)
