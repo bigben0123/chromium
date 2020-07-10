@@ -2297,7 +2297,13 @@ void LocalFrameView::UpdateLifecyclePhasesInternal(
   need_paint_phase_after_throttling_ = false;
 
   DCHECK_EQ(target_state, DocumentLifecycle::kPaintClean);
+
+#ifndef CUST_CONFIG_PAINT  // zhibin:paint
+
+#else
   RunPaintLifecyclePhase();
+#endif
+
   DCHECK(ShouldThrottleRendering() ||
          (frame_->GetDocument()->Printing() &&
           !RuntimeEnabledFeatures::PrintBrowserEnabled()) ||

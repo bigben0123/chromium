@@ -786,6 +786,10 @@ void SingleThreadProxy::BeginMainFrame(
     const viz::BeginFrameArgs& begin_frame_args) {
   // This checker assumes NotifyReadyToCommit in this stack causes a synchronous
   // commit.
+#ifndef CUST_CONFIG_PAINT  // zhibin:paint
+  return;
+#endif
+
   ScopedAbortRemainingSwapPromises swap_promise_checker(
       layer_tree_host_->GetSwapPromiseManager());
 

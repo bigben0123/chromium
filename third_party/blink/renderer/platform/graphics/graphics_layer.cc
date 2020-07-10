@@ -231,6 +231,10 @@ IntRect GraphicsLayer::InterestRect() {
 }
 
 void GraphicsLayer::PaintRecursively() {
+#ifndef CUST_CONFIG_PAINT  // zhibin:paint
+  return;
+#endif
+
   Vector<GraphicsLayer*> repainted_layers;
   PaintRecursivelyInternal(repainted_layers);
 

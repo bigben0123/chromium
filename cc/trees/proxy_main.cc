@@ -282,6 +282,9 @@ void ProxyMain::BeginMainFrame(
   // to corresponding  cc display list. An exception is for painted scrollbars,
   // which paint eagerly during layer update.
   bool updated = should_update_layers && layer_tree_host_->UpdateLayers();
+#ifndef CUST_CONFIG_PAINT  // zhibin:paint
+  updated = false;
+#endif
 
   // If updating the layers resulted in a content update, we need a commit.
   if (updated)
