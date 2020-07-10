@@ -2741,6 +2741,14 @@ void Node::HandleLocalEvents(Event& event) {
 }
 
 void Node::DispatchScopedEvent(Event& event) {
+#ifndef CUST_NO_EVENT_NOTIFY_VALUE_CHANGED  // zhibin:call js
+  if (event.type() == "change") {
+    LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
+    Event* ce = Event::CreateBubble(event_interface_names::kCustomEvent);
+    ce->SetType("cust_event_notify_value_changed");
+    executing_window->DispatchEvent(*ce, this);
+  }
+#endif 
   event.SetTrusted(true);
   EventDispatcher::DispatchScopedEvent(*this, event);
 }
