@@ -22,6 +22,10 @@
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/modules/event_target_modules_names.h"
+#include "third_party/blink/renderer/core/event_interface_names.h"
 
 // There are 2 clipboard permissions defined in the spec:
 // * clipboard-read
@@ -107,6 +111,18 @@ void ClipboardPromise::StartWriteRepresentation() {
   if (clipboard_representation_index_ == clipboard_item_data_.size()) {
     SystemClipboard::GetInstance().CommitWrite();
     script_promise_resolver_->Resolve();
+#ifndef CUST_NO_EVENT_CLIPBOARD_ON_COPY  // zhibin:clipboard
+    {
+      ExecutionContext* context = ExecutionContext::From(script_state_);
+      Document* doc = To<Document>(context);
+      LocalDOMWindow* executing_window = doc->ExecutingWindow();
+
+      Event* ce = Event::CreateBubble(event_type_names::kCopy);
+      //(event_interface_names::kCustomEvent);
+      // ce->SetType("copy");
+      executing_window->DispatchEvent(*ce, NULL);
+    }
+#endif
     return;
   }
   const String& type =
@@ -249,15 +265,33 @@ void ClipboardPromise::HandleWriteWithPermission(PermissionStatus status) {
 
 void ClipboardPromise::HandleWriteTextWithPermission(PermissionStatus status) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+#ifndef CUST_NO_EVENT_CLIPBOARD_ON_COPY  // zhibin:clipboard
+
+#else
   if (status != PermissionStatus::GRANTED) {
     script_promise_resolver_->Reject(MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kNotAllowedError, "Write permission denied."));
     return;
   }
+#endif
 
   SystemClipboard::GetInstance().WritePlainText(plain_text_);
   SystemClipboard::GetInstance().CommitWrite();
   script_promise_resolver_->Resolve();
+
+#ifndef CUST_NO_EVENT_CLIPBOARD_ON_COPY  // zhibin:clipboard
+  {
+    ExecutionContext* context = ExecutionContext::From(script_state_);
+    Document* doc = To<Document>(context);
+    LocalDOMWindow* executing_window = doc->ExecutingWindow();
+
+    Event* ce = Event::CreateBubble(event_type_names::kCopy);
+    //(event_interface_names::kCustomEvent);
+    // ce->SetType("copy");
+    executing_window->DispatchEvent(*ce, NULL);
+  }
+#endif
 }
 
 PermissionService* ClipboardPromise::GetPermissionService() {
@@ -300,6 +334,23 @@ void ClipboardPromise::CheckWritePermission(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(script_promise_resolver_);
 
+#ifndef CUST_NO_EVENT_CLIPBOARD_ON_COPY  // zhibin:clipboard
+  if (!GetPermissionService()) {
+    script_promise_resolver_->Reject(MakeGarbageCollected<DOMException>(
+        DOMExceptionCode::kNotAllowedError,
+        "Permission Service could not connect."));
+    return;
+  }
+
+  // Check current permission (but do not query the user).
+  // See crbug.com/795929 for moving this check into the Browser process.
+  permission_service_->HasPermission(
+      CreateClipboardPermissionDescriptor(
+          mojom::blink::PermissionName::CLIPBOARD_WRITE, false),
+      std::move(callback));
+
+  #else
+
   if (!IsFocusedDocument(ExecutionContext::From(script_state_))) {
     script_promise_resolver_->Reject(MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kNotAllowedError, "Document is not focused."));
@@ -318,6 +369,7 @@ void ClipboardPromise::CheckWritePermission(
       CreateClipboardPermissionDescriptor(
           mojom::blink::PermissionName::CLIPBOARD_WRITE, false),
       std::move(callback));
+  #endif
 }
 
 scoped_refptr<base::SingleThreadTaskRunner> ClipboardPromise::GetTaskRunner() {
