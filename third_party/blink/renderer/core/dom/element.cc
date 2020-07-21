@@ -2081,6 +2081,18 @@ void Element::AttributeChanged(const AttributeModificationParams& params) {
       root->DidChangeHostChildSlotName(params.old_value, params.new_value);
   }
 
+#ifndef CUST_NO_EVENT_NOTIFY_ATTR_CHANGED  // zhibin:attribute change
+  if (params.old_value != params.new_value 
+//      && params.old_value && IsHTMLImageElement(*this) && name == html_names::kSrcAttr
+      )
+  {
+    LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
+    Event* ce = Event::CreateBubble(event_interface_names::kCustomEvent);
+    ce->SetType("cust_event_notify_attr_changed");
+    executing_window->DispatchEvent(*ce, this);
+  }
+#endif 
+
   ParseAttribute(params);
 
   GetDocument().IncDOMTreeVersion();
