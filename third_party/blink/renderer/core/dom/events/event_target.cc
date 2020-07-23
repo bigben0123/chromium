@@ -535,7 +535,26 @@ bool EventTarget::AddEventListenerInternal(
                               argv.data());
   }
 
-#if 0//ndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_DISPATCH  // zhibin:patch_to_content
+  RegisteredEventListener registered_listener;
+  bool added = EnsureEventTargetData().event_listener_map.Add(
+      event_type, listener, options, &registered_listener);
+  if (added) {
+    AddedEventListener(event_type, registered_listener);
+    if (IsA<JSBasedEventListener>(listener) &&
+        IsInstrumentedForAsyncStack(event_type)) {
+      probe::AsyncTaskScheduled(GetExecutionContext(), event_type,
+                                listener->async_task_id());
+    }
+#ifndef CUST_NO_EVENT_NOTIFY_ADD_EVENT_LISTENER  // zhibin:notify addEventListener
+    {
+      LocalDOMWindow* executing_window = ExecutingWindow();
+      MutationEvent* ce = MutationEvent::Create(
+          "cust_event_notify_add_event_listener", Event::Bubbles::kYes,
+          ToNode(), "", "", event_type.GetString());
+      executing_window->DispatchEvent(*ce, this);
+    }
+
+#if 0  // ndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_DISPATCH  //zhibin:patch_to_content
   {
     LocalDOMWindow* executing_window = ExecutingWindow();
     Node* node = ToNode();
@@ -561,31 +580,7 @@ bool EventTarget::AddEventListenerInternal(
   }
 #endif
 
- #ifndef CUST_NO_EVENT_NOTIFY_ADD_EVENT_LISTENER  // zhibin:call js
-  {
-    LocalDOMWindow* executing_window = ExecutingWindow();
-    Node* node = ToNode();
-    if (node && node->IsElementNode()) {
-      //auto* ele = DynamicTo<Element>(node);
-
-      /* call to js */
-      Event* ce = Event::CreateBubble(event_interface_names::kCustomEvent);
-      ce->SetType("cust_event_notify_add_event_listener");
-      executing_window->DispatchEvent(*ce, this);
-    }
-  }
 #endif
-
-  RegisteredEventListener registered_listener;
-  bool added = EnsureEventTargetData().event_listener_map.Add(
-      event_type, listener, options, &registered_listener);
-  if (added) {
-    AddedEventListener(event_type, registered_listener);
-    if (IsA<JSBasedEventListener>(listener) &&
-        IsInstrumentedForAsyncStack(event_type)) {
-      probe::AsyncTaskScheduled(GetExecutionContext(), event_type,
-                                listener->async_task_id());
-    }
   }
   return added;
 }
@@ -699,6 +694,16 @@ bool EventTarget::RemoveEventListenerInternal(
     }
   }
   RemovedEventListener(event_type, registered_listener);
+
+#ifndef CUST_NO_EVENT_NOTIFY_REMOVE_EVENT_LISTENER  // zhibin:notify removeEventListener
+  {
+    LocalDOMWindow* executing_window = ExecutingWindow();
+    MutationEvent* ce = MutationEvent::Create(
+        "cust_event_notify_remove_event_listener", Event::Bubbles::kYes, ToNode(),
+        "", "", event_type.GetString());
+    executing_window->DispatchEvent(*ce, this);
+  }
+#endif
   return true;
 }
 
@@ -862,7 +867,7 @@ DispatchEventResult EventTarget::FireEventListeners(Event& event) {
 #if DCHECK_IS_ON()
   DCHECK(!EventDispatchForbiddenScope::IsEventDispatchForbidden());
 #endif
- // DCHECK(event.WasInitialized());
+  DCHECK(event.WasInitialized());
 
   EventTargetData* d = GetEventTargetData();
   if (!d)

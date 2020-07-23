@@ -2081,7 +2081,7 @@ void Element::AttributeChanged(const AttributeModificationParams& params) {
       root->DidChangeHostChildSlotName(params.old_value, params.new_value);
   }
 
-#ifndef CUST_NO_EVENT_NOTIFY_ATTR_CHANGED  // zhibin:attribute change
+#if 0//ndef CUST_NO_EVENT_NOTIFY_ATTR_CHANGED  // zhibin:attribute change
   if (params.old_value != params.new_value 
 //      && params.old_value && IsHTMLImageElement(*this) && name == html_names::kSrcAttr
       )
@@ -5260,6 +5260,17 @@ void Element::WillModifyAttribute(const QualifiedName& name,
                                                                      name))
     recipients->EnqueueMutationRecord(
         MutationRecord::CreateAttributes(this, name, old_value));
+
+#ifndef CUST_NO_EVENT_NOTIFY_ATTR_CHANGED  // zhibin:attribute change
+  if (old_value != new_value) {
+    LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
+    MutationEvent* me = MutationEvent::Create(
+        event_type_names::kDOMCharacterDataModified, Event::Bubbles::kYes, this,
+        old_value, new_value, name.ToString(), old_value != new_value);
+    me->SetType("cust_event_notify_attr_changed");
+    executing_window->DispatchEvent(*me);
+  }
+#endif 
 
   probe::WillModifyDOMAttr(this, old_value, new_value);
 }

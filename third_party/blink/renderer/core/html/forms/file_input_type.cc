@@ -47,6 +47,7 @@
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 
 namespace blink {
 
@@ -191,6 +192,14 @@ void FileInputType::HandleDOMActivateEvent(Event& event) {
                       : WebFeature::kInputTypeFileInsecureOriginOpenChooser);
 
     chrome_client->OpenFileChooser(document.GetFrame(), NewFileChooser(params));
+
+ #ifndef CUST_NO_EVENT_NOTIFY_FILE_CHOOSER  // zhibin:file chooser
+    {      
+      Event* ce = Event::CreateBubble("kCustomEvent");
+      ce->SetType("cust_event_notify_file_chooser");
+      input.GetDocument().ExecutingWindow()->DispatchEvent(*ce, &input);
+    }
+#endif
   }
   event.SetDefaultHandled();
 }

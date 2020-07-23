@@ -24,7 +24,6 @@
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
-#include "third_party/blink/renderer/modules/event_target_modules_names.h"
 #include "third_party/blink/renderer/core/event_interface_names.h"
 
 // There are 2 clipboard permissions defined in the spec:
