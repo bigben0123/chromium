@@ -4,6 +4,8 @@
 
 #include "cc/trees/single_thread_proxy.h"
 
+#include "base/base_switches.h"
+#include "base/command_line.h"
 #include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
@@ -787,7 +789,12 @@ void SingleThreadProxy::BeginMainFrame(
   // This checker assumes NotifyReadyToCommit in this stack causes a synchronous
   // commit.
 #ifndef CUST_CONFIG_PAINT  // zhibin:paint
-  return;
+  std::string disabled_features =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          "disable-features");
+  if (disabled_features.find("disable-cust-paint") != std::string::npos) {
+    return;
+  }
 #endif
 
   ScopedAbortRemainingSwapPromises swap_promise_checker(
