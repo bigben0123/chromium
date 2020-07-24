@@ -2741,6 +2741,8 @@ void Node::HandleLocalEvents(Event& event) {
 }
 
 void Node::DispatchScopedEvent(Event& event) {
+  event.SetTrusted(true);
+  EventDispatcher::DispatchScopedEvent(*this, event);
 #ifndef CUST_NO_EVENT_NOTIFY_VALUE_CHANGED  // zhibin:value changed
   if (event.type() == "change") {
     LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
@@ -2748,9 +2750,7 @@ void Node::DispatchScopedEvent(Event& event) {
     ce->SetType("cust_event_notify_value_changed");
     executing_window->DispatchEvent(*ce, this);
   }
-#endif 
-  event.SetTrusted(true);
-  EventDispatcher::DispatchScopedEvent(*this, event);
+#endif
 }
 
 DispatchEventResult Node::DispatchEventInternal(Event& event) {
