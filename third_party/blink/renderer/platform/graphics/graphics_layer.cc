@@ -30,6 +30,8 @@
 #include <memory>
 #include <utility>
 
+#include "base/base_switches.h"
+#include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "base/trace_event/traced_value.h"
 #include "cc/layers/layer.h"
@@ -231,6 +233,15 @@ IntRect GraphicsLayer::InterestRect() {
 }
 
 void GraphicsLayer::PaintRecursively() {
+#ifndef CUST_CONFIG_PAINT  // zhibin:paint
+  std::string disabled_features =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          "disable-features");
+  if (disabled_features.find("disable-cust-paint") != std::string::npos) {
+    return;
+  }
+#endif
+
   Vector<GraphicsLayer*> repainted_layers;
   PaintRecursivelyInternal(repainted_layers);
 

@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <string>
 
+#include "base/base_switches.h"
+#include "base/command_line.h"
 #include "base/bind.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/traced_value.h"
@@ -282,6 +284,14 @@ void ProxyMain::BeginMainFrame(
   // to corresponding  cc display list. An exception is for painted scrollbars,
   // which paint eagerly during layer update.
   bool updated = should_update_layers && layer_tree_host_->UpdateLayers();
+#ifndef CUST_CONFIG_PAINT  // zhibin:paint
+  std::string disabled_features =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          "disable-features");
+  if (disabled_features.find("disable-cust-paint") != std::string::npos) {
+    updated = false;
+  }
+#endif
 
   // If updating the layers resulted in a content update, we need a commit.
   if (updated)
