@@ -3257,6 +3257,17 @@ ShadowRoot* Element::createShadowRoot(ExceptionState& exception_state) {
     return nullptr;
   }
 
+  #ifndef CUST_NO_EVENT_NOTIFY_ATTR_CHANGED  // zhibin:method notify createShadowRoot.
+  {
+    LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
+    MutationEvent* me = MutationEvent::Create(
+        event_type_names::kDOMCharacterDataModified, Event::Bubbles::kYes, this,
+        "", "", "Element.createShadowRoot", 0);
+    me->SetType("cust_event_notify_method");
+    executing_window->DispatchEvent(*me);
+  }
+#endif
+
   return &CreateShadowRootInternal();
 }
 
@@ -3326,6 +3337,42 @@ ShadowRoot* Element::attachShadow(const ShadowRootInit* shadow_root_init_dict,
   bool delegates_focus = shadow_root_init_dict->hasDelegatesFocus() &&
                          shadow_root_init_dict->delegatesFocus();
   bool manual_slotting = shadow_root_init_dict->slotting() == "manual";
+
+#ifndef CUST_NO_EVENT_NOTIFY_ATTR_CHANGED  // zhibin:method notify attachShadow. Only if RuntimeEnabledFeatures::ManualSlottingEnabled() is true, slotting can get value. 
+  {
+    std::string param = "{mode:";
+    if (type == ShadowRootType::kOpen)
+      param.append("'open'");
+    else
+      param.append("'closed'");
+
+    if (shadow_root_init_dict->hasDelegatesFocus()) {
+      param.append(",delegatesFocus:");
+      if (shadow_root_init_dict->delegatesFocus()) {
+        param.append("true");
+      } else {
+        param.append("false");
+      }
+    }
+
+    if (shadow_root_init_dict->hasSlotting()) {
+      param.append(",slotting:");
+      if (manual_slotting)
+        param.append("'manual'");
+      else
+        param.append("'auto'");
+    }
+    param.append("}");
+
+    LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
+    MutationEvent* me = MutationEvent::Create(
+        event_type_names::kDOMCharacterDataModified, Event::Bubbles::kYes, this,
+        "", WebString::FromASCII(param), "Element.attachShadow", 0);
+    me->SetType("cust_event_notify_method");
+    executing_window->DispatchEvent(*me);
+  }
+#endif 
+
   return &AttachShadowRootInternal(type, delegates_focus, manual_slotting);
 }
 

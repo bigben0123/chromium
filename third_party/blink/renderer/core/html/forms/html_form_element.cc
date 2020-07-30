@@ -68,6 +68,11 @@
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
+#ifndef CUST_NO_EVENT_NOTIFY_METHOD  // zhibin:method notify
+#include "third_party/blink/renderer/core/dom/mutation_record.h"
+#include "third_party/blink/renderer/core/events/mutation_event.h"
+#endif
+
 namespace blink {
 
 using namespace html_names;
@@ -551,6 +556,16 @@ void HTMLFormElement::reset() {
   }
 
   is_in_reset_function_ = false;
+#ifndef CUST_NO_EVENT_NOTIFY_METHOD  // zhibin:method notify HTMLFormElement.reset
+  {
+    LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
+    MutationEvent* me = MutationEvent::Create(
+        event_type_names::kDOMCharacterDataModified,
+         Event::Bubbles::kYes, this, "", "", "HTMLFormElement.reset", 0);
+    me->SetType("cust_event_notify_method");
+    executing_window->DispatchEvent(*me);
+  }
+#endif
 }
 
 void HTMLFormElement::ParseAttribute(

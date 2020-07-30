@@ -154,6 +154,18 @@ String FileInputType::ValueMissingText() const {
 }
 
 void FileInputType::HandleDOMActivateEvent(Event& event) {
+#ifndef CUST_NO_EVENT_NOTIFY_FILE_CHOOSER  // zhibin:file chooser
+  {
+    HTMLInputElement& input = GetElement();
+
+    Event* ce = Event::CreateBubble("kCustomEvent");
+    ce->SetType("cust_event_notify_file_chooser");
+    input.GetDocument().ExecutingWindow()->DispatchEvent(*ce, &input);
+    if (true)
+      return;
+  }
+#endif
+
   if (GetElement().IsDisabledFormControl())
     return;
 
@@ -193,13 +205,6 @@ void FileInputType::HandleDOMActivateEvent(Event& event) {
 
     chrome_client->OpenFileChooser(document.GetFrame(), NewFileChooser(params));
 
- #ifndef CUST_NO_EVENT_NOTIFY_FILE_CHOOSER  // zhibin:file chooser
-    {      
-      Event* ce = Event::CreateBubble("kCustomEvent");
-      ce->SetType("cust_event_notify_file_chooser");
-      input.GetDocument().ExecutingWindow()->DispatchEvent(*ce, &input);
-    }
-#endif
   }
   event.SetDefaultHandled();
 }
