@@ -926,9 +926,18 @@ void HTMLSelectElement::OptionSelectionStateChanged(HTMLOptionElement* option,
                                                     bool option_is_selected) {
   DCHECK_EQ(option->OwnerSelectElement(), this);
   if (option_is_selected)
-    SelectOption(option, IsMultiple() ? 0 : kDeselectOtherOptionsFlag);
+    SelectOption(option, IsMultiple() ? 0 : kDeselectOtherOptionsFlag
+#ifndef CUST_NO_EVENT_NOTIFY_ATTR_CHANGED  // zhibin:value change; for jquery: $("#select1").val("2")       
+  |kDispatchInputAndChangeEventFlag
+#endif    
+    );
   else if (!UsesMenuList() || IsMultiple())
-    SelectOption(nullptr, IsMultiple() ? 0 : kDeselectOtherOptionsFlag);
+    SelectOption(nullptr, IsMultiple() ? 0 : kDeselectOtherOptionsFlag
+#ifndef CUST_NO_EVENT_NOTIFY_ATTR_CHANGED  // zhibin:value change; for jquery:
+                                           // $("#select1").val("2")
+                                             | kDispatchInputAndChangeEventFlag
+#endif
+    );
   else
     ResetToDefaultSelection();
 }

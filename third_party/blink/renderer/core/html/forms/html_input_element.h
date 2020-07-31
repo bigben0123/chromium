@@ -116,7 +116,14 @@ class CORE_EXPORT HTMLInputElement
   bool checked() const;
   void setChecked(
       bool,
-      TextFieldEventBehavior = TextFieldEventBehavior::kDispatchNoEvent);
+      TextFieldEventBehavior = 
+#ifndef CUST_NO_EVENT_NOTIFY_ATTR_CHANGED  // zhibin:value change; for jquery:
+                                           // $("#radio2").prop('checked',true);
+                      TextFieldEventBehavior::kDispatchInputAndChangeEvent
+#else
+                      TextFieldEventBehavior::kDispatchNoEvent
+#endif  
+  );
   void DispatchChangeEventIfNeeded();
   void DispatchInputAndChangeEventIfNeeded();
 

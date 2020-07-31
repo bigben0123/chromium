@@ -1015,6 +1015,14 @@ void HTMLInputElement::setChecked(bool now_checked,
       isConnected() &&
       input_type_->ShouldSendChangeEventAfterCheckedChanged()) {
     DispatchInputEvent();
+#ifndef CUST_NO_EVENT_NOTIFY_VALUE_CHANGED  // zhibin:value changed
+    {
+      LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
+      Event* ce = Event::CreateBubble(event_interface_names::kCustomEvent);
+      ce->SetType("cust_event_notify_value_changed");
+      executing_window->DispatchEvent(*ce, this);
+    }
+#endif
   }
 
   PseudoStateChanged(CSSSelector::kPseudoChecked);

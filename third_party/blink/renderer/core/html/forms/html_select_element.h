@@ -86,7 +86,14 @@ class CORE_EXPORT HTMLSelectElement final
   void remove(int index);
 
   String value() const;
-  void setValue(const String&, bool send_events = false);
+  void setValue(const String&, bool send_events = 
+#ifndef CUST_NO_EVENT_NOTIFY_VALUE_CHANGED  // zhibin:value changed: when
+                                            // $("#select1").get(0).value="2";
+                    true
+#else
+                    false
+#endif
+  );
   String SuggestedValue() const;
   void SetSuggestedValue(const String&);
 
