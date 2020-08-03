@@ -5304,21 +5304,31 @@ void Element::WillModifyAttribute(const QualifiedName& name,
 
   if (MutationObserverInterestGroup* recipients =
           MutationObserverInterestGroup::CreateForAttributesMutation(*this,
-                                                                     name))
-    recipients->EnqueueMutationRecord(
+                                                                     name))  
+      recipients->EnqueueMutationRecord(
         MutationRecord::CreateAttributes(this, name, old_value));
 
 #ifndef CUST_NO_EVENT_NOTIFY_ATTR_CHANGED  // zhibin:attribute change
-  if (old_value != new_value) {
-    LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
-    MutationEvent* me = MutationEvent::Create(
-        event_type_names::kDOMCharacterDataModified, Event::Bubbles::kYes, this,
-        old_value, new_value, name.ToString(), old_value != new_value);
-    me->SetType("cust_event_notify_attr_changed");
-    executing_window->DispatchEvent(*me);
-  }
-#endif 
+  if (name == html_names::kTargetAttr || name == html_names::kLabelAttr ||
+      name == html_names::kDisabledAttr ||
+      name == html_names::kDisablepictureinpictureAttr ||
+      name == html_names::kPlaysinlineAttr || name == html_names::kLoopAttr ||
+      name == html_names::kAutoplayAttr || name == html_names::kPosterAttr ||
+      name == html_names::kMutedAttr ||
+      name == html_names::kSrcAttr  // for media
 
+  ) {
+    if (old_value != new_value) {
+      LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
+      MutationEvent* me = MutationEvent::Create(
+          event_type_names::kDOMCharacterDataModified, Event::Bubbles::kYes,
+          this, old_value, new_value, name.ToString(), old_value != new_value);
+      me->SetType("cust_event_notify_attr_changed");
+      executing_window->DispatchEvent(*me);
+    }
+  }
+
+#endif 
   probe::WillModifyDOMAttr(this, old_value, new_value);
 }
 

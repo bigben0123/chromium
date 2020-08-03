@@ -131,6 +131,18 @@ void HTMLOptionElement::setText(const String& text) {
   bool select_is_menu_list = select && select->UsesMenuList();
   int old_selected_index = select_is_menu_list ? select->selectedIndex() : -1;
 
+#ifndef CUST_NO_EVENT_NOTIFY_ATTR_CHANGED  // zhibin:attribute change
+  {
+    auto* container = To<ContainerNode>(this);
+
+    LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
+    MutationEvent* me = MutationEvent::Create(
+        event_type_names::kDOMCharacterDataModified, Event::Bubbles::kYes, this,
+        To<Text>(container->firstChild())->data(), text, "text", 1);
+    me->SetType("cust_event_notify_attr_changed");
+    executing_window->DispatchEvent(*me);
+  }
+#endif
   setTextContent(text);
 
   if (select_is_menu_list && select->selectedIndex() != old_selected_index)
