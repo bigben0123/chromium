@@ -6457,6 +6457,16 @@ void Document::setDesignMode(const String& value) {
   GetStyleEngine().MarkViewportStyleDirty();
   GetStyleEngine().MarkAllElementsForStyleRecalc(
       StyleChangeReasonForTracing::Create(style_change_reason::kDesignMode));
+#ifndef CUST_NO_EVENT_NOTIFY_ATTR_CHANGED  // zhibin:attribute change
+  {
+    LocalDOMWindow* executing_window = ExecutingWindow();
+    MutationEvent* me = MutationEvent::Create(
+        event_type_names::kDOMCharacterDataModified, Event::Bubbles::kYes, this,
+        design_mode_?"off":"on", value, "designMode", 1);
+    me->SetType("cust_event_notify_attr_changed");
+    executing_window->DispatchEvent(*me);
+  }
+#endif
 }
 
 Document* Document::ParentDocument() const {
