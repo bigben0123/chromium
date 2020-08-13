@@ -229,6 +229,11 @@ bool AllowedToRequestFullscreen(Document& document) {
   // only allow one fullscreen when the user activation state is active.
   if (LocalFrame::ConsumeTransientUserActivation(document.GetFrame()))
     return true;
+#ifndef CUST_NO_WORKROUND_FULLSCREEN  // zhibin: always fullscreen ignore if user
+                                  // activation or not.
+  else
+    return true;
+#endif
 
   //  The algorithm is triggered by a user generated orientation change.
   if (ScopedAllowFullscreen::FullscreenAllowedReason() ==

@@ -3261,7 +3261,7 @@ ShadowRoot* Element::createShadowRoot(ExceptionState& exception_state) {
   {
     LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
     MutationEvent* me = MutationEvent::Create(
-        event_type_names::kDOMCharacterDataModified, Event::Bubbles::kYes, this,
+        event_type_names::kDOMCharacterDataModified, Event::Bubbles::kNo, this,
         "", "", "Element.createShadowRoot", 0);
     me->SetType("cust_event_notify_method");
     executing_window->DispatchEvent(*me);
@@ -3366,7 +3366,7 @@ ShadowRoot* Element::attachShadow(const ShadowRootInit* shadow_root_init_dict,
 
     LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
     MutationEvent* me = MutationEvent::Create(
-        event_type_names::kDOMCharacterDataModified, Event::Bubbles::kYes, this,
+        event_type_names::kDOMCharacterDataModified, Event::Bubbles::kNo, this,
         "", WebString::FromASCII(param), "Element.attachShadow", 0);
     me->SetType("cust_event_notify_method");
     executing_window->DispatchEvent(*me);
@@ -3780,6 +3780,26 @@ bool Element::hasAttributeNS(const AtomicString& namespace_uri,
 void Element::focus(const FocusOptions* options) {
   focus(FocusParams(SelectionBehaviorOnFocus::kRestore, kWebFocusTypeNone,
                     nullptr, options));
+#ifndef CUST_NO_EVENT_NOTIFY_METHOD  // zhibin:method notify HTMLOrForeignElement.focus
+  {
+    std::string jsparam= "{";
+    if (options->hasPreventScroll()) {
+      if (options->preventScroll()) {
+        jsparam.append("preventScroll : true");
+      } else {
+        jsparam.append("preventScroll : false");
+      }
+    }
+    jsparam.append("}");
+
+    LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
+    MutationEvent* me = MutationEvent::Create(
+        event_type_names::kDOMCharacterDataModified, Event::Bubbles::kNo, this,
+        "", WebString::FromASCII(jsparam), "HTMLOrForeignElement.focus", 0);
+    me->SetType("cust_event_notify_method");
+    executing_window->DispatchEvent(*me);
+  }
+#endif
 }
 
 void Element::focus(const FocusParams& params) {
@@ -3910,6 +3930,16 @@ void Element::blur() {
       doc.ClearFocusedElement();
     }
   }
+#ifndef CUST_NO_EVENT_NOTIFY_METHOD  // zhibin:method notify HTMLOrForeignElement.blur
+  {
+    LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
+    MutationEvent* me = MutationEvent::Create(
+        event_type_names::kDOMCharacterDataModified, Event::Bubbles::kNo, this,
+        "", "", "HTMLOrForeignElement.blur", 0);
+    me->SetType("cust_event_notify_method");
+    executing_window->DispatchEvent(*me);
+  }
+#endif
 }
 
 bool Element::SupportsFocus() const {

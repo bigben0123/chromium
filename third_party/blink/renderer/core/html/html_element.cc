@@ -81,6 +81,10 @@
 #include "third_party/blink/renderer/platform/text/bidi_text_run.h"
 #include "third_party/blink/renderer/platform/text/text_run_iterator.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
+#ifndef CUST_NO_EVENT_NOTIFY_METHOD  // zhibin:method notify
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/events/mutation_event.h"
+#endif
 
 namespace blink {
 
@@ -921,6 +925,16 @@ void HTMLElement::setSpellcheck(bool enable) {
 void HTMLElement::click() {
   DispatchSimulatedClick(nullptr, kSendNoEvents,
                          SimulatedClickCreationScope::kFromScript);
+#ifndef CUST_NO_EVENT_NOTIFY_METHOD  // zhibin:method notify HTMLElement.click
+  {
+    LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
+    MutationEvent* me = MutationEvent::Create(
+        event_type_names::kDOMCharacterDataModified, Event::Bubbles::kNo, this,
+        "", "", "HTMLElement.click", 0);
+    me->SetType("cust_event_notify_method");
+    executing_window->DispatchEvent(*me);
+  }
+#endif
 }
 
 void HTMLElement::AccessKeyAction(bool send_mouse_events) {
