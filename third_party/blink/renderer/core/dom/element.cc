@@ -5310,7 +5310,8 @@ void Element::WillModifyAttribute(const QualifiedName& name,
 
 #ifndef CUST_NO_EVENT_NOTIFY_ATTR_CHANGED  // zhibin:attribute change
   if (name == html_names::kTargetAttr || name == html_names::kLabelAttr ||
-      name == html_names::kDisabledAttr ||
+      (localName() == html_names::kStyleTag &&
+       name == html_names::kDisabledAttr) ||
       name == html_names::kDisablepictureinpictureAttr ||
       name == html_names::kPlaysinlineAttr || name == html_names::kLoopAttr ||
       name == html_names::kAutoplayAttr || name == html_names::kPosterAttr ||

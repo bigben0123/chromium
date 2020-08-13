@@ -108,6 +108,10 @@
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
+#ifndef CUST_NO_EVENT_NOTIFY_ATTR_CHANGED  // zhibin:attribute change
+#include "third_party/blink/renderer/core/events/mutation_event.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#endif
 
 #ifndef LOG_MEDIA_EVENTS
 // Default to not logging events because so many are generated they can
@@ -1164,6 +1168,17 @@ void HTMLMediaElement::LoadResource(const WebMediaPlayerSource& source,
   // loading from the app cache is an internal detail not exposed through the
   // media element API.
   current_src_ = url;
+
+#ifndef CUST_NO_EVENT_NOTIFY_ATTR_CHANGED  // zhibin:attribute change
+  {
+    LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
+    MutationEvent* me = MutationEvent::Create(
+        event_type_names::kDOMCharacterDataModified, Event::Bubbles::kYes, this,
+        current_src_.GetString(), current_src_.GetString(), "currentSrc", 0);
+    me->SetType("cust_event_notify_attr_changed");
+    executing_window->DispatchEvent(*me);
+  }
+#endif 
 
   if (audio_source_node_)
     audio_source_node_->OnCurrentSrcChanged(current_src_);
