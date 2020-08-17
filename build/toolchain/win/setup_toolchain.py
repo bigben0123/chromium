@@ -80,9 +80,11 @@ def _DetectVisualStudioPath():
 
 
 def _LoadEnvFromBat(args):
-  """Given a bat command, runs it and returns env vars set by it."""
+  """Given a bat command, runs it and returns env vars set by it."""  
   args = args[:]
+  args.append('-vcvars_ver=14.25')
   args.extend(('&&', 'set'))
+  print(args, file=sys.stderr) 
   popen = subprocess.Popen(
       args, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
   variables, _ = popen.communicate()
@@ -136,6 +138,7 @@ def _LoadToolchainEnv(cpu, sdk_dir, target_store):
     script_path = os.path.normpath(os.path.join(
                                        os.environ['GYP_MSVS_OVERRIDE_PATH'],
                                        'VC/vcvarsall.bat'))
+    print('vcvarsall.bat path: %s ' % (script_path), file=sys.stderr)                                           
     if not os.path.exists(script_path):
       # vcvarsall.bat for VS 2017 fails if run after running vcvarsall.bat from
       # VS 2013 or VS 2015. Fix this by clearing the vsinstalldir environment
@@ -145,6 +148,7 @@ def _LoadToolchainEnv(cpu, sdk_dir, target_store):
       other_path = os.path.normpath(os.path.join(
                                         os.environ['GYP_MSVS_OVERRIDE_PATH'],
                                         'VC/Auxiliary/Build/vcvarsall.bat'))
+      print('other_path vcvarsall.bat path: %s ' % (other_path), file=sys.stderr)  
       if not os.path.exists(other_path):
         raise Exception('%s is missing - make sure VC++ tools are installed.' %
                         script_path)
@@ -152,12 +156,13 @@ def _LoadToolchainEnv(cpu, sdk_dir, target_store):
     cpu_arg = "amd64"
     if (cpu != 'x64'):
       # x64 is default target CPU thus any other CPU requires a target set
-      cpu_arg += '_' + cpu
+      cpu_arg += '_' + cpu    
     args = [script_path, cpu_arg]
     # Store target must come before any SDK version declaration
     if (target_store):
-      args.append(['store'])
+      args.append(['store'])    
     variables = _LoadEnvFromBat(args)
+  print(args, file=sys.stderr)
   return _ExtractImportantEnvironment(variables)
 
 
@@ -220,10 +225,12 @@ def main():
   for cpu in cpus:
     if cpu == target_cpu:
       # Extract environment variables for subprocesses.
-      env = _LoadToolchainEnv(cpu, win_sdk_path, target_store)
+      print('cpu, win_sdk_path, target_store: %s %s %s' % (cpu, win_sdk_path, target_store), file=sys.stderr)         
+      env = _LoadToolchainEnv(cpu, win_sdk_path, target_store)      
       env['PATH'] = runtime_dirs + os.pathsep + env['PATH']
 
       for path in env['PATH'].split(os.pathsep):
+        print('vs path: %s ' % (path), file=sys.stderr)          	
         if os.path.exists(os.path.join(path, 'cl.exe')):
           vc_bin_dir = os.path.realpath(path)
           break

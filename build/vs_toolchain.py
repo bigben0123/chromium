@@ -179,13 +179,13 @@ def DetectVisualStudioPath():
   for path in (
       os.environ.get('vs%s_install' % version_as_year),
       os.path.expandvars('%ProgramFiles(x86)%' +
+                         '/Microsoft Visual Studio/%s/Community' %
+                         version_as_year),
+      os.path.expandvars('%ProgramFiles(x86)%' +
                          '/Microsoft Visual Studio/%s/Enterprise' %
                          version_as_year),
       os.path.expandvars('%ProgramFiles(x86)%' +
                          '/Microsoft Visual Studio/%s/Professional' %
-                         version_as_year),
-      os.path.expandvars('%ProgramFiles(x86)%' +
-                         '/Microsoft Visual Studio/%s/Community' %
                          version_as_year),
       os.path.expandvars('%ProgramFiles(x86)%' +
                          '/Microsoft Visual Studio/%s/Preview' %
