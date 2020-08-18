@@ -2488,7 +2488,16 @@ void HTMLMediaElement::PlayInternal() {
   can_autoplay_ = false;
 
   OnPlay();
-
+#ifndef CUST_NO_EVENT_NOTIFY_METHOD  // zhibin:method media play()
+  {
+    LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
+    MutationEvent* me = MutationEvent::Create(
+        event_type_names::kDOMCharacterDataModified, Event::Bubbles::kNo, this,
+        "", "", "HTMLMediaElement.play", 0);
+    me->SetType("cust_event_notify_method");
+    executing_window->DispatchEvent(*me);
+  }
+#endif  
   SetIgnorePreloadNone();
   UpdatePlayState();
 }
@@ -2523,6 +2532,16 @@ void HTMLMediaElement::PauseInternal() {
   }
 
   UpdatePlayState();
+#ifndef CUST_NO_EVENT_NOTIFY_METHOD  // zhibin:method media pause()
+  {
+    LocalDOMWindow* executing_window = GetDocument().ExecutingWindow();
+    MutationEvent* me = MutationEvent::Create(
+        event_type_names::kDOMCharacterDataModified, Event::Bubbles::kNo, this,
+        "", "", "HTMLMediaElement.pause", 0);
+    me->SetType("cust_event_notify_method");
+    executing_window->DispatchEvent(*me);
+  }
+#endif
 }
 
 void HTMLMediaElement::FlingingStarted() {

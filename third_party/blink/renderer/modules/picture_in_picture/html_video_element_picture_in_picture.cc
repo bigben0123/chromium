@@ -12,6 +12,10 @@
 #include "third_party/blink/renderer/modules/picture_in_picture/picture_in_picture_controller_impl.h"
 #include "third_party/blink/renderer/modules/picture_in_picture/picture_in_picture_window.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
+#ifndef CUST_NO_EVENT_NOTIFY_METHOD  // zhibin:method notify headers
+#include "third_party/blink/renderer/core/events/mutation_event.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#endif
 
 namespace blink {
 
@@ -31,6 +35,16 @@ ScriptPromise HTMLVideoElementPictureInPicture::requestPictureInPicture(
   PictureInPictureControllerImpl::From(element.GetDocument())
       .EnterPictureInPicture(&element, nullptr /* options */, resolver);
 
+#ifndef CUST_NO_EVENT_NOTIFY_METHOD  // zhibin:method video element requestPictureInPicture()
+  {
+    LocalDOMWindow* executing_window = element.GetDocument().ExecutingWindow();
+    MutationEvent* me = MutationEvent::Create(
+        event_type_names::kDOMCharacterDataModified, Event::Bubbles::kNo,
+        nullptr, "", "", "HTMLMediaElement.requestPictureInPicture", 0);
+    me->SetType("cust_event_notify_method");
+    executing_window->DispatchEvent(*me);
+  }
+#endif 
   return promise;
 }
 

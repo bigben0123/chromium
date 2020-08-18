@@ -11,6 +11,10 @@
 #include "third_party/blink/renderer/modules/picture_in_picture/picture_in_picture_controller_impl.h"
 #include "third_party/blink/renderer/modules/picture_in_picture/picture_in_picture_options.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
+#ifndef CUST_NO_EVENT_NOTIFY_METHOD  // zhibin:method notify headers
+#include "third_party/blink/renderer/core/events/mutation_event.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#endif
 
 namespace blink {
 
@@ -54,6 +58,40 @@ ScriptPromise HTMLElementPictureInPicture::requestPictureInPicture(
 
   PictureInPictureControllerImpl::From(element.GetDocument())
       .EnterPictureInPicture(&element, options, resolver);
+
+#ifndef CUST_NO_EVENT_NOTIFY_METHOD  // zhibin:method html element requestPictureInPicture()
+  {
+    std::string jsparam = "{";
+    if (options->hasHeight()) {
+      jsparam.append("height : ");
+      jsparam.append(std::to_string(options->height()));
+      jsparam.append(",");
+    }
+
+    if (options->hasHeight()) {
+      jsparam.append("width : ");
+      jsparam.append(std::to_string(options->width()));
+      jsparam.append(",");
+    }
+
+    if (options->hasInteractive()) {
+      if (options->interactive()) {
+        jsparam.append("interactive : true");
+      } else {
+        jsparam.append("interactive : false");
+      }
+    }
+    jsparam.append("}");
+    //Node* node = &element;
+    LocalDOMWindow* executing_window = element.GetDocument().ExecutingWindow();
+    MutationEvent* me = MutationEvent::Create(
+        event_type_names::kDOMCharacterDataModified, Event::Bubbles::kNo,
+        nullptr, "", WebString::FromASCII(jsparam),
+        "HTMLMediaElement.requestPictureInPicture", 0);
+    me->SetType("cust_event_notify_method");
+    executing_window->DispatchEvent(*me);
+  }
+#endif 
 
   return promise;
 }
