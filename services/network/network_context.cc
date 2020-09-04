@@ -872,6 +872,19 @@ void NetworkContext::ComputeHttpCacheSize(
                      base::Unretained(this), std::move(callback))));
 }
 
+void NetworkContext::ComputeHttpCacheSize0(
+    base::Time start_time,
+    base::Time end_time,
+    const std::string& url,
+    ComputeHttpCacheSize0Callback callback) { // base::OnceCallback<void(const std::vector<uint8_t>&, int64_t)>;
+  // It's safe to use Unretained below as the HttpCacheDataCounter is owned by
+  // |this| and guarantees it won't call its callback if deleted.
+  http_cache_data_counters_.push_back(HttpCacheDataCounter::CreateAndStart(
+      url_request_context_, start_time, end_time,url,
+      base::BindOnce(&NetworkContext::OnHttpCacheSizeComputed0, 
+                     base::Unretained(this), std::move(callback))));
+}
+
 void NetworkContext::ClearHostCache(mojom::ClearDataFilterPtr filter,
                                     ClearHostCacheCallback callback) {
   net::HostCache* host_cache =
@@ -2245,6 +2258,16 @@ void NetworkContext::OnHttpCacheSizeComputed(
     int64_t result_or_error) {
   EraseIf(http_cache_data_counters_, base::MatchesUniquePtr(counter));
   std::move(callback).Run(is_upper_limit, result_or_error);
+}
+
+
+void NetworkContext::OnHttpCacheSizeComputed0(
+    ComputeHttpCacheSize0Callback callback,
+    HttpCacheDataCounter* counter,
+    const std::vector<int8_t>& buffer,
+    int64_t result_or_error) {
+  EraseIf(http_cache_data_counters_, base::MatchesUniquePtr(counter));
+  std::move(callback).Run(buffer, result_or_error);
 }
 
 void NetworkContext::OnConnectionError() {

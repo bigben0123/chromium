@@ -3134,7 +3134,7 @@ if (use_external_gssapi) {
   }
 }
 
-if (is_linux || is_mac) {
+if (is_linux || is_mac || is_win) {
   executable("cachetool") {
     testonly = true
     sources = [
@@ -3304,7 +3304,7 @@ if (is_android) {
   }
 }
 
-if (is_android || is_linux) {
+if (is_android || is_linux || is_win) {
   executable("disk_cache_memory_test") {
     testonly = true
     sources = [

@@ -2,6 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/*
+ninja -C out/Testing disk_cache_memory_test
+
+D:\dev\electron7\src>out\Testing\disk_cache_memory_test.exe --spec-1=block_file:disk_cache:xxx
+
+*/
+
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -31,8 +38,257 @@
 #include "net/disk_cache/simple/simple_backend_impl.h"
 #include "net/disk_cache/simple/simple_index.h"
 
+
+#include "net/disk_cache/blockfile/backend_impl.h"
+#include "net/disk_cache/blockfile/file.h"
+#include "net/disk_cache/cache_util.h"
+
+
+
+#include "base/bind_helpers.h"
+#include "base/compiler_specific.h"
+#include "net/base/io_buffer.h"
+
+#include "base/files/file_path.h"
+#include "base/macros.h"
+#include "base/timer/timer.h"
+#include "build/build_config.h"
+
+//-----------------------------------------------------------------------------
+#include "net/http/http_cache.h"
+#include "net/http/http_response_headers.h"
+#include "net/http/http_util.h"
+
+///
+/// 
+//-----------------------------------------------------------------------------
+// completion callback helper
+
+// A helper class for completion callbacks, designed to make it easy to run
+// tests involving asynchronous operations.  Just call WaitForResult to wait
+// for the asynchronous operation to complete.  Uses a RunLoop to spin the
+// current MessageLoop while waiting.  The callback must be invoked on the same
+// thread WaitForResult is called on.
+//
+// NOTE: Since this runs a message loop to wait for the completion callback,
+// there could be other side-effects resulting from WaitForResult.  For this
+// reason, this class is probably not ideal for a general application.
+//
+namespace base {
+class RunLoop;
+}
+
+namespace net {
+
+class IOBuffer;
+
+namespace internal {
+
+class TestCompletionCallbackBaseInternal {
+ public:
+  bool have_result() const { return have_result_; }
+
+ protected:
+  TestCompletionCallbackBaseInternal();
+  virtual ~TestCompletionCallbackBaseInternal();
+
+  void DidSetResult();
+  void WaitForResult();
+
+ private:
+  // RunLoop.  Only non-NULL during the call to WaitForResult, so the class is
+  // reusable.
+  std::unique_ptr<base::RunLoop> run_loop_;
+  bool have_result_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestCompletionCallbackBaseInternal);
+};
+
+template <typename R>
+struct NetErrorIsPendingHelper {
+  bool operator()(R status) const { return status == ERR_IO_PENDING; }
+};
+
+template <typename R, typename IsPendingHelper = NetErrorIsPendingHelper<R>>
+class TestCompletionCallbackTemplate
+    : public TestCompletionCallbackBaseInternal {
+ public:
+  virtual ~TestCompletionCallbackTemplate() override {}
+
+  R WaitForResult() {
+    TestCompletionCallbackBaseInternal::WaitForResult();
+    return std::move(result_);
+  }
+
+  R GetResult(R result) {
+    IsPendingHelper check_pending;
+    if (!check_pending(result))
+      return std::move(result);
+    return WaitForResult();
+  }
+
+ protected:
+  TestCompletionCallbackTemplate() : result_(R()) {}
+
+  // Override this method to gain control as the callback is running.
+  virtual void SetResult(R result) {
+    result_ = std::move(result);
+    DidSetResult();
+  }
+
+ private:
+  R result_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestCompletionCallbackTemplate);
+};
+
+
+void TestCompletionCallbackBaseInternal::DidSetResult() {
+  have_result_ = true;
+  if (run_loop_)
+    run_loop_->Quit();
+}
+
+void TestCompletionCallbackBaseInternal::WaitForResult() {
+  DCHECK(!run_loop_);
+  if (!have_result_) {
+    run_loop_ = std::make_unique<base::RunLoop>(
+        base::RunLoop::Type::kNestableTasksAllowed);
+    run_loop_->Run();
+    run_loop_.reset();
+    DCHECK(have_result_);
+  }
+  have_result_ = false;  // Auto-reset for next callback.
+}
+
+TestCompletionCallbackBaseInternal::TestCompletionCallbackBaseInternal()
+    : have_result_(false) {}
+
+TestCompletionCallbackBaseInternal::~TestCompletionCallbackBaseInternal() =
+    default;
+
+
+}  // namespace internal
+
+
+// Base class overridden by custom implementations of TestCompletionCallback.
+typedef internal::TestCompletionCallbackTemplate<int>
+    TestCompletionCallbackBase;
+
+typedef internal::TestCompletionCallbackTemplate<int64_t>
+    TestInt64CompletionCallbackBase;
+
+class TestCompletionCallback : public TestCompletionCallbackBase {
+ public:
+  TestCompletionCallback() {}
+  ~TestCompletionCallback() override;
+
+  CompletionOnceCallback callback() {
+    return base::BindOnce(&TestCompletionCallback::SetResult,
+                          base::Unretained(this));
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestCompletionCallback);
+};
+
+class TestInt64CompletionCallback : public TestInt64CompletionCallbackBase {
+ public:
+  TestInt64CompletionCallback() {}
+  ~TestInt64CompletionCallback() override;
+
+  Int64CompletionOnceCallback callback() {
+    return base::BindOnce(&TestInt64CompletionCallback::SetResult,
+                          base::Unretained(this));
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestInt64CompletionCallback);
+};
+
+// Makes sure that the buffer is not referenced when the callback runs.
+class ReleaseBufferCompletionCallback : public TestCompletionCallback {
+ public:
+  explicit ReleaseBufferCompletionCallback(IOBuffer* buffer);
+  ~ReleaseBufferCompletionCallback() override;
+
+ private:
+  void SetResult(int result) override;
+
+  IOBuffer* buffer_;
+  DISALLOW_COPY_AND_ASSIGN(ReleaseBufferCompletionCallback);
+};
+
+
+TestCompletionCallback::~TestCompletionCallback() = default;
+
+TestInt64CompletionCallback::~TestInt64CompletionCallback() = default;
+
+ReleaseBufferCompletionCallback::ReleaseBufferCompletionCallback(
+    IOBuffer* buffer)
+    : buffer_(buffer) {}
+
+ReleaseBufferCompletionCallback::~ReleaseBufferCompletionCallback() = default;
+
+void ReleaseBufferCompletionCallback::SetResult(int result) {
+  if (!buffer_->HasOneRef())
+    result = ERR_FAILED;
+  TestCompletionCallback::SetResult(result);
+}
+}  // namespace net
+
+
+
+// -----------------------------------------------------------------------
+//this file
+
+using base::Time;
+using base::TimeDelta;
+
+
+
+// -----------------------------------------------------------------------
+
 namespace disk_cache {
 namespace {
+
+    
+// -----------------------------------------------------------------------
+// TestEntryResult callback define
+// Like net::TestCompletionCallback, but for EntryResultCallback.
+struct EntryResultIsPendingHelper {
+  bool operator()(const disk_cache::EntryResult& result) const {
+    return result.net_error() == net::ERR_IO_PENDING;
+  }
+};
+using TestEntryResultCompletionCallbackBase =
+    net::internal::TestCompletionCallbackTemplate<disk_cache::EntryResult,
+                                                  EntryResultIsPendingHelper>;
+
+class TestEntryResultCompletionCallback
+    : public TestEntryResultCompletionCallbackBase {
+ public:
+  TestEntryResultCompletionCallback();
+  ~TestEntryResultCompletionCallback() override;
+
+  disk_cache::Backend::EntryResultCallback callback();
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestEntryResultCompletionCallback);
+};
+
+TestEntryResultCompletionCallback::TestEntryResultCompletionCallback() =
+    default;
+
+TestEntryResultCompletionCallback::~TestEntryResultCompletionCallback() =
+    default;
+
+disk_cache::Backend::EntryResultCallback
+TestEntryResultCompletionCallback::callback() {
+  return base::BindOnce(&TestEntryResultCompletionCallback::SetResult,
+                        base::Unretained(this));
+}
+
 
 const char kBlockFileBackendType[] = "block_file";
 const char kSimpleBackendType[] = "simple";
@@ -56,11 +312,24 @@ struct CacheSpec {
       return std::unique_ptr<CacheSpec>();
     if (tokens[1] != kDiskCacheType && tokens[1] != kAppCacheType)
       return std::unique_ptr<CacheSpec>();
+
+    #if 1
+    const base::FilePath::CharType cacheFileName[] =
+        L"C:/Users/zhibin/AppData/Roaming/eventdemo/Cache";
+    //FilePath log_file_path(kLogFileName);
+
+    return std::unique_ptr<CacheSpec>(new CacheSpec(
+        tokens[0] == kBlockFileBackendType ? net::CACHE_BACKEND_BLOCKFILE
+                                           : net::CACHE_BACKEND_SIMPLE,
+        tokens[1] == kDiskCacheType ? net::DISK_CACHE : net::APP_CACHE,
+        base::FilePath(cacheFileName )));
+    #else
     return std::unique_ptr<CacheSpec>(new CacheSpec(
         tokens[0] == kBlockFileBackendType ? net::CACHE_BACKEND_BLOCKFILE
                                            : net::CACHE_BACKEND_SIMPLE,
         tokens[1] == kDiskCacheType ? net::DISK_CACHE : net::APP_CACHE,
         base::FilePath(tokens[2])));
+#endif
   }
 
   const net::BackendType backend_type;
@@ -87,6 +356,8 @@ void SetSuccessCodeOnCompletion(base::RunLoop* run_loop,
   }
   run_loop->Quit();
 }
+
+
 
 std::unique_ptr<Backend> CreateAndInitBackend(const CacheSpec& spec) {
   std::unique_ptr<Backend> result;
@@ -126,6 +397,24 @@ std::unique_ptr<Backend> CreateAndInitBackend(const CacheSpec& spec) {
   result.swap(backend);
   return result;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+#if 1//zhibin:test
+int getpid() {
+  return 0;
+}
+#endif
 
 // Parses range lines from /proc/<PID>/smaps, e.g. (anonymous read write):
 // 7f819d88b000-7f819d890000 rw-p 00000000 00:00 0
@@ -186,6 +475,12 @@ bool ParseRangeProperty(const std::string& line,
 }
 
 uint64_t GetMemoryConsumption() {
+#if 1//zhibin:test
+  if (true)
+  return 0;
+  else {
+
+    #endif
   std::ifstream maps_file(
       base::StringPrintf("/proc/%d/smaps", getpid()).c_str());
   if (!maps_file.good()) {
@@ -216,16 +511,189 @@ uint64_t GetMemoryConsumption() {
     }
   }
   return total_size;
+  #if 1//zhibin:test
+  }
+  #endif
+}
+
+
+// Gets a key's stream to a buffer.
+scoped_refptr<net::GrowableIOBuffer> GetStreamForKeyBuffer(
+    Backend* backend,
+    const std::string& key,
+    int index) {
+
+  TestEntryResultCompletionCallback cb_open;
+  EntryResult result = backend->OpenEntry(
+      key, net::HIGHEST, cb_open.callback());
+  result = cb_open.GetResult(std::move(result));
+  if (result.net_error() != net::OK) {
+    std::cout << "Couldn't find key's entry." << std::endl;
+    return nullptr;
+  }
+  Entry* cache_entry = result.ReleaseEntry();
+
+  const int kInitBufferSize = 8192;
+  scoped_refptr<net::GrowableIOBuffer> buffer =
+      base::MakeRefCounted<net::GrowableIOBuffer>();
+  buffer->SetCapacity(kInitBufferSize);
+  net::TestCompletionCallback cb;
+  while (true) {
+    int rv = cache_entry->ReadData(index, buffer->offset(), buffer.get(),
+                                   buffer->capacity() - buffer->offset(),
+                                   cb.callback());
+    rv = cb.GetResult(rv);
+    if (rv < 0) {
+      cache_entry->Close();
+      std::cout << "Stream read error.." << std::endl;
+      return nullptr;
+    }
+    buffer->set_offset(buffer->offset() + rv);
+    if (rv == 0)
+      break;
+    buffer->SetCapacity(buffer->offset() * 2);
+  }
+  cache_entry->Close();
+  return buffer;
+}
+using disk_cache::Backend;
+using disk_cache::Entry;
+using disk_cache::EntryResult;
+constexpr int kResponseInfoIndex = 0;
+constexpr int kResponseContentIndex = 1;
+void GetStreamForKey(Backend* backend, std::string url, int index) {
+  std::string key = "https://home.baidu.com/Public/img/play.png?v=12";
+  //"https://home.baidu.com/Public/js/fontbase.js?v=12";
+ // "http://192.168.50.206:8080/jquery.js";
+ // "https://home.baidu.com/Public/img/play.png?v=12";
+  // index = 0;//0 header 1,2 
+   std::cout << "=== index ="<<index << std::endl;
+  scoped_refptr<net::GrowableIOBuffer> buffer(
+      GetStreamForKeyBuffer(backend, key, index));
+  
+  if (index == kResponseInfoIndex) {
+    net::HttpResponseInfo response_info;
+    bool truncated_response_info = false;
+    if (!net::HttpCache::ParseResponseInfo(buffer->StartOfBuffer(),
+                                           buffer->offset(), &response_info,
+                                           &truncated_response_info)) {
+      // This can happen when reading data stored by content::CacheStorage.
+      std::cerr << "WARNING: Returning empty response info for key: " << key
+                << std::endl;
+      //command_marshal->ReturnSuccess();
+      //return command_marshal->ReturnString("");
+    }
+    if (truncated_response_info)
+      std::cerr << "WARNING: Truncated HTTP response." << std::endl;
+    //command_marshal->ReturnSuccess();
+    std::cout<<
+        net::HttpUtil::ConvertHeadersBackToHTTPResponse(
+            response_info.headers->raw_headers())<<std::endl;
+  } else if (index == kResponseContentIndex) {
+    //command_marshal->ReturnSuccess();
+    std::cout.write(buffer->StartOfBuffer(), buffer->offset());
+  }
+}
+
+
+void OnEntryResultComplete(base::RunLoop* run_loop,
+                           bool* succeeded,int* sum,
+                           EntryResult result) {
+  auto rv = result.net_error();
+
+  if (rv == net::OK) {
+    *succeeded = true;
+
+    Entry* entry = result.ReleaseEntry();
+    std::string url = entry->GetKey();
+    (*sum)++;
+    std::cout << *sum << "\t:" << url << std::endl;
+    entry->Close();
+
+  } else {
+    *succeeded = false;
+  }
+
+  run_loop->Quit();
+
+  if (rv == net::ERR_FAILED) {
+    std::cout << "=== read failed." << std::endl;
+  }
 }
 
 bool CacheMemTest(const std::vector<std::unique_ptr<CacheSpec>>& specs) {
   std::vector<std::unique_ptr<Backend>> backends;
   for (const auto& it : specs) {
     std::unique_ptr<Backend> backend = CreateAndInitBackend(*it);
-    if (!backend)
+    if (!backend) {
+      std::cout << "Get backend error.";
       return false;
+    }
+
     std::cout << "Number of entries in " << it->path.LossyDisplayName() << " : "
               << backend->GetEntryCount() << std::endl;
+    if (true) {
+        //complecated for list
+        //http://tb2.bdstatic.com/tb/static-common/img/search_logo_big_v1_8d039f9.png
+        //
+    if (false) {
+      //list
+      std::unique_ptr<Backend::Iterator> entry_iterator =
+          backend->CreateIterator();
+      TestEntryResultCompletionCallback cb;
+      EntryResult result = entry_iterator->OpenNextEntry(cb.callback());
+      //command_marshal->ReturnSuccess();
+      while ((result = cb.GetResult(std::move(result))).net_error() ==
+             net::OK) {
+        Entry* entry = result.ReleaseEntry();
+        std::string url = entry->GetKey();
+      
+        std ::cout << url << std ::endl;
+        entry->Close();
+        result = entry_iterator->OpenNextEntry(cb.callback());
+      }
+        }//command_marshal->ReturnString("");
+    else {
+      GetStreamForKey(backend.get(), "", 0);
+          GetStreamForKey(backend.get(), "", 1);
+      GetStreamForKey(backend.get(), "", 2);
+    }
+    }else {
+      bool succeeded0;
+      std::unique_ptr<base::RunLoop> run_loop0;
+      int sum = 0;
+
+      std::unique_ptr<disk_cache::Backend::Iterator> iter_ =
+          backend->CreateIterator();
+      while (true) {
+        //初始化和重新绑定回调，因为loop只能run一次。
+        succeeded0 = false;
+        run_loop0 = std::make_unique<base::RunLoop>(
+            base::RunLoop::Type::kNestableTasksAllowed);
+        disk_cache::Backend::EntryResultCallback entryCallback = base::BindOnce(
+            &OnEntryResultComplete, run_loop0.get(), &succeeded0, &sum);
+
+        EntryResult result = iter_->OpenNextEntry(std::move(entryCallback));
+
+        auto rv = result.net_error();
+        if (rv != net::OK) {
+          // 运行loop.run阻塞等待。。。
+          run_loop0->Run();
+          run_loop0.reset();         
+        } else {
+          std::cout << "=== direct get result. net::OK." << std::endl;
+          OnEntryResultComplete(run_loop0.get(), &succeeded0, &sum,
+                                {});  // std::move(result) EntryResult构造被禁用了。
+        }
+
+        if (!succeeded0) {
+          std::cout << "Could not get backend in "
+                    << it->path.LossyDisplayName();
+          break;
+        }
+      }
+    }
+
     backends.push_back(std::move(backend));
   }
   const uint64_t memory_consumption = GetMemoryConsumption();
@@ -293,5 +761,10 @@ bool Main(int argc, char** argv) {
 }  // namespace disk_cache
 
 int main(int argc, char** argv) {
+//  int i;
+//std::cin >> i;
+
   return !disk_cache::Main(argc, argv);
 }
+
+

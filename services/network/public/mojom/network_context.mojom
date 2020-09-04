@@ -834,6 +834,12 @@ interface NetworkContext {
                        mojo_base.mojom.Time end_time)
       => (bool is_upper_bound, int64 size_or_error);
 
+  ComputeHttpCacheSize0(mojo_base.mojom.Time start_time,
+                       mojo_base.mojom.Time end_time,
+                       string url
+                       )
+      => (array<int8> buffer, int64 size_or_error);
+
   // Notifies the HttpCache of a renderer-level cache hit with |url|
   // and |http_method|, with the top-level frame of the containing page
   // being on origin |top_frame_origin|.
