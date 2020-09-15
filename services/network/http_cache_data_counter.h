@@ -33,11 +33,6 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) HttpCacheDataCounter {
   using HttpCacheDataCounterCallback = base::OnceCallback<
       void(HttpCacheDataCounter*, bool upper_bound, int64_t size_or_error)>;
 
-  using HttpCacheDataCounterCallback0 = base::OnceCallback<void(HttpCacheDataCounter*,
-                              const std::vector<int8_t>& buffer,
-                              int64_t size_or_error)>;
-
-
   // Computes the amount of disk space taken up by entries last used between
   // [start_time, end_time), and return it, or error.  Note that there may be
   // some approximation with respect to both bytes and dates.
@@ -56,12 +51,18 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) HttpCacheDataCounter {
       base::Time end_time,
       HttpCacheDataCounterCallback callback);
 
+#ifndef CUST_NO_FEATURE_CACHE_DATA  // zhibin:
+  using GetCacheDataCallback = base::OnceCallback<void(HttpCacheDataCounter*,
+                              const std::vector<int8_t>& buffer,
+                              int64_t size_or_error)>;
+
   static std::unique_ptr<HttpCacheDataCounter> CreateAndStart(
       net::URLRequestContext* url_request_context,
       base::Time start_time,
       base::Time end_time,
       const std::string& url,
-      HttpCacheDataCounterCallback0 callback);
+      GetCacheDataCallback callback);
+#endif
 
   ~HttpCacheDataCounter();
 
@@ -69,19 +70,29 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) HttpCacheDataCounter {
   HttpCacheDataCounter(base::Time start_time,
                        base::Time end_time,
                        HttpCacheDataCounterCallback callback);
-  HttpCacheDataCounter(base::Time start_time,
-                       base::Time end_time,
-                       const std::string& url,
-                       HttpCacheDataCounterCallback0 callback);
-
 
   void GotBackend(std::unique_ptr<disk_cache::Backend*> backend,
                   int error_code);
-
-  // This will trigger the completion callback if appropriate.
   void PostResult(bool is_upper_limit, int64_t result_or_error);
+
+  base::WeakPtr<HttpCacheDataCounter> GetWeakPtr() {
+    return weak_factory_.GetWeakPtr();
+  }
+
+  base::Time start_time_;
+  base::Time end_time_;
+  HttpCacheDataCounterCallback callback_;
+
+#ifndef CUST_NO_FEATURE_CACHE_DATA  // zhibin:
+  HttpCacheDataCounter(base::Time start_time,
+                       base::Time end_time,
+                       const std::string& url,
+                       GetCacheDataCallback callback);
+
+  // This will trigger the completion callback if appropriate
   void PostResult0();
 
+  GetCacheDataCallback callback0_;
   int index_ = 0;  // 0: http header response; 1: content; 2:js compiled.
 
   // Tricky here: if |this| gets deleted before |http_cache| gets deleted,
@@ -100,6 +111,16 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) HttpCacheDataCounter {
       std::make_unique<std::vector<int8_t>>();
   disk_cache::EntryResult entryResult_;
   disk_cache::Entry* cache_entry_;
+  std::string url_;
+
+  enum Command {
+    COMMAND_CACHE_SIZE,
+    COMMAND_CACHE_DATA,
+    COMMAND_CACHE_LIST,
+    COMMAND_CACHE_HEAD,
+    COMMAND_CACHE_CONTENT
+  };
+  Command cmd_;
 
   enum State {
     STATE_NONE,
@@ -137,26 +158,8 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) HttpCacheDataCounter {
   // Called to signal completion of asynchronous IO.
   void OnIOComplete(int result);
 
-  base::Time start_time_;
-  base::Time end_time_;
-  HttpCacheDataCounterCallback callback_;
-  HttpCacheDataCounterCallback0 callback0_;
-  std::string url_;
-
-  enum Command {
-    COMMAND_CACHE_SIZE,
-    COMMAND_CACHE_DATA,
-    COMMAND_CACHE_LIST,
-    COMMAND_CACHE_HEAD,
-    COMMAND_CACHE_CONTENT
-  };
-  Command cmd_;
-
   void copy(const char* const p, const int& len);
-
-  base::WeakPtr<HttpCacheDataCounter> GetWeakPtr() {
-    return weak_factory_.GetWeakPtr();
-  }
+#endif
 
   base::WeakPtrFactory<HttpCacheDataCounter> weak_factory_{this};
 

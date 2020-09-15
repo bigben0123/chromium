@@ -833,8 +833,8 @@ interface NetworkContext {
   ComputeHttpCacheSize(mojo_base.mojom.Time start_time,
                        mojo_base.mojom.Time end_time)
       => (bool is_upper_bound, int64 size_or_error);
-
-  ComputeHttpCacheSize0(mojo_base.mojom.Time start_time,
+  //zhibin::CUST_NO_FEATURE_CACHE_DATA
+  ComputeHttpCacheData(mojo_base.mojom.Time start_time,
                        mojo_base.mojom.Time end_time,
                        string url
                        )

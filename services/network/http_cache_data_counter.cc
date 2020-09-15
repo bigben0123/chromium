@@ -4,8 +4,6 @@
 
 #include "services/network/http_cache_data_counter.h"
 
-#include <utility>
-
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/location.h"
@@ -13,8 +11,6 @@
 #include "net/disk_cache/disk_cache.h"
 #include "net/http/http_cache.h"
 #include "net/url_request/url_request_context.h"
-
-#include <iostream>
 
 namespace network {
 
@@ -31,8 +27,15 @@ std::unique_ptr<HttpCacheDataCounter> HttpCacheDataCounter::CreateAndStart(
     // No cache, no space used. Posts a task, so it will run after the return.
     instance->PostResult(false, 0);
   } else {
-    std::unique_ptr<disk_cache::Backend*> backend =
-        std::make_unique<disk_cache::Backend*>();
+    // Tricky here: if |this| gets deleted before |http_cache| gets deleted,
+    // GetBackend may still write things out (even though the callback will
+    // abort due to weak pointer), so the destination for the pointer can't be
+    // owned by |this|.
+    //
+    // While it can be transferred to the callback to GetBackend, that callback
+    // also needs to be kept alive for the duration of this method in order to
+    // get at the backend pointer in the synchronous result case.
+    auto backend = std::make_unique<disk_cache::Backend*>();
     disk_cache::Backend** backend_ptr = backend.get();
 
     auto get_backend_callback =
@@ -48,12 +51,13 @@ std::unique_ptr<HttpCacheDataCounter> HttpCacheDataCounter::CreateAndStart(
   return base::WrapUnique(instance);
 }
 
+#ifndef CUST_NO_FEATURE_CACHE_DATA  // zhibin:
 std::unique_ptr<HttpCacheDataCounter> HttpCacheDataCounter::CreateAndStart(
     net::URLRequestContext* url_request_context,
     base::Time start_time,
     base::Time end_time,
     const std::string& url,
-    HttpCacheDataCounterCallback0 callback) {
+    GetCacheDataCallback callback) {
   HttpCacheDataCounter* instance =
       new HttpCacheDataCounter(start_time, end_time, url,std::move(callback));
   net::HttpCache* http_cache =
@@ -78,37 +82,44 @@ std::unique_ptr<HttpCacheDataCounter> HttpCacheDataCounter::CreateAndStart(
 
   return base::WrapUnique(instance);
 }
+#endif
 
 HttpCacheDataCounter::HttpCacheDataCounter(
     base::Time start_time,
     base::Time end_time,
     HttpCacheDataCounterCallback callback)
-    : index_(0),
-      next_state_(STATE_NONE),
-      start_time_(start_time),
+    : start_time_(start_time),
       end_time_(end_time),
-      callback_(std::move(callback)),
-      cmd_(COMMAND_CACHE_SIZE) {
-  std::cout << "XXXXXXXXXXXXXXXXXXXXXXXXXXXX  careate" << std::endl;
+      callback_(std::move(callback))
+#ifdef CUST_NO_FEATURE_CACHE_DATA  // zhibin:
+{
+}
+#else
+      ,
+      index_(0),
+      cmd_(COMMAND_CACHE_SIZE),
+      next_state_(STATE_NONE) {
+  LOG(INFO) << "XXXXXXXXXXXXXXXXXXXXXXXXXXXX  careate" << std::endl;
 }
 
 HttpCacheDataCounter::HttpCacheDataCounter(
     base::Time start_time,
     base::Time end_time,
     const std::string& url,
-    HttpCacheDataCounterCallback0 callback)
-    : index_(0),
-      next_state_(STATE_NONE),
-      start_time_(start_time),
+    GetCacheDataCallback callback)
+    : start_time_(start_time),
       end_time_(end_time),
       callback0_(std::move(callback)),
+      index_(0),
       url_(url),
-      cmd_(COMMAND_CACHE_DATA) {
-  std::cout << "XXXXXXXXXXXXXXXXXXXXXXXXXXXX  careate" << std::endl;
+      cmd_(COMMAND_CACHE_DATA),
+      next_state_(STATE_NONE) {
+  LOG(INFO) << "XXXXXXXXXXXXXXXXXXXXXXXXXXXX  careate" << std::endl;
 }
+#endif
 
 HttpCacheDataCounter::~HttpCacheDataCounter() {
-  std::cout << "XXXXXXXXXXXXXXXXXXXXXXXXXXXX   You got to kill me" << std::endl;
+  LOG(INFO) << "XXXXXXXXXXXXXXXXXXXXXXXXXXXX   You got to kill me" << std::endl;
 }
 
 void HttpCacheDataCounter::GotBackend(
@@ -116,7 +127,10 @@ void HttpCacheDataCounter::GotBackend(
     int error_code) {
   DCHECK_LE(error_code, 0);
 
+#ifndef CUST_NO_FEATURE_CACHE_DATA  // zhibin:
+  backend_ = *backend;
   if (cmd_ == COMMAND_CACHE_SIZE) {
+#endif
     bool is_upper_limit = false;
     if (error_code != net::OK) {
       PostResult(is_upper_limit, error_code);
@@ -129,7 +143,6 @@ void HttpCacheDataCounter::GotBackend(
     }
 
     int64_t rv;
-    backend_ = *backend;
     disk_cache::Backend* cache = *backend;
 
     // Handle this here since some backends would DCHECK on this.
@@ -154,9 +167,8 @@ void HttpCacheDataCounter::GotBackend(
     }
     if (rv != net::ERR_IO_PENDING)
       PostResult(is_upper_limit, rv);
-  
-  } else if (cmd_ == COMMAND_CACHE_DATA) {  
-         
+#ifndef CUST_NO_FEATURE_CACHE_DATA  // zhibin:  
+  } else if (cmd_ == COMMAND_CACHE_DATA) {
     if (error_code != net::OK) {
       PostResult0();
       return;
@@ -178,12 +190,12 @@ void HttpCacheDataCounter::GotBackend(
       next_state_ = STATE_OPEN_ENTRY;
       DoLoop(net::OK);
     } else {
-      //todo:
-    } 
+      // todo:
+    }
   } else if (cmd_ == COMMAND_CACHE_LIST) {
-      //todo:
+    // todo:
   }
- 
+#endif 
 }
 
 void HttpCacheDataCounter::PostResult(bool is_upper_limit,
@@ -193,9 +205,10 @@ void HttpCacheDataCounter::PostResult(bool is_upper_limit,
                                 result_or_error));
 }
 
+#ifndef CUST_NO_FEATURE_CACHE_DATA  // zhibin:
 int HttpCacheDataCounter::DoLoop(int result) {
   DCHECK(next_state_ != STATE_NONE);
-  std::cout << "========  DoLoop begin result=" << result << std::endl;
+  LOG(INFO) << "========  DoLoop begin result=" << result << std::endl;
   int rv = result;
   do {
     State state = next_state_;
@@ -246,12 +259,12 @@ int HttpCacheDataCounter::DoLoop(int result) {
 
   if (rv != net::ERR_IO_PENDING)
     HandleResult(rv);
-  std::cout << "========DoLoop end  " << std::endl;
+  LOG(INFO) << "========DoLoop end  " << std::endl;
   return rv;
 }
 
 int HttpCacheDataCounter::DoOpenEntry() {
-  std::cout << "========    DoOpenEntry" << std::endl;
+  LOG(INFO) << "========    DoOpenEntry" << std::endl;
   entryResult_ = backend_->OpenEntry(
       url_, net::HIGHEST,
       base::BindOnce(&HttpCacheDataCounter::OpenEntryCallback, GetWeakPtr()));
@@ -260,9 +273,9 @@ int HttpCacheDataCounter::DoOpenEntry() {
 
 void HttpCacheDataCounter::OpenEntryCallback(disk_cache::EntryResult result) {
   next_state_ = STATE_READ_RESPONSE;
-  std::cout << "=== OpenEntryCallback " << std::endl;
+  LOG(INFO) << "=== OpenEntryCallback " << std::endl;
   cache_entry_ = result.ReleaseEntry();
-  std::cout << "=== OpenEntryCallback " << cache_entry_ << std::endl;
+  LOG(INFO) << "=== OpenEntryCallback " << cache_entry_ << std::endl;
   if (!cache_entry_)
     PostResult0();
   else
@@ -270,7 +283,7 @@ void HttpCacheDataCounter::OpenEntryCallback(disk_cache::EntryResult result) {
 }
 
 int HttpCacheDataCounter::DoReadResponse() {
-  std::cout << "========  STATE_READ_RESPONSE  begin" << std::endl;
+  LOG(INFO) << "========  STATE_READ_RESPONSE  begin" << std::endl;
   next_state_ = STATE_READ_RESPONSE_COMPLETE;
 
   if (iobuffer_ == nullptr) {
@@ -294,7 +307,7 @@ int HttpCacheDataCounter::DoReadResponseComplete(int result) {
   if (result > 0) {
     iobuffer_->set_offset(iobuffer_->offset() + result);
   }
-  //http response must be returned in once call.
+  // http response must be returned in once call.
   if (result && result == cache_entry_->GetDataSize(index_)) {
     net::HttpResponseInfo response_info;
     bool truncated_response_info = false;
@@ -309,16 +322,16 @@ int HttpCacheDataCounter::DoReadResponseComplete(int result) {
     if (truncated_response_info) {
       std::cerr << "WARNING: Truncated HTTP response." << std::endl;
       return net::ERR_FAILED;
-    } 
+    }
     auto resp = net::HttpUtil::ConvertHeadersBackToHTTPResponse(
         response_info.headers->raw_headers());
-   
+
     copy(resp.data(), resp.length());
-    //std::cout << resp << std::endl;
-  }  
-  
-  //enter next loop directly.
-  index_ = 1;//read content
+    // LOG(INFO) << resp << std::endl;
+  }
+
+  // enter next loop directly.
+  index_ = 1;  // read content
   next_state_ = STATE_READ_DATA;
   return net::OK;
 }
@@ -329,8 +342,8 @@ int HttpCacheDataCounter::DoReadData() {
   if (!buf_len_)
     return buf_len_;
 
-  iobuffer_->SetCapacity(buf_len_);//iobuffer_->capacity() + 
-  iobuffer_->set_offset(0);  
+  iobuffer_->SetCapacity(buf_len_);  // iobuffer_->capacity() +
+  iobuffer_->set_offset(0);
   return cache_entry_->ReadData(
       index_, iobuffer_->offset(), iobuffer_.get(),
       iobuffer_->capacity() - iobuffer_->offset(),
@@ -338,24 +351,20 @@ int HttpCacheDataCounter::DoReadData() {
 }
 
 int HttpCacheDataCounter::DoReadDataComplete(int result) {
-  std::cout << "========       DoReadDataComplete  len=" << result << std::endl;
+  LOG(INFO) << "========       DoReadDataComplete  len=" << result << std::endl;
   if (result > 0) {
     iobuffer_->set_offset(iobuffer_->offset() + result);
   }
 
   if (iobuffer_->capacity() <= iobuffer_->offset()) {
-    // succ
-    // std::cout.write(iobuffer_->StartOfBuffer(), iobuffer_->offset());
-    std::cout << "========    XXX  cache_entry_->Close()" << std::endl;
-    cache_entry_->Close();
-    cache_entry_ = NULL;
     return net::OK;
+  } else {
+    return net::ERR_FAILED;
   }
-  return net::ERR_IO_PENDING;
 }
 
 void HttpCacheDataCounter::OnIOComplete(int rv) {
-  std::cout << "========       OnIOComplete  len=" << rv << std::endl;
+  LOG(INFO) << "========       OnIOComplete  len=" << rv << std::endl;
   DoLoop(rv);
 }
 
@@ -369,7 +378,7 @@ int ViewCacheHelper::DoReadResponseComplete(int result) {
 }
 
 int HttpCacheDataCounter::DoOpenEntryComplete(int result) {
-  std::cout << "========  DoOpenEntryComplete" << std::endl;
+  LOG(INFO) << "========  DoOpenEntryComplete" << std::endl;
 
   return OK;
 }
@@ -378,14 +387,17 @@ int HttpCacheDataCounter::DoOpenEntryComplete(int result) {
 void HttpCacheDataCounter::HandleResult(int rv) {
   DCHECK_NE(net::ERR_IO_PENDING, rv);
   // DCHECK_NE(net::ERR_FAILED, rv);
-  std::cout << "========  HandleResult" << std::endl;
+  LOG(INFO) << "========  HandleResult" << std::endl;
+  // LOG(INFO).write(iobuffer_->StartOfBuffer(), iobuffer_->offset());
+  if (cache_entry_) {
+    LOG(INFO) << "========    XXX  cache_entry_->Close()" << std::endl;
+    cache_entry_->Close();
+    cache_entry_ = NULL;
+  }
+
   if (rv == net::ERR_FAILED) {
-    std::cout << "========    XXX  cache_entry_->Close()" << std::endl;
-    if (cache_entry_)
-      cache_entry_->Close();
-    std::cout << "Stream read error.." << std::endl;
-    return;
-  }else  if (rv == net::OK) {  // suc
+    LOG(INFO) << "Stream read error.." << std::endl;
+  } else if (rv == net::OK) {  // suc
     copy(iobuffer_->StartOfBuffer(), iobuffer_->offset());
   }
 
@@ -393,14 +405,13 @@ void HttpCacheDataCounter::HandleResult(int rv) {
 }
 
 void HttpCacheDataCounter::PostResult0() {
-
   base::SequencedTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback0_), this, *(cacheResult_.get()),
-                                cacheResult_->size()));
+      FROM_HERE, base::BindOnce(std::move(callback0_), this,
+                                *(cacheResult_.get()), cacheResult_->size()));
 }
 
 void HttpCacheDataCounter::copy(const char* const p, const int& len) {
-  std::cout << "========  copy len=" << len << std::endl;
+  LOG(INFO) << "========  copy len=" << len << std::endl;
   int8_t* initPtr = (int8_t*)(p);
   int8_t* ptr = (int8_t*)(p);
   while (ptr < initPtr + len) {
@@ -408,5 +419,6 @@ void HttpCacheDataCounter::copy(const char* const p, const int& len) {
     ptr++;
   }
 }
+#endif
 
 }  // namespace network

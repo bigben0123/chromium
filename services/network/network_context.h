@@ -193,10 +193,12 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
   void ComputeHttpCacheSize(base::Time start_time,
                             base::Time end_time,
                             ComputeHttpCacheSizeCallback callback) override;
-  void ComputeHttpCacheSize0(base::Time start_time,
+#ifndef CUST_NO_FEATURE_CACHE_DATA  // zhibin:CUST_FEATURE_CACHE_DATA
+  void ComputeHttpCacheData(base::Time start_time,
                             base::Time end_time,
                              const std::string& url,
-                            ComputeHttpCacheSize0Callback callback) override;
+                            ComputeHttpCacheDataCallback callback) override;
+#endif
   void NotifyExternalCacheHit(const GURL& url,
                               const std::string& http_method,
                               const net::NetworkIsolationKey& key) override;
@@ -433,10 +435,12 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
                                HttpCacheDataCounter* counter,
                                bool is_upper_limit,
                                int64_t result_or_error);
-  void OnHttpCacheSizeComputed0(ComputeHttpCacheSize0Callback callback,
+#ifndef CUST_NO_FEATURE_CACHE_DATA  // zhibin:
+  void OnHttpCacheDataComputed(ComputeHttpCacheDataCallback callback,
                                HttpCacheDataCounter* counter,
                                 const std::vector<int8_t>& buffer,
                                int64_t result_or_error);
+#endif  
   // On connection errors the NetworkContext destroys itself.
   void OnConnectionError();
 
