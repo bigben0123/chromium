@@ -98,9 +98,7 @@ HttpCacheDataCounter::HttpCacheDataCounter(
       ,
       index_(0),
       cmd_(COMMAND_CACHE_SIZE),
-      next_state_(STATE_NONE) {
-  LOG(INFO) << "XXXXXXXXXXXXXXXXXXXXXXXXXXXX  careate" << std::endl;
-}
+      next_state_(STATE_NONE) {}
 
 HttpCacheDataCounter::HttpCacheDataCounter(
     base::Time start_time,
@@ -113,14 +111,10 @@ HttpCacheDataCounter::HttpCacheDataCounter(
       index_(0),
       url_(url),
       cmd_(COMMAND_CACHE_DATA),
-      next_state_(STATE_NONE) {
-  LOG(INFO) << "XXXXXXXXXXXXXXXXXXXXXXXXXXXX  careate" << std::endl;
-}
+      next_state_(STATE_NONE) {}
 #endif
 
-HttpCacheDataCounter::~HttpCacheDataCounter() {
-  LOG(INFO) << "XXXXXXXXXXXXXXXXXXXXXXXXXXXX   You got to kill me" << std::endl;
-}
+HttpCacheDataCounter::~HttpCacheDataCounter() {}
 
 void HttpCacheDataCounter::GotBackend(
     std::unique_ptr<disk_cache::Backend*> backend,
@@ -368,26 +362,10 @@ void HttpCacheDataCounter::OnIOComplete(int rv) {
   DoLoop(rv);
 }
 
-#if 0
-int ViewCacheHelper::DoReadResponseComplete(int result) {
-  HandleResult(rv);
-
-  index_ = 0;
-  next_state_ = STATE_NONE;
-  return OK;
-}
-
-int HttpCacheDataCounter::DoOpenEntryComplete(int result) {
-  LOG(INFO) << "========  DoOpenEntryComplete" << std::endl;
-
-  return OK;
-}
-#endif
-
 void HttpCacheDataCounter::HandleResult(int rv) {
   DCHECK_NE(net::ERR_IO_PENDING, rv);
   // DCHECK_NE(net::ERR_FAILED, rv);
-  LOG(INFO) << "========  HandleResult" << std::endl;
+  LOG(INFO) << "========  HandleResult rv="<< rv << std::endl;
   // LOG(INFO).write(iobuffer_->StartOfBuffer(), iobuffer_->offset());
   if (cache_entry_) {
     LOG(INFO) << "========    XXX  cache_entry_->Close()" << std::endl;
@@ -396,7 +374,7 @@ void HttpCacheDataCounter::HandleResult(int rv) {
   }
 
   if (rv == net::ERR_FAILED) {
-    LOG(INFO) << "Stream read error.." << std::endl;
+    LOG(INFO) << "Cache read error with URL="<< url_ << std::endl;
   } else if (rv == net::OK) {  // suc
     copy(iobuffer_->StartOfBuffer(), iobuffer_->offset());
   }
