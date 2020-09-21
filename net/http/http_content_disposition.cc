@@ -80,7 +80,11 @@ bool DecodeBQEncoding(const std::string& part,
 }
 
 bool DecodeWord(const std::string& encoded_word,
+#ifndef CUST_NO_CHARSET_WORKROUND
+                std::string referrer_charset,
+#else
                 const std::string& referrer_charset,
+#endif
                 bool* is_rfc2047,
                 std::string* output,
                 int* parse_result_flags) {
@@ -94,6 +98,9 @@ bool DecodeWord(const std::string& encoded_word,
     if (base::IsStringUTF8(encoded_word)) {
       *output = encoded_word;
     } else {
+#ifndef CUST_NO_CHARSET_WORKROUND
+      referrer_charset = "GB18030";
+#endif
       base::string16 utf16_output;
       if (!referrer_charset.empty() &&
           ConvertToUTF16(encoded_word, referrer_charset.c_str(),
