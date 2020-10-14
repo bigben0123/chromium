@@ -61,6 +61,8 @@
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/service_manager/public/cpp/connector.h"
 
+#include "net/base/hex_utils.h"
+
 #if defined(OS_ANDROID)
 #include "components/download/internal/common/android/download_collection_bridge.h"
 #endif  // defined(OS_ANDROID)
@@ -398,6 +400,14 @@ DownloadItemImpl::DownloadItemImpl(DownloadItemImplDelegate* delegate,
       fetch_error_body_(info.fetch_error_body),
       request_headers_(info.request_headers),
       download_source_(info.download_source) {
+  
+    {
+    LOG(INFO) << "=== info.content_disposition assign to DownloadItemImpl. "
+                 "content_disposition_ ===";
+     LOG(INFO) << info.content_disposition;
+     auto sss = base::StringPiece(info.content_disposition);
+     LOG(INFO) << net::HexDump(sss);
+  }
   delegate_->Attach();
   Init(true /* actively downloading */, TYPE_ACTIVE_DOWNLOAD);
   allow_metered_ |= delegate_->IsActiveNetworkMetered();
@@ -2627,3 +2637,4 @@ const char* DownloadItemImpl::DebugResumeModeString(ResumeMode mode) {
 }
 
 }  // namespace download
+

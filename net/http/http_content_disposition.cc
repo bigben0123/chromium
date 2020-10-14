@@ -14,6 +14,7 @@
 #include "net/base/escape.h"
 #include "net/base/net_string_util.h"
 #include "net/http/http_util.h"
+#include "net/base/hex_utils.h"
 
 namespace net {
 
@@ -96,8 +97,10 @@ bool DecodeWord(const std::string& encoded_word,
   if (!base::IsStringASCII(encoded_word)) {
     // Try UTF-8, referrer_charset and the native OS default charset in turn.
     if (base::IsStringUTF8(encoded_word)) {
+LOG(INFO) << "====== filename is  UTF8==================";
       *output = encoded_word;
     } else {
+LOG(INFO) << "====== filename is  gbk==================";
 #ifndef CUST_NO_CHARSET_WORKROUND
       referrer_charset = "GB18030";
 #endif
@@ -106,7 +109,16 @@ bool DecodeWord(const std::string& encoded_word,
           ConvertToUTF16(encoded_word, referrer_charset.c_str(),
                          &utf16_output)) {
         *output = base::UTF16ToUTF8(utf16_output);
+
+        { 
+          LOG(INFO) << "====== after encode to UTF8";
+          auto sss = base::StringPiece(*output);
+          LOG(INFO)<<HexDump(sss);
+        }
+       
+
       } else {
+LOG(INFO) << "====== filename don't know==================";
         *output = base::WideToUTF8(base::SysNativeMBToWide(encoded_word));
       }
     }

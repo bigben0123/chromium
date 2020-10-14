@@ -11,7 +11,7 @@
 #include "components/download/public/common/download_url_parameters.h"
 #include "components/download/public/common/download_utils.h"
 #include "net/http/http_status_code.h"
-
+#include "net/base/hex_utils.h"
 namespace download {
 
 namespace {
@@ -151,6 +151,16 @@ DownloadResponseHandler::CreateDownloadCreateInfo(
   create_info->download_source = download_source_;
   create_info->request_initiator = request_initiator_;
 
+
+  
+    {
+    net::HttpResponseHeaders* header0 = head.headers.get();
+      
+    LOG(INFO) << "===== RAW HEADER ====";
+    auto sss = base::StringPiece((header0->raw_headers()));
+    LOG(INFO) << net::HexDump(sss);
+  }
+
   HandleResponseHeaders(head.headers.get(), create_info.get());
   return create_info;
 }
@@ -268,3 +278,4 @@ void DownloadResponseHandler::OnResponseStarted(
 }
 
 }  // namespace download
+
