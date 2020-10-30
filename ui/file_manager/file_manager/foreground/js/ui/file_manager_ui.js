@@ -118,6 +118,12 @@ class FileManagerUI {
     this.formatDialog = queryRequiredElement('#format-dialog');
 
     /**
+     * Dialog for password prompt
+     * @type {?FilesPasswordDialog}
+     */
+    this.passwordDialog_ = null;
+
+    /**
      * The container element of the dialog.
      * @type {!HTMLElement}
      */
@@ -368,6 +374,13 @@ class FileManagerUI {
         /** @type {!FilesToast} */ (document.querySelector('files-toast'));
 
     /**
+     * Container of file-type filter buttons.
+     * @const {!HTMLElement}
+     */
+    this.fileTypeFilterContainer =
+        queryRequiredElement('#file-type-filter-container', this.element);
+
+    /**
      * A hidden div that can be used to announce text to screen
      * reader/ChromeVox.
      * @private {!HTMLElement}
@@ -403,6 +416,20 @@ class FileManagerUI {
   }
 
   /**
+   * Gets password dialog.
+   * @return {!Element}
+   */
+  get passwordDialog() {
+    if (this.passwordDialog_) {
+      return this.passwordDialog_;
+    }
+    this.passwordDialog_ = /** @type {!FilesPasswordDialog} */ (
+        document.createElement('files-password-dialog'));
+    this.element.appendChild(this.passwordDialog_);
+    return this.passwordDialog_;
+  }
+
+  /**
    * Initializes here elements, which are expensive or hidden in the beginning.
    *
    * @param {!FileTable} table
@@ -412,7 +439,8 @@ class FileManagerUI {
   initAdditionalUI(table, grid, volumeManager) {
     // List container.
     this.listContainer = new ListContainer(
-        queryRequiredElement('#list-container', this.element), table, grid);
+        queryRequiredElement('#list-container', this.element), table, grid,
+        this.dialogType_);
 
     // Location line.
     this.locationLine = new LocationLine(

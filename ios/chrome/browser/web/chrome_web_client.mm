@@ -22,7 +22,6 @@
 #include "ios/chrome/browser/chrome_switches.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
 #include "ios/chrome/browser/ios_chrome_main_parts.h"
-#include "ios/chrome/browser/passwords/password_manager_features.h"
 #import "ios/chrome/browser/reading_list/offline_page_tab_helper.h"
 #import "ios/chrome/browser/safe_browsing/safe_browsing_blocking_page.h"
 #import "ios/chrome/browser/safe_browsing/safe_browsing_error.h"
@@ -33,8 +32,15 @@
 #import "ios/chrome/browser/web/error_page_util.h"
 #include "ios/chrome/browser/web/features.h"
 #import "ios/components/security_interstitials/ios_blocking_page_tab_helper.h"
+#import "ios/components/security_interstitials/legacy_tls/legacy_tls_blocking_page.h"
+#import "ios/components/security_interstitials/legacy_tls/legacy_tls_controller_client.h"
+#import "ios/components/security_interstitials/legacy_tls/legacy_tls_tab_allow_list.h"
+#import "ios/components/security_interstitials/lookalikes/lookalike_url_blocking_page.h"
+#import "ios/components/security_interstitials/lookalikes/lookalike_url_container.h"
+#import "ios/components/security_interstitials/lookalikes/lookalike_url_controller_client.h"
 #import "ios/components/security_interstitials/lookalikes/lookalike_url_error.h"
 #include "ios/components/webui/web_ui_url_constants.h"
+#import "ios/net/protocol_handler_util.h"
 #include "ios/public/provider/chrome/browser/browser_url_rewriter_provider.h"
 #import "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
@@ -44,7 +50,9 @@
 #include "ios/web/common/user_agent.h"
 #include "ios/web/public/navigation/browser_url_rewriter.h"
 #include "ios/web/public/navigation/navigation_manager.h"
+#include "net/base/net_errors.h"
 #include "net/http/http_util.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "url/gurl.h"
@@ -98,9 +106,45 @@ NSString* GetSafeBrowsingErrorPageHTML(web::WebState* web_state,
 }
 
 // Returns the lookalike error page HTML.
-NSString* GetLookalikeErrorPageHTML(web::WebState* web_state,
+NSString* GetLookalikeUrlErrorPageHtml(web::WebState* web_state,
+                                       int64_t navigation_id) {
+  // Fetch the lookalike URL info from the WebState's container.
+  LookalikeUrlContainer* container =
+      LookalikeUrlContainer::FromWebState(web_state);
+  std::unique_ptr<LookalikeUrlContainer::LookalikeUrlInfo> lookalike_info =
+      container->ReleaseLookalikeUrlInfo();
+
+  // Construct the blocking page and associate it with the WebState.
+  std::unique_ptr<security_interstitials::IOSSecurityInterstitialPage> page =
+      std::make_unique<LookalikeUrlBlockingPage>(
+          web_state, lookalike_info->safe_url, lookalike_info->request_url,
+          ukm::ConvertToSourceId(navigation_id,
+                                 ukm::SourceIdType::NAVIGATION_ID),
+          lookalike_info->match_type,
+          std::make_unique<LookalikeUrlControllerClient>(
+              web_state, lookalike_info->safe_url, lookalike_info->request_url,
+              GetApplicationContext()->GetApplicationLocale()));
+  std::string error_page_content = page->GetHtmlContents();
+  security_interstitials::IOSBlockingPageTabHelper::FromWebState(web_state)
+      ->AssociateBlockingPage(navigation_id, std::move(page));
+
+  return base::SysUTF8ToNSString(error_page_content);
+}
+
+// Returns the legacy TLS error page HTML.
+NSString* GetLegacyTLSErrorPageHTML(web::WebState* web_state,
                                     int64_t navigation_id) {
-  std::string error_page_content = "lookalike error";
+  // Construct the blocking page and associate it with the WebState.
+  std::unique_ptr<security_interstitials::IOSSecurityInterstitialPage> page =
+      std::make_unique<LegacyTLSBlockingPage>(
+          web_state, web_state->GetVisibleURL() /*request_url*/,
+          std::make_unique<LegacyTLSControllerClient>(
+              web_state, web_state->GetVisibleURL(),
+              GetApplicationContext()->GetApplicationLocale()));
+  std::string error_page_content = page->GetHtmlContents();
+  security_interstitials::IOSBlockingPageTabHelper::FromWebState(web_state)
+      ->AssociateBlockingPage(navigation_id, std::move(page));
+
   return base::SysUTF8ToNSString(error_page_content);
 }
 
@@ -245,10 +289,6 @@ NSString* ChromeWebClient::GetDocumentStartScriptForMainFrame(
   NSMutableArray* scripts = [NSMutableArray array];
   [scripts addObject:GetPageScript(@"chrome_bundle_main_frame")];
 
-  if (base::FeatureList::IsEnabled(features::kCredentialManager)) {
-    [scripts addObject:GetPageScript(@"credential_manager")];
-  }
-
   return [scripts componentsJoinedByString:@";"];
 }
 
@@ -259,15 +299,21 @@ void ChromeWebClient::AllowCertificateError(
     const GURL& request_url,
     bool overridable,
     int64_t navigation_id,
-    const base::Callback<void(bool)>& callback) {
+    base::OnceCallback<void(bool)> callback) {
   base::OnceCallback<void(NSString*)> null_callback;
   // TODO(crbug.com/760873): IOSSSLErrorHandler will present an interstitial
   // for the user to decide if it is safe to proceed.
   // Handle the case of web_state not presenting UI to users like prerender tabs
   // or web_state used to fetch offline content in Reading List.
-  IOSSSLErrorHandler::HandleSSLError(web_state, cert_error, info, request_url,
-                                     overridable, navigation_id, callback,
-                                     std::move(null_callback));
+  IOSSSLErrorHandler::HandleSSLError(
+      web_state, cert_error, info, request_url, overridable, navigation_id,
+      std::move(callback), std::move(null_callback));
+}
+
+bool ChromeWebClient::IsLegacyTLSAllowedForHost(web::WebState* web_state,
+                                                const std::string& hostname) {
+  return LegacyTLSTabAllowList::FromWebState(web_state)->IsDomainAllowed(
+      hostname);
 }
 
 void ChromeWebClient::PrepareErrorPage(
@@ -311,7 +357,11 @@ void ChromeWebClient::PrepareErrorPage(
     // Only kLookalikeUrlErrorCode is supported.
     DCHECK_EQ(kLookalikeUrlErrorCode, final_underlying_error.code);
     std::move(error_html_callback)
-        .Run(GetLookalikeErrorPageHTML(web_state, navigation_id));
+        .Run(GetLookalikeUrlErrorPageHtml(web_state, navigation_id));
+  } else if ([final_underlying_error.domain isEqual:net::kNSErrorDomain] &&
+             final_underlying_error.code == net::ERR_SSL_OBSOLETE_VERSION) {
+    std::move(error_html_callback)
+        .Run(GetLegacyTLSErrorPageHTML(web_state, navigation_id));
   } else if (info.has_value()) {
     base::OnceCallback<void(bool)> proceed_callback;
     base::OnceCallback<void(NSString*)> blocking_page_callback =

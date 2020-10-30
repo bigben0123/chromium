@@ -168,8 +168,7 @@ SkColor NativeThemeMac::GetSystemColor(ColorId color_id,
   // once NativeTheme.cc handles kColorProviderReirection and
   // kPlatformHighContrast both being on.
   if ((base::FeatureList::IsEnabled(features::kColorProviderRedirection) &&
-       color_scheme != ColorScheme::kPlatformHighContrast) ||
-      should_only_use_dark_colors_)
+       color_scheme != ColorScheme::kPlatformHighContrast))
     return NativeTheme::GetSystemColor(color_id, color_scheme);
 
   if (UsesHighContrastColors()) {
@@ -238,6 +237,13 @@ base::Optional<SkColor> NativeThemeMac::GetOSColor(
     default:
       return base::nullopt;
   }
+}
+
+NativeThemeAura::PreferredContrast NativeThemeMac::CalculatePreferredContrast()
+    const {
+  return UsesHighContrastColors()
+             ? NativeThemeAura::PreferredContrast::kMore
+             : NativeThemeAura::PreferredContrast::kNoPreference;
 }
 
 void NativeThemeMac::Paint(cc::PaintCanvas* canvas,
@@ -577,8 +583,7 @@ void NativeThemeMac::PaintMenuItemBackground(
 
 NativeThemeMac::NativeThemeMac(bool configure_web_instance,
                                bool should_only_use_dark_colors)
-    : NativeThemeBase(should_only_use_dark_colors),
-      should_only_use_dark_colors_(should_only_use_dark_colors) {
+    : NativeThemeBase(should_only_use_dark_colors) {
   if (!should_only_use_dark_colors)
     InitializeDarkModeStateAndObserver();
 
@@ -593,6 +598,8 @@ NativeThemeMac::NativeThemeMac(bool configure_web_instance,
                          queue:nil
                     usingBlock:^(NSNotification* notification) {
                       theme->set_high_contrast(IsHighContrast());
+                      theme->set_preferred_contrast(
+                          CalculatePreferredContrast());
                       theme->NotifyObservers();
                     }];
   }
@@ -637,6 +644,7 @@ void NativeThemeMac::ConfigureWebInstance() {
   NativeTheme* web_instance = NativeTheme::GetInstanceForWeb();
   web_instance->set_use_dark_colors(IsDarkMode());
   web_instance->set_preferred_color_scheme(CalculatePreferredColorScheme());
+  web_instance->set_preferred_contrast(CalculatePreferredContrast());
   web_instance->set_high_contrast(IsHighContrast());
 
   // Add the web native theme as an observer to stay in sync with dark mode,

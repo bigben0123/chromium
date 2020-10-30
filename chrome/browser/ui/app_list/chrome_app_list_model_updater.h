@@ -23,6 +23,9 @@ class ChromeAppListItem;
 class ChromeAppListModelUpdater : public AppListModelUpdater {
  public:
   explicit ChromeAppListModelUpdater(Profile* profile);
+  ChromeAppListModelUpdater(const ChromeAppListModelUpdater&) = delete;
+  ChromeAppListModelUpdater& operator=(const ChromeAppListModelUpdater&) =
+      delete;
   ~ChromeAppListModelUpdater() override;
 
   void SetActive(bool active) override;
@@ -93,13 +96,12 @@ class ChromeAppListModelUpdater : public AppListModelUpdater {
       app_list::AppListSyncableService::SyncItem* sync_item,
       bool update_name,
       bool update_folder) override;
+  void NotifyProcessSyncChangesFinished() override;
 
   // Methods to handle model update from ash:
-  void OnFolderCreated(std::unique_ptr<ash::AppListItemMetadata> item) override;
-  void OnFolderDeleted(std::unique_ptr<ash::AppListItemMetadata> item) override;
+  void OnItemAdded(std::unique_ptr<ash::AppListItemMetadata> item) override;
   void OnItemUpdated(std::unique_ptr<ash::AppListItemMetadata> item) override;
-  void OnPageBreakItemAdded(const std::string& id,
-                            const syncer::StringOrdinal& position) override;
+  void OnFolderDeleted(std::unique_ptr<ash::AppListItemMetadata> item) override;
   void OnPageBreakItemDeleted(const std::string& id) override;
 
   void AddObserver(AppListModelUpdaterObserver* observer) override;
@@ -117,8 +119,6 @@ class ChromeAppListModelUpdater : public AppListModelUpdater {
   bool search_engine_is_google_ = false;
 
   base::WeakPtrFactory<ChromeAppListModelUpdater> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ChromeAppListModelUpdater);
 };
 
 #endif  // CHROME_BROWSER_UI_APP_LIST_CHROME_APP_LIST_MODEL_UPDATER_H_

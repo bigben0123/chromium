@@ -27,7 +27,9 @@ namespace blink {
 //
 // This needs its static position [1] to be placed correctly in its containing
 // block. And in the case of fragmentation, this also needs the containing block
-// fragment to be placed correctly within the fragmentation context root.
+// fragment to be placed correctly within the fragmentation context root. In
+// addition, the containing block offset is needed to compute the start offset
+// and the initial fragmentainer of an out-of-flow positioned-node.
 //
 // This is struct is allowed to be stored/persisted.
 //
@@ -37,17 +39,20 @@ struct CORE_EXPORT NGPhysicalOutOfFlowPositionedNode {
   NGPhysicalStaticPosition static_position;
   // Continuation root of the optional inline container.
   const LayoutInline* inline_container;
+  PhysicalOffset containing_block_offset;
   scoped_refptr<const NGPhysicalContainerFragment> containing_block_fragment;
 
   NGPhysicalOutOfFlowPositionedNode(
       NGBlockNode node,
       NGPhysicalStaticPosition static_position,
       const LayoutInline* inline_container = nullptr,
+      PhysicalOffset containing_block_offset = PhysicalOffset(),
       scoped_refptr<const NGPhysicalContainerFragment>
           containing_block_fragment = nullptr)
       : node(node),
         static_position(static_position),
         inline_container(inline_container),
+        containing_block_offset(containing_block_offset),
         containing_block_fragment(std::move(containing_block_fragment)) {
     DCHECK(!inline_container ||
            inline_container == inline_container->ContinuationRoot());
@@ -66,6 +71,7 @@ struct NGLogicalOutOfFlowPositionedNode {
   // Continuation root of the optional inline container.
   const LayoutInline* inline_container;
   bool needs_block_offset_adjustment;
+  LogicalOffset containing_block_offset;
   scoped_refptr<const NGPhysicalContainerFragment> containing_block_fragment;
 
   NGLogicalOutOfFlowPositionedNode(
@@ -73,12 +79,14 @@ struct NGLogicalOutOfFlowPositionedNode {
       NGLogicalStaticPosition static_position,
       const LayoutInline* inline_container = nullptr,
       bool needs_block_offset_adjustment = false,
+      LogicalOffset containing_block_offset = LogicalOffset(),
       scoped_refptr<const NGPhysicalContainerFragment>
           containing_block_fragment = nullptr)
       : node(node),
         static_position(static_position),
         inline_container(inline_container),
         needs_block_offset_adjustment(needs_block_offset_adjustment),
+        containing_block_offset(containing_block_offset),
         containing_block_fragment(std::move(containing_block_fragment)) {
     DCHECK(!inline_container ||
            inline_container == inline_container->ContinuationRoot());

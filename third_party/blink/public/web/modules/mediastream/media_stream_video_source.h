@@ -20,10 +20,10 @@
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom-shared.h"
 #include "third_party/blink/public/platform/modules/mediastream/media_stream_types.h"
 #include "third_party/blink/public/platform/modules/mediastream/secure_display_link_tracker.h"
+#include "third_party/blink/public/platform/modules/mediastream/web_media_stream_source.h"
+#include "third_party/blink/public/platform/modules/mediastream/web_media_stream_track.h"
 #include "third_party/blink/public/platform/modules/mediastream/web_platform_media_stream_source.h"
 #include "third_party/blink/public/platform/web_common.h"
-#include "third_party/blink/public/platform/web_media_stream_source.h"
-#include "third_party/blink/public/platform/web_media_stream_track.h"
 #include "third_party/blink/public/web/modules/mediastream/encoded_video_frame.h"
 
 namespace base {
@@ -168,6 +168,8 @@ class BLINK_MODULES_EXPORT MediaStreamVideoSource
   void UpdateNumEncodedSinks();
 
   bool IsRunning() const { return state_ == STARTED; }
+
+  bool IsStoppedForRestart() const { return state_ == STOPPED_FOR_RESTART; }
 
   size_t NumTracks() const {
     DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);

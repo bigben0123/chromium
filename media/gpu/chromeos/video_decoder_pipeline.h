@@ -42,7 +42,7 @@ class MEDIA_GPU_EXPORT DecoderInterface {
   // TODO(crbug.com/998413): Replace VideoFrame to GpuMemoryBuffer-based
   // instance.
   using OutputCB = base::RepeatingCallback<void(scoped_refptr<VideoFrame>)>;
-  using DecodeCB = base::OnceCallback<void(DecodeStatus)>;
+  using DecodeCB = VideoDecoder::DecodeCB;
 
   // Client interface of DecoderInterface.
   class MEDIA_GPU_EXPORT Client {
@@ -59,10 +59,12 @@ class MEDIA_GPU_EXPORT DecoderInterface {
     // flushed.
     virtual void PrepareChangeResolution() = 0;
 
-    // Return a valid format for |decoder_| output from given |candidates| and
-    // the visible rect.
+    // Return a valid format and size for |decoder_| output from given
+    // |candidates| and the visible rect. The size might be modified from the
+    // ones provided originally to accommodate the needs of the pipeline.
     // Return base::nullopt if no valid format is found.
-    virtual base::Optional<Fourcc> PickDecoderOutputFormat(
+    virtual base::Optional<std::pair<Fourcc, gfx::Size>>
+    PickDecoderOutputFormat(
         const std::vector<std::pair<Fourcc, gfx::Size>>& candidates,
         const gfx::Rect& visible_rect) = 0;
   };
@@ -83,6 +85,7 @@ class MEDIA_GPU_EXPORT DecoderInterface {
   // TODO(akahuang): Add an error notification method to handle misused case.
   // 4) |init_cb| may be called before this returns.
   virtual void Initialize(const VideoDecoderConfig& config,
+                          CdmContext* cdm_context,
                           InitCB init_cb,
                           const OutputCB& output_cb) = 0;
 
@@ -164,7 +167,7 @@ class MEDIA_GPU_EXPORT VideoDecoderPipeline : public VideoDecoder,
   // After picking a format, it instantiates an |image_processor_| if none of
   // format in |candidates| is renderable and an ImageProcessor can convert a
   // candidate to renderable format.
-  base::Optional<Fourcc> PickDecoderOutputFormat(
+  base::Optional<std::pair<Fourcc, gfx::Size>> PickDecoderOutputFormat(
       const std::vector<std::pair<Fourcc, gfx::Size>>& candidates,
       const gfx::Rect& visible_rect) override;
 
@@ -178,17 +181,21 @@ class MEDIA_GPU_EXPORT VideoDecoderPipeline : public VideoDecoder,
       GetCreateDecoderFunctionsCB get_create_decoder_functions_cb);
 
   void InitializeTask(const VideoDecoderConfig& config,
+                      CdmContext* cdm_context,
                       InitCB init_cb,
                       const OutputCB& output_cb);
   void ResetTask(base::OnceClosure closure);
   void DecodeTask(scoped_refptr<DecoderBuffer> buffer, DecodeCB decode_cb);
 
-  void CreateAndInitializeVD(VideoDecoderConfig config, Status parent_error);
+  void CreateAndInitializeVD(VideoDecoderConfig config,
+                             CdmContext* cdm_context,
+                             Status parent_error);
   void OnInitializeDone(VideoDecoderConfig config,
+                        CdmContext* cdm_context,
                         Status parent_error,
                         Status status);
 
-  void OnDecodeDone(bool eos_buffer, DecodeCB decode_cb, DecodeStatus status);
+  void OnDecodeDone(bool eos_buffer, DecodeCB decode_cb, Status status);
   void OnResetDone();
   void OnError(const std::string& msg);
 

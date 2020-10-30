@@ -158,6 +158,23 @@ bool ElementFinder::JsFilterBuilder::AddFilter(
       return true;
     }
 
+    case SelectorProto::Filter::kCssStyle: {
+      std::string re_var = AddRegexpInstance(filter.css_style().value());
+      std::string property = AddArgument(filter.css_style().property());
+      std::string element = AddArgument(filter.css_style().pseudo_element());
+      AddLine("elements = elements.filter((e) => {");
+      AddLine("  const s = window.getComputedStyle(e, ");
+      AddLine({"      ", element, " === '' ? null : ", element, ");"});
+      AddLine({"  const match = ", re_var, ".test(s[", property, "]);"});
+      if (filter.css_style().should_match()) {
+        AddLine("  return match;");
+      } else {
+        AddLine("  return !match;");
+      }
+      AddLine("});");
+      return true;
+    }
+
     case SelectorProto::Filter::kLabelled:
       AddLine(R"(elements = elements.flatMap((e) => {
   if (e.tagName != 'LABEL') return [];
@@ -178,6 +195,11 @@ bool ElementFinder::JsFilterBuilder::AddFilter(
       // the list of labelable elements listed on "W3C's HTML5: Edition for Web
       // Authors":
       // https://www.w3.org/TR/2011/WD-html5-author-20110809/forms.html#category-label
+      return true;
+
+    case SelectorProto::Filter::kMatchCssSelector:
+      AddLine({"elements = elements.filter((e) => e.webkitMatchesSelector(",
+               AddArgument(filter.match_css_selector()), "));"});
       return true;
 
     case SelectorProto::Filter::kEnterFrame:
@@ -358,6 +380,8 @@ void ElementFinder::ExecuteNextTask() {
     case SelectorProto::Filter::kValue:
     case SelectorProto::Filter::kBoundingBox:
     case SelectorProto::Filter::kPseudoElementContent:
+    case SelectorProto::Filter::kMatchCssSelector:
+    case SelectorProto::Filter::kCssStyle:
     case SelectorProto::Filter::kLabelled: {
       std::vector<std::string> matches;
       if (!ConsumeAllMatchesOrFail(matches))

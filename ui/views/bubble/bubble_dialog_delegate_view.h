@@ -20,7 +20,7 @@
 #include "ui/views/widget/widget_observer.h"
 #include "ui/views/window/dialog_delegate.h"
 
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
 #include "ui/base/cocoa/bubble_closer.h"
 #endif
 
@@ -59,7 +59,8 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate,
 
   // DialogDelegate:
   BubbleDialogDelegate* AsBubbleDialogDelegate() override;
-  NonClientFrameView* CreateNonClientFrameView(Widget* widget) override;
+  std::unique_ptr<NonClientFrameView> CreateNonClientFrameView(
+      Widget* widget) override;
   ClientView* CreateClientView(Widget* widget) override;
   ax::mojom::Role GetAccessibleWindowRole() override;
 
@@ -310,7 +311,7 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate,
   void OnBubbleWidgetClosing();
   void OnBubbleWidgetVisibilityChanged(bool visible);
   void OnBubbleWidgetActivationChanged(bool active);
-  void OnBubbleWidgetPaintAsActiveChanged(bool as_active);
+  void OnBubbleWidgetPaintAsActiveChanged();
 
   void OnDeactivate();
 
@@ -327,6 +328,8 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate,
   std::unique_ptr<AnchorViewObserver> anchor_view_observer_;
   std::unique_ptr<AnchorWidgetObserver> anchor_widget_observer_;
   std::unique_ptr<BubbleWidgetObserver> bubble_widget_observer_;
+  std::unique_ptr<Widget::PaintAsActiveCallbackList::Subscription>
+      paint_as_active_subscription_;
   std::unique_ptr<Widget::PaintAsActiveLock> paint_as_active_lock_;
   bool adjust_if_offscreen_ = true;
   bool focus_traversable_from_anchor_view_ = true;
@@ -350,7 +353,7 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate,
   // Pointer to this bubble's ClientView.
   ClientView* client_view_ = nullptr;
 
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
   // Special handler for close_on_deactivate() on Mac. Window (de)activation is
   // suppressed by the WindowServer when clicking rapidly, so the bubble must
   // monitor clicks as well for the desired behavior.
@@ -367,6 +370,8 @@ class VIEWS_EXPORT BubbleDialogDelegateView : public BubbleDialogDelegate,
   METADATA_HEADER(BubbleDialogDelegateView);
 
   // Create and initialize the bubble Widget(s) with proper bounds.
+  static Widget* CreateBubble(
+      std::unique_ptr<BubbleDialogDelegateView> delegate);
   static Widget* CreateBubble(BubbleDialogDelegateView* bubble_delegate);
 
   BubbleDialogDelegateView();
@@ -382,7 +387,6 @@ class VIEWS_EXPORT BubbleDialogDelegateView : public BubbleDialogDelegate,
 
   // BubbleDialogDelegate:
   View* GetContentsView() override;
-  void DeleteDelegate() override;
 
   // View:
   Widget* GetWidget() override;
@@ -403,9 +407,6 @@ class VIEWS_EXPORT BubbleDialogDelegateView : public BubbleDialogDelegate,
 
   // Perform view initialization on the contents for bubble sizing.
   void Init() override;
-
-  // Allows the up and down arrow keys to tab between items.
-  void EnableUpDownKeyboardAccelerators();
 
  private:
   FRIEND_TEST_ALL_PREFIXES(BubbleDelegateTest, CreateDelegate);

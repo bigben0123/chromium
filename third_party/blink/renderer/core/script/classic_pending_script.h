@@ -26,8 +26,6 @@ namespace blink {
 class CORE_EXPORT ClassicPendingScript final : public PendingScript,
                                                public ResourceClient,
                                                public MemoryPressureListener {
-  USING_GARBAGE_COLLECTED_MIXIN(ClassicPendingScript);
-
  public:
   // https://html.spec.whatwg.org/C/#fetch-a-classic-script
   //
@@ -60,8 +58,8 @@ class CORE_EXPORT ClassicPendingScript final : public PendingScript,
 
   void Trace(Visitor*) const override;
 
-  mojom::ScriptType GetScriptType() const override {
-    return mojom::ScriptType::kClassic;
+  mojom::blink::ScriptType GetScriptType() const override {
+    return mojom::blink::ScriptType::kClassic;
   }
 
   ClassicScript* GetSource(const KURL& document_url) const override;
@@ -103,6 +101,7 @@ class CORE_EXPORT ClassicPendingScript final : public PendingScript,
       ScriptSchedulingType type,
       bool can_use_streamer,
       ScriptStreamer::NotStreamingReason reason);
+  void RecordThirdPartyRequestWithCookieIfNeeded(const ResourceResponse&) const;
 
   // MemoryPressureListener
   void OnPurgeMemory() override;

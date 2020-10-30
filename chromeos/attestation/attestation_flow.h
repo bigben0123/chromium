@@ -14,6 +14,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "chromeos/dbus/attestation/interface.pb.h"
 #include "chromeos/dbus/constants/attestation_constants.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
@@ -29,6 +30,7 @@ class AsyncMethodCaller;
 namespace chromeos {
 
 class CryptohomeClient;
+class AttestationClient;
 
 namespace attestation {
 
@@ -69,22 +71,14 @@ class COMPONENT_EXPORT(CHROMEOS_ATTESTATION) AttestationFlow {
   static AttestationKeyType GetKeyTypeForProfile(
       AttestationCertificateProfile certificate_profile);
 
-  // Returns the name of the key for a given certificate profile. The
-  // |request_origin| parameter is for PROFILE_CONTENT_PROTECTION_CERTIFICATE
-  // profiles and is ignored for other profiles.
-  //
-  // Parameters
-  //   certificate_profile - Specifies what kind of certificate the key is for.
-  //   request_origin - For content protection profiles, certificate requests
-  //                    are origin-specific.  This string must uniquely identify
-  //                    the origin of the request.
-  static std::string GetKeyNameForProfile(
-      AttestationCertificateProfile certificate_profile,
-      const std::string& request_origin);
-
   AttestationFlow(cryptohome::AsyncMethodCaller* async_caller,
                   CryptohomeClient* cryptohome_client,
                   std::unique_ptr<ServerProxy> server_proxy);
+  AttestationFlow(cryptohome::AsyncMethodCaller* async_caller,
+                  CryptohomeClient* cryptohome_client,
+                  std::unique_ptr<ServerProxy> server_proxy,
+                  ::attestation::KeyType crypto_key_type);
+
   virtual ~AttestationFlow();
 
   // Sets the timeout for attestation to be ready.
@@ -132,14 +126,14 @@ class COMPONENT_EXPORT(CHROMEOS_ATTESTATION) AttestationFlow {
                               CertificateCallback callback);
 
  private:
-  // Handles the result of a call to TpmAttestationIsEnrolled. Reports success
-  // if enrollment is complete and otherwise starts the process.
+  // Handles the result of a call to `GetStatus()` for enrollment status.
+  // Reports success if enrollment is complete and otherwise starts the process.
   //
   // Parameters
   //   callback - Called with the success or failure of the enrollment.
-  //   result - Result of TpmAttestationIsEnrolled().
+  //   result - Result of `GetStatus()`, which contains `enrolled` field.
   void OnEnrollmentCheckComplete(base::OnceCallback<void(bool)> callback,
-                                 base::Optional<bool> result);
+                                 const ::attestation::GetStatusReply& reply);
 
   // Asynchronously waits for attestation to be ready and start enrollment once
   // it is. If attestation is not ready by the time the flow's timeout is
@@ -151,16 +145,17 @@ class COMPONENT_EXPORT(CHROMEOS_ATTESTATION) AttestationFlow {
   void WaitForAttestationPrepared(base::TimeTicks end_time,
                                   base::OnceCallback<void(bool)> callback);
 
-  // Handles the result of a call to TpmAttestationIsPrepared. Starts enrollment
-  // on success and retries after |retry_delay_| if not.
+  // Handles the result of a call to GetEnrollmentPreparations. Starts
+  // enrollment on success and retries after |retry_delay_| if not.
   //
   // Parameters
   //   end_time - Time after which preparation should time out.
   //   callback - Called with the success or failure of the enrollment.
-  //   result - Result of TpmAttestationIsPrepared().
-  void OnPreparedCheckComplete(base::TimeTicks end_time,
-                               base::OnceCallback<void(bool)> callback,
-                               base::Optional<bool> result);
+  //   reply - Reply from the attestation service.
+  void OnPreparedCheckComplete(
+      base::TimeTicks end_time,
+      base::OnceCallback<void(bool)> callback,
+      const ::attestation::GetEnrollmentPreparationsReply& reply);
 
   // Called when the attestation daemon has finished creating an enrollment
   // request for the Privacy CA.  The request is asynchronously forwarded as-is
@@ -251,14 +246,13 @@ class COMPONENT_EXPORT(CHROMEOS_ATTESTATION) AttestationFlow {
   //   account_id - Identifies the active user.
   //   key_name - The name of the key for which a certificate is requested.
   //   callback - Called when the operation completes.
-  //   success - The status of request creation.
-  //   data - The request data for the Privacy CA.
-  void SendCertificateRequestToPCA(AttestationKeyType key_type,
-                                   const AccountId& account_id,
-                                   const std::string& key_name,
-                                   CertificateCallback callback,
-                                   bool success,
-                                   const std::string& data);
+  //   reply - the result returned by |AttestationClient|.
+  void SendCertificateRequestToPCA(
+      AttestationKeyType key_type,
+      const AccountId& account_id,
+      const std::string& key_name,
+      CertificateCallback callback,
+      const ::attestation::CreateCertificateRequestReply& reply);
 
   // Called when the Privacy CA responds to a certificate request.  The response
   // is asynchronously forwarded as-is to the attestation daemon in order to
@@ -302,7 +296,11 @@ class COMPONENT_EXPORT(CHROMEOS_ATTESTATION) AttestationFlow {
 
   cryptohome::AsyncMethodCaller* async_caller_;
   CryptohomeClient* cryptohome_client_;
+  AttestationClient* attestation_client_;
   std::unique_ptr<ServerProxy> server_proxy_;
+
+  // The key type that asks attestation service to create with.
+  const ::attestation::KeyType crypto_key_type_;
 
   base::TimeDelta ready_timeout_;
   base::TimeDelta retry_delay_;

@@ -71,7 +71,7 @@ source_set("authentication") {
   } else {
     deps += [ "resources:signin_promo_logo_chromium_color" ]
   }
-  libs = [
+  frameworks = [
     "CoreGraphics.framework",
     "QuartzCore.framework",
     "UIKit.framework",
@@ -84,7 +84,7 @@ source_set("authentication_constants") {
     "authentication_constants.h",
     "authentication_constants.mm",
   ]
-  libs = [ "UIKit.framework" ]
+  frameworks = [ "UIKit.framework" ]
 }
 
 source_set("unit_tests") {
@@ -136,43 +136,6 @@ source_set("unit_tests") {
   ]
 }
 
-source_set("eg_test_support") {
-  defines = [ "CHROME_EARL_GREY_1" ]
-  configs += [ "//build/config/compiler:enable_arc" ]
-  testonly = true
-  sources = [
-    "signin_earl_grey_ui.h",
-    "signin_earl_grey_ui.mm",
-    "signin_earlgrey_utils.h",
-    "signin_earlgrey_utils.mm",
-    "signin_earlgrey_utils_app_interface.h",
-    "signin_earlgrey_utils_app_interface.mm",
-  ]
-  deps = [
-    ":authentication",
-    "unified_consent",
-    "//base/test:test_support",
-    "//components/bookmarks/browser",
-    "//components/signin/public/identity_manager",
-    "//ios/chrome/app/strings",
-    "//ios/chrome/browser/bookmarks",
-    "//ios/chrome/browser/browser_state",
-    "//ios/chrome/browser/signin",
-    "//ios/chrome/browser/ui/authentication/cells",
-    "//ios/chrome/browser/ui/authentication/unified_consent:unified_consent_ui",
-    "//ios/chrome/browser/ui/authentication/unified_consent/identity_chooser:identity_chooser_ui",
-    "//ios/chrome/browser/ui/util",
-    "//ios/chrome/test:eg_test_support",
-    "//ios/chrome/test/app:test_support",
-    "//ios/chrome/test/earl_grey:test_support",
-    "//ios/public/provider/chrome/browser/signin",
-    "//ios/public/provider/chrome/browser/signin:fake_chrome_identity",
-    "//ios/public/provider/chrome/browser/signin:test_support",
-    "//ios/testing/earl_grey:earl_grey_support",
-    "//ios/third_party/earl_grey:earl_grey+link",
-  ]
-}
-
 source_set("eg_app_support+eg2") {
   defines = [ "CHROME_EARL_GREY_2" ]
   configs += [
@@ -181,9 +144,10 @@ source_set("eg_app_support+eg2") {
   ]
   testonly = true
   sources = [
-    "signin_earlgrey_utils_app_interface.h",
-    "signin_earlgrey_utils_app_interface.mm",
+    "signin_earl_grey_app_interface.h",
+    "signin_earl_grey_app_interface.mm",
   ]
+  visibility = [ "//ios/chrome/test/earl_grey:eg_app_support+eg2" ]
   deps = [
     ":authentication",
     "unified_consent",
@@ -206,6 +170,21 @@ source_set("eg_app_support+eg2") {
   ]
 }
 
+source_set("internal+eg2") {
+  defines = [ "CHROME_EARL_GREY_2" ]
+  configs += [
+    "//build/config/compiler:enable_arc",
+    "//build/config/ios:xctest_config",
+  ]
+  testonly = true
+  visibility = [ ":*" ]
+  sources = [
+    "signin_earl_grey_app_interface.h",
+    "signin_earl_grey_app_interface_stub.mm",
+  ]
+  deps = [ "//ios/third_party/earl_grey2:test_lib" ]
+}
+
 source_set("eg_test_support+eg2") {
   defines = [ "CHROME_EARL_GREY_2" ]
   configs += [
@@ -214,24 +193,27 @@ source_set("eg_test_support+eg2") {
   ]
   testonly = true
   sources = [
+    "signin_earl_grey.h",
+    "signin_earl_grey.mm",
     "signin_earl_grey_ui.h",
     "signin_earl_grey_ui.mm",
-    "signin_earlgrey_utils.h",
-    "signin_earlgrey_utils.mm",
-    "signin_earlgrey_utils_app_interface.h",
-    "signin_earlgrey_utils_app_interface_stub.mm",
   ]
   deps = [
+    ":internal+eg2",
     "//base",
     "//base/test:test_support",
     "//ios/chrome/app/strings",
     "//ios/chrome/browser/ui/authentication/cells:constants",
     "//ios/chrome/browser/ui/authentication/unified_consent:constants",
+    "//ios/chrome/browser/ui/recent_tabs:recent_tabs_ui_constants",
+    "//ios/chrome/browser/ui/settings/google_services:constants",
     "//ios/chrome/test:eg_test_support+eg2",
     "//ios/chrome/test/earl_grey:eg_test_support+eg2",
     "//ios/public/provider/chrome/browser/signin",
     "//ios/public/provider/chrome/browser/signin:fake_chrome_identity",
+    "//ios/public/provider/chrome/browser/signin:test_support",
     "//ios/testing/earl_grey:eg_test_support+eg2",
     "//ios/third_party/earl_grey2:test_lib",
+    "//ui/base",
   ]
 }

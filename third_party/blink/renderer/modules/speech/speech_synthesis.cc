@@ -27,6 +27,10 @@
 
 #include "build/build_config.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
+#include "third_party/blink/public/common/privacy_budget/identifiability_metric_builder.h"
+#include "third_party/blink/public/common/privacy_budget/identifiability_study_settings.h"
+#include "third_party/blink/public/common/privacy_budget/identifiable_token.h"
+#include "third_party/blink/public/common/privacy_budget/identifiable_token_builder.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_speech_synthesis_error_event_init.h"
@@ -35,12 +39,15 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/media/autoplay_policy.h"
 #include "third_party/blink/renderer/core/timing/dom_window_performance.h"
 #include "third_party/blink/renderer/core/timing/performance.h"
 #include "third_party/blink/renderer/modules/speech/speech_synthesis_error_event.h"
 #include "third_party/blink/renderer/modules/speech/speech_synthesis_event.h"
+#include "third_party/blink/renderer/modules/speech/speech_synthesis_voice.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/privacy_budget/identifiability_digest_helpers.h"
 
 namespace blink {
 
@@ -58,7 +65,7 @@ SpeechSynthesis* SpeechSynthesis::speechSynthesis(LocalDOMWindow& window) {
     // TODO(crbug/811929): Consider moving this logic into the Android-
     // specific backend implementation.
 #else
-    synthesis->InitializeMojomSynthesis();
+    ignore_result(synthesis->TryEnsureMojomSynthesis());
 #endif
   }
   return synthesis;
@@ -90,8 +97,31 @@ void SpeechSynthesis::OnSetVoiceList(
 
 const HeapVector<Member<SpeechSynthesisVoice>>& SpeechSynthesis::getVoices() {
   // Kick off initialization here to ensure voice list gets populated.
-  InitializeMojomSynthesisIfNeeded();
+  ignore_result(TryEnsureMojomSynthesis());
+  RecordVoicesForIdentifiability();
   return voice_list_;
+}
+
+void SpeechSynthesis::RecordVoicesForIdentifiability() const {
+  constexpr IdentifiableSurface surface = IdentifiableSurface::FromTypeAndToken(
+      IdentifiableSurface::Type::kWebFeature,
+      WebFeature::kSpeechSynthesis_GetVoices_Method);
+  if (!IdentifiabilityStudySettings::Get()->ShouldSample(surface))
+    return;
+  ExecutionContext* context = GetExecutionContext();
+  if (!context)
+    return;
+
+  IdentifiableTokenBuilder builder;
+  for (const auto& voice : voice_list_) {
+    builder.AddToken(IdentifiabilityBenignStringToken(voice->voiceURI()));
+    builder.AddToken(IdentifiabilityBenignStringToken(voice->lang()));
+    builder.AddToken(IdentifiabilityBenignStringToken(voice->name()));
+    builder.AddToken(voice->localService());
+  }
+  IdentifiabilityMetricBuilder(context->UkmSourceID())
+      .Set(surface, builder.GetToken())
+      .Record(context->UkmRecorder());
 }
 
 bool SpeechSynthesis::speaking() const {
@@ -143,24 +173,27 @@ void SpeechSynthesis::cancel() {
   // fire events on them asynchronously.
   utterance_queue_.clear();
 
-  InitializeMojomSynthesisIfNeeded();
-  mojom_synthesis_->Cancel();
+  if (mojom::blink::SpeechSynthesis* mojom_synthesis =
+          TryEnsureMojomSynthesis())
+    mojom_synthesis->Cancel();
 }
 
 void SpeechSynthesis::pause() {
   if (is_paused_)
     return;
 
-  InitializeMojomSynthesisIfNeeded();
-  mojom_synthesis_->Pause();
+  if (mojom::blink::SpeechSynthesis* mojom_synthesis =
+          TryEnsureMojomSynthesis())
+    mojom_synthesis->Pause();
 }
 
 void SpeechSynthesis::resume() {
   if (!CurrentSpeechUtterance())
     return;
 
-  InitializeMojomSynthesisIfNeeded();
-  mojom_synthesis_->Resume();
+  if (mojom::blink::SpeechSynthesis* mojom_synthesis =
+          TryEnsureMojomSynthesis())
+    mojom_synthesis->Resume();
 }
 
 void SpeechSynthesis::DidStartSpeaking(SpeechSynthesisUtterance* utterance) {
@@ -220,8 +253,8 @@ void SpeechSynthesis::StartSpeakingImmediately() {
   utterance->SetStartTime(millis / 1000.0);
   is_paused_ = false;
 
-  InitializeMojomSynthesisIfNeeded();
-  utterance->Start(this);
+  if (TryEnsureMojomSynthesis())
+    utterance->Start(this);
 }
 
 void SpeechSynthesis::HandleSpeakingCompleted(
@@ -339,21 +372,17 @@ void SpeechSynthesis::SetMojomSynthesisForTesting(
       GetExecutionContext()->GetTaskRunner(TaskType::kMiscPlatformAPI)));
 }
 
-void SpeechSynthesis::InitializeMojomSynthesis() {
-  DCHECK(!mojom_synthesis_.is_bound());
+mojom::blink::SpeechSynthesis* SpeechSynthesis::TryEnsureMojomSynthesis() {
+  if (mojom_synthesis_.is_bound())
+    return mojom_synthesis_.get();
 
   // The frame could be detached. In that case, calls on mojom_synthesis_ will
   // just get dropped. That's okay and is simpler than having to null-check
   // mojom_synthesis_ before each use.
   ExecutionContext* context = GetExecutionContext();
 
-  if (!context) {
-    // Mimic the LocalDOMWindow::GetTaskRunner code that uses the current
-    // task runner when frames are detached.
-    ignore_result(mojom_synthesis_.BindNewPipeAndPassReceiver(
-        Thread::Current()->GetTaskRunner()));
-    return;
-  }
+  if (!context)
+    return nullptr;
 
   auto receiver = mojom_synthesis_.BindNewPipeAndPassReceiver(
       context->GetTaskRunner(TaskType::kMiscPlatformAPI));
@@ -362,11 +391,7 @@ void SpeechSynthesis::InitializeMojomSynthesis() {
 
   mojom_synthesis_->AddVoiceListObserver(receiver_.BindNewPipeAndPassRemote(
       context->GetTaskRunner(TaskType::kMiscPlatformAPI)));
-}
-
-void SpeechSynthesis::InitializeMojomSynthesisIfNeeded() {
-  if (!mojom_synthesis_.is_bound())
-    InitializeMojomSynthesis();
+  return mojom_synthesis_.get();
 }
 
 const AtomicString& SpeechSynthesis::InterfaceName() const {

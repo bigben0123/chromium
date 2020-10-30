@@ -11,6 +11,9 @@
 namespace web {
 namespace features {
 
+const base::Feature kReduceSessionSize{"ReduceSessionSize",
+                                       base::FEATURE_DISABLED_BY_DEFAULT};
+
 const base::Feature kCrashOnUnexpectedURLChange{
     "CrashOnUnexpectedURLChange", base::FEATURE_ENABLED_BY_DEFAULT};
 
@@ -27,7 +30,7 @@ const base::Feature kClearOldNavigationRecordsWorkaround{
     "ClearOldNavigationRecordsWorkaround", base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kSSLCommittedInterstitials{
-    "SSLCommittedInterstitials", base::FEATURE_DISABLED_BY_DEFAULT};
+    "SSLCommittedInterstitials", base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kEnablePersistentDownloads{
     "EnablePersistentDownloads", base::FEATURE_DISABLED_BY_DEFAULT};
@@ -47,6 +50,11 @@ const base::Feature kIOSLookalikeUrlNavigationSuggestionsUI{
 
 const base::Feature kAddWebContentDropInteraction{
     "AddWebContentDropInteraction", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kScrollToTextIOS{"ScrollToTextIOS",
+                                     base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kIOSLegacyTLSInterstitial{
+    "IOSLegacyTLSInterstitial", base::FEATURE_DISABLED_BY_DEFAULT};
 
 bool UseWebClientDefaultUserAgent() {
   if (@available(iOS 13, *)) {

@@ -11,8 +11,8 @@
 #include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "components/autofill/core/common/gaia_id_hash.h"
-#include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/mock_password_store.h"
+#include "components/password_manager/core/browser/password_form.h"
 #include "components/password_manager/core/browser/stub_password_manager_client.h"
 #include "components/password_manager/core/common/password_manager_features.h"
 #include "url/gurl.h"
@@ -20,7 +20,6 @@
 #include "url/url_constants.h"
 
 using autofill::GaiaIdHash;
-using autofill::PasswordForm;
 using base::ASCIIToUTF16;
 using testing::_;
 using testing::IsEmpty;
@@ -201,9 +200,9 @@ TEST_F(MultiStoreFormFetcherTest, CloningMultiStoreFetcherClonesState) {
   blocked.in_store = PasswordForm::Store::kAccountStore;
   std::vector<std::unique_ptr<PasswordForm>> results;
   results.push_back(std::make_unique<PasswordForm>(blocked));
-  form_fetcher_->OnGetPasswordStoreResultsFrom(account_mock_store_,
+  form_fetcher_->OnGetPasswordStoreResultsFrom(account_mock_store_.get(),
                                                std::move(results));
-  form_fetcher_->OnGetPasswordStoreResultsFrom(profile_mock_store_, {});
+  form_fetcher_->OnGetPasswordStoreResultsFrom(profile_mock_store_.get(), {});
 
   EXPECT_EQ(form_fetcher_->GetState(), FormFetcher::State::NOT_WAITING);
   EXPECT_TRUE(form_fetcher_->IsBlacklisted());
@@ -235,9 +234,9 @@ TEST_F(MultiStoreFormFetcherTest, CloningMultiStoreFetcherResumesFetch) {
   blocked.in_store = PasswordForm::Store::kAccountStore;
   std::vector<std::unique_ptr<PasswordForm>> results;
   results.push_back(std::make_unique<PasswordForm>(blocked));
-  form_fetcher_->OnGetPasswordStoreResultsFrom(account_mock_store_,
+  form_fetcher_->OnGetPasswordStoreResultsFrom(account_mock_store_.get(),
                                                std::move(results));
-  form_fetcher_->OnGetPasswordStoreResultsFrom(profile_mock_store_, {});
+  form_fetcher_->OnGetPasswordStoreResultsFrom(profile_mock_store_.get(), {});
 
   EXPECT_EQ(form_fetcher_->GetState(), FormFetcher::State::NOT_WAITING);
   EXPECT_TRUE(form_fetcher_->IsBlacklisted());
@@ -250,11 +249,11 @@ TEST_F(MultiStoreFormFetcherTest, Empty) {
   EXPECT_CALL(consumer_, OnFetchCompleted);
   // Both profile and account respond with empty results.
   form_fetcher_->OnGetPasswordStoreResultsFrom(
-      profile_mock_store_, std::vector<std::unique_ptr<PasswordForm>>());
+      profile_mock_store_.get(), std::vector<std::unique_ptr<PasswordForm>>());
   // We should be still waiting for the second store to respond.
   EXPECT_EQ(FormFetcher::State::WAITING, form_fetcher_->GetState());
   form_fetcher_->OnGetPasswordStoreResultsFrom(
-      account_mock_store_, std::vector<std::unique_ptr<PasswordForm>>());
+      account_mock_store_.get(), std::vector<std::unique_ptr<PasswordForm>>());
   EXPECT_EQ(FormFetcher::State::NOT_WAITING, form_fetcher_->GetState());
   EXPECT_THAT(form_fetcher_->GetNonFederatedMatches(), IsEmpty());
   EXPECT_THAT(form_fetcher_->GetFederatedMatches(), IsEmpty());
@@ -284,7 +283,7 @@ TEST_F(MultiStoreFormFetcherTest, MergeFromBothStores) {
   results.push_back(std::make_unique<PasswordForm>(federated2));
   results.push_back(std::make_unique<PasswordForm>(non_federated1));
   results.push_back(std::make_unique<PasswordForm>(blocked));
-  form_fetcher_->OnGetPasswordStoreResultsFrom(profile_mock_store_,
+  form_fetcher_->OnGetPasswordStoreResultsFrom(profile_mock_store_.get(),
                                                std::move(results));
 
   // We should be still waiting for the second store to respond.
@@ -297,7 +296,7 @@ TEST_F(MultiStoreFormFetcherTest, MergeFromBothStores) {
   results.push_back(std::make_unique<PasswordForm>(non_federated3));
 
   EXPECT_CALL(consumer_, OnFetchCompleted);
-  form_fetcher_->OnGetPasswordStoreResultsFrom(account_mock_store_,
+  form_fetcher_->OnGetPasswordStoreResultsFrom(account_mock_store_.get(),
                                                std::move(results));
 
   EXPECT_EQ(FormFetcher::State::NOT_WAITING, form_fetcher_->GetState());
@@ -322,10 +321,10 @@ TEST_F(MultiStoreFormFetcherTest, BlockedEntryInTheAccountStore) {
   // Pass response from the first store.
   std::vector<std::unique_ptr<PasswordForm>> results;
   results.push_back(std::make_unique<PasswordForm>(blocked));
-  form_fetcher_->OnGetPasswordStoreResultsFrom(account_mock_store_,
+  form_fetcher_->OnGetPasswordStoreResultsFrom(account_mock_store_.get(),
                                                std::move(results));
   // Pass empty response from the second store.
-  form_fetcher_->OnGetPasswordStoreResultsFrom(profile_mock_store_, {});
+  form_fetcher_->OnGetPasswordStoreResultsFrom(profile_mock_store_.get(), {});
 
   // Simulate a user in the account mode.
   ON_CALL(*client()->GetPasswordFeatureManager(), IsOptedInForAccountStorage())
@@ -362,10 +361,10 @@ TEST_F(MultiStoreFormFetcherTest, BlockedEntryInTheProfileStore) {
   // Pass response from the first store.
   std::vector<std::unique_ptr<PasswordForm>> results;
   results.push_back(std::make_unique<PasswordForm>(blocked));
-  form_fetcher_->OnGetPasswordStoreResultsFrom(profile_mock_store_,
+  form_fetcher_->OnGetPasswordStoreResultsFrom(profile_mock_store_.get(),
                                                std::move(results));
   // Pass empty response from the second store.
-  form_fetcher_->OnGetPasswordStoreResultsFrom(account_mock_store_, {});
+  form_fetcher_->OnGetPasswordStoreResultsFrom(account_mock_store_.get(), {});
 
   // Simulate a user in the account mode.
   ON_CALL(*client()->GetPasswordFeatureManager(), IsOptedInForAccountStorage())
@@ -421,10 +420,10 @@ TEST_F(MultiStoreFormFetcherTest, MovingToAccountStoreIsBlocked) {
   results.push_back(std::make_unique<PasswordForm>(blocked_form));
   results.push_back(std::make_unique<PasswordForm>(unblocked_form));
   results.push_back(std::make_unique<PasswordForm>(psl_form));
-  form_fetcher_->OnGetPasswordStoreResultsFrom(profile_mock_store_,
+  form_fetcher_->OnGetPasswordStoreResultsFrom(profile_mock_store_.get(),
                                                std::move(results));
   // Pass empty response from the account store.
-  form_fetcher_->OnGetPasswordStoreResultsFrom(account_mock_store_, {});
+  form_fetcher_->OnGetPasswordStoreResultsFrom(account_mock_store_.get(), {});
 
   // Moving should be blocked for |kUser| and |form1|.
   EXPECT_TRUE(
@@ -438,6 +437,30 @@ TEST_F(MultiStoreFormFetcherTest, MovingToAccountStoreIsBlocked) {
   // PSL match entries should be ignored when computing the moving blacklist
   // entries.
   EXPECT_FALSE(form_fetcher_->IsMovingBlocked(kUser, psl_form.username_value));
+}
+
+TEST_F(MultiStoreFormFetcherTest, CompromisedCredentials) {
+  Fetch();
+  const CompromisedCredentials profile_store_compromised_credentials{
+      form_digest_.signon_realm, base::ASCIIToUTF16("profile_username"),
+      base::Time::FromTimeT(1), CompromiseType::kLeaked,
+      PasswordForm::Store::kProfileStore};
+
+  const CompromisedCredentials account_store_compromised_credentials{
+      form_digest_.signon_realm, base::ASCIIToUTF16("account_username"),
+      base::Time::FromTimeT(1), CompromiseType::kLeaked,
+      PasswordForm::Store::kAccountStore};
+
+  static_cast<CompromisedCredentialsConsumer*>(form_fetcher_.get())
+      ->OnGetCompromisedCredentials({profile_store_compromised_credentials});
+
+  static_cast<CompromisedCredentialsConsumer*>(form_fetcher_.get())
+      ->OnGetCompromisedCredentials({account_store_compromised_credentials});
+
+  EXPECT_THAT(form_fetcher_->GetCompromisedCredentials(),
+              testing::UnorderedElementsAreArray(
+                  {profile_store_compromised_credentials,
+                   account_store_compromised_credentials}));
 }
 
 }  // namespace password_manager

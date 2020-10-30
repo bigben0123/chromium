@@ -14,13 +14,14 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop_current.h"
 #include "base/strings/string_util.h"
+#include "base/task/current_thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ui/events/ozone/layout/keyboard_layout_engine_manager.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/ozone/platform/wayland/common/wayland_object.h"
 #include "ui/ozone/platform/wayland/host/gtk_primary_selection_device_manager.h"
+#include "ui/ozone/platform/wayland/host/zwp_primary_selection_device_manager.h"
 #include "ui/ozone/platform/wayland/host/wayland_buffer_manager_host.h"
 #include "ui/ozone/platform/wayland/host/wayland_clipboard.h"
 #include "ui/ozone/platform/wayland/host/wayland_cursor.h"
@@ -38,6 +39,13 @@
 #include "ui/ozone/platform/wayland/host/wayland_window.h"
 #include "ui/ozone/platform/wayland/host/wayland_window_drag_controller.h"
 #include "ui/ozone/platform/wayland/host/wayland_zwp_linux_dmabuf.h"
+#include "ui/ozone/platform/wayland/host/xdg_foreign_wrapper.h"
+
+#if defined(USE_LIBWAYLAND_STUBS)
+#include <dlfcn.h>
+
+#include "third_party/wayland/libwayland_stubs.h"  // nogncheck
+#endif
 
 namespace ui {
 
@@ -46,14 +54,18 @@ constexpr uint32_t kMaxCompositorVersion = 4;
 constexpr uint32_t kMaxGtkPrimarySelectionDeviceManagerVersion = 1;
 constexpr uint32_t kMaxKeyboardExtensionVersion = 1;
 constexpr uint32_t kMaxLinuxDmabufVersion = 3;
-constexpr uint32_t kMaxSeatVersion = 4;
+constexpr uint32_t kMaxSeatVersion = 5;
 constexpr uint32_t kMaxShmVersion = 1;
 constexpr uint32_t kMaxXdgShellVersion = 1;
 constexpr uint32_t kMaxDeviceManagerVersion = 3;
 constexpr uint32_t kMaxWpPresentationVersion = 1;
+constexpr uint32_t kMaxWpViewporterVersion = 1;
 constexpr uint32_t kMaxTextInputManagerVersion = 1;
+constexpr uint32_t kMaxExplicitSyncVersion = 2;
+constexpr uint32_t kMinAuraShellVersion = 10;
 constexpr uint32_t kMinWlDrmVersion = 2;
 constexpr uint32_t kMinWlOutputVersion = 2;
+constexpr uint32_t kMaxXdgDecorationVersion = 1;
 }  // namespace
 
 WaylandConnection::WaylandConnection() = default;
@@ -61,6 +73,21 @@ WaylandConnection::WaylandConnection() = default;
 WaylandConnection::~WaylandConnection() = default;
 
 bool WaylandConnection::Initialize() {
+#if defined(USE_LIBWAYLAND_STUBS)
+  // Use RTLD_NOW to load all symbols, since the stubs will try to load all of
+  // them anyway.  Use RTLD_GLOBAL to add the symbols to the global namespace.
+  auto dlopen_flags = RTLD_NOW | RTLD_GLOBAL;
+  if (void* libwayland_client =
+          dlopen("libwayland-client.so.0", dlopen_flags)) {
+    third_party_wayland::InitializeLibwaylandclient(libwayland_client);
+  } else {
+    LOG(ERROR) << "Failed to load wayland client libraries.";
+    return false;
+  }
+  if (void* libwayland_egl = dlopen("libwayland-egl.so.1", dlopen_flags))
+    third_party_wayland::InitializeLibwaylandegl(libwayland_egl);
+#endif
+
   static const wl_registry_listener registry_listener = {
       &WaylandConnection::Global,
       &WaylandConnection::GlobalRemove,
@@ -117,7 +144,7 @@ void WaylandConnection::ScheduleFlush() {
   // When we are in tests, the message loop is set later when the
   // initialization of the OzonePlatform complete. Thus, just
   // flush directly. This doesn't happen in normal run.
-  if (!base::MessageLoopCurrentForUI::IsSet()) {
+  if (!base::CurrentUIThread::IsSet()) {
     Flush();
   } else if (!scheduled_flush_) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -127,11 +154,16 @@ void WaylandConnection::ScheduleFlush() {
   }
 }
 
+void WaylandConnection::SetShutdownCb(base::OnceCallback<void()> shutdown_cb) {
+  event_source()->SetShutdownCb(std::move(shutdown_cb));
+}
+
 void WaylandConnection::SetCursorBitmap(const std::vector<SkBitmap>& bitmaps,
-                                        const gfx::Point& location) {
+                                        const gfx::Point& hotspot_in_dips,
+                                        int buffer_scale) {
   if (!cursor_)
     return;
-  cursor_->UpdateBitmap(bitmaps, location, serial_);
+  cursor_->UpdateBitmap(bitmaps, hotspot_in_dips, serial(), buffer_scale);
 }
 
 bool WaylandConnection::IsDragInProgress() const {
@@ -163,26 +195,33 @@ void WaylandConnection::UpdateInputDevices(wl_seat* seat,
     pointer_.reset();
     cursor_.reset();
     wayland_cursor_position_.reset();
-  } else if (wl_pointer* pointer = wl_seat_get_pointer(seat)) {
-    pointer_ = std::make_unique<WaylandPointer>(pointer, this, event_source());
-    cursor_ = std::make_unique<WaylandCursor>(pointer_.get(), this);
-    wayland_cursor_position_ = std::make_unique<WaylandCursorPosition>();
-  } else {
-    LOG(ERROR) << "Failed to get wl_pointer from seat";
+  } else if (!pointer_) {
+    if (wl_pointer* pointer = wl_seat_get_pointer(seat)) {
+      pointer_ =
+          std::make_unique<WaylandPointer>(pointer, this, event_source());
+      cursor_ = std::make_unique<WaylandCursor>(pointer_.get(), this);
+      wayland_cursor_position_ = std::make_unique<WaylandCursorPosition>();
+    } else {
+      LOG(ERROR) << "Failed to get wl_pointer from seat";
+    }
   }
 
   if (!has_keyboard) {
     keyboard_.reset();
-  } else if (!CreateKeyboard()) {
-    LOG(ERROR) << "Failed to create WaylandKeyboard";
+  } else if (!keyboard_) {
+    if (!CreateKeyboard()) {
+      LOG(ERROR) << "Failed to create WaylandKeyboard";
+    }
   }
 
   if (!has_touch) {
     touch_.reset();
-  } else if (wl_touch* touch = wl_seat_get_touch(seat)) {
-    touch_ = std::make_unique<WaylandTouch>(touch, this, event_source());
-  } else {
-    LOG(ERROR) << "Failed to get wl_touch from seat";
+  } else if (!touch_) {
+    if (wl_touch* touch = wl_seat_get_touch(seat)) {
+      touch_ = std::make_unique<WaylandTouch>(touch, this, event_source());
+    } else {
+      LOG(ERROR) << "Failed to get wl_touch from seat";
+    }
   }
 }
 
@@ -271,8 +310,7 @@ void WaylandConnection::Global(void* data,
     }
     zxdg_shell_v6_add_listener(connection->shell_v6_.get(), &shell_v6_listener,
                                connection);
-  } else if (!connection->shell_v6_ && !connection->shell_ &&
-             strcmp(interface, "xdg_wm_base") == 0) {
+  } else if (!connection->shell_ && strcmp(interface, "xdg_wm_base") == 0) {
     connection->shell_ = wl::Bind<xdg_wm_base>(
         registry, name, std::min(version, kMaxXdgShellVersion));
     if (!connection->shell_) {
@@ -315,14 +353,29 @@ void WaylandConnection::Global(void* data,
         std::make_unique<WaylandDataDeviceManager>(
             data_device_manager.release(), connection);
     connection->CreateDataObjectsIfReady();
-  } else if (!connection->primary_selection_device_manager_ &&
+  } else if (!connection->gtk_primary_selection_device_manager_ &&
              strcmp(interface, "gtk_primary_selection_device_manager") == 0) {
-    wl::Object<gtk_primary_selection_device_manager> manager =
-        wl::Bind<gtk_primary_selection_device_manager>(
+    wl::Object<::gtk_primary_selection_device_manager> manager =
+        wl::Bind<::gtk_primary_selection_device_manager>(
             registry, name, kMaxGtkPrimarySelectionDeviceManagerVersion);
-    connection->primary_selection_device_manager_ =
+    connection->gtk_primary_selection_device_manager_ =
         std::make_unique<GtkPrimarySelectionDeviceManager>(manager.release(),
                                                            connection);
+  } else if (!connection->zwp_primary_selection_device_manager_ &&
+             strcmp(interface, "zwp_primary_selection_device_manager_v1") ==
+                 0) {
+    wl::Object<zwp_primary_selection_device_manager_v1> manager =
+        wl::Bind<zwp_primary_selection_device_manager_v1>(
+            registry, name, kMaxGtkPrimarySelectionDeviceManagerVersion);
+    connection->zwp_primary_selection_device_manager_ =
+        std::make_unique<ZwpPrimarySelectionDeviceManager>(manager.release(),
+                                                        connection);
+  } else if (!connection->linux_explicit_synchronization_ &&
+             (strcmp(interface, "zwp_linux_explicit_synchronization_v1") ==
+              0)) {
+    connection->linux_explicit_synchronization_ =
+        wl::Bind<zwp_linux_explicit_synchronization_v1>(
+            registry, name, std::min(version, kMaxExplicitSyncVersion));
   } else if (!connection->zwp_dmabuf_ &&
              (strcmp(interface, "zwp_linux_dmabuf_v1") == 0)) {
     wl::Object<zwp_linux_dmabuf_v1> zwp_linux_dmabuf =
@@ -334,6 +387,10 @@ void WaylandConnection::Global(void* data,
              (strcmp(interface, "wp_presentation") == 0)) {
     connection->presentation_ =
         wl::Bind<wp_presentation>(registry, name, kMaxWpPresentationVersion);
+  } else if (!connection->viewporter_ &&
+             (strcmp(interface, "wp_viewporter") == 0)) {
+    connection->viewporter_ =
+        wl::Bind<wp_viewporter>(registry, name, kMaxWpViewporterVersion);
   } else if (!connection->keyboard_extension_v1_ &&
              strcmp(interface, "zcr_keyboard_extension_v1") == 0) {
     connection->keyboard_extension_v1_ = wl::Bind<zcr_keyboard_extension_v1>(
@@ -353,11 +410,29 @@ void WaylandConnection::Global(void* data,
       LOG(ERROR) << "Failed to bind to zwp_text_input_manager_v1 global";
       return;
     }
+  } else if (!connection->xdg_foreign_ &&
+             strcmp(interface, "zxdg_exporter_v1") == 0) {
+    connection->xdg_foreign_ = std::make_unique<XdgForeignWrapper>(
+        connection, wl::Bind<zxdg_exporter_v1>(registry, name, version));
   } else if (!connection->drm_ && (strcmp(interface, "wl_drm") == 0) &&
              version >= kMinWlDrmVersion) {
     auto wayland_drm = wl::Bind<struct wl_drm>(registry, name, version);
     connection->drm_ =
         std::make_unique<WaylandDrm>(wayland_drm.release(), connection);
+  } else if (!connection->aura_shell_ &&
+             (strcmp(interface, "zaura_shell") == 0) &&
+             version >= kMinAuraShellVersion) {
+    connection->aura_shell_ =
+        wl::Bind<struct zaura_shell>(registry, name, version);
+    if (!connection->aura_shell_) {
+      LOG(ERROR) << "Failed to bind zaura_shell";
+      return;
+    }
+  } else if (!connection->xdg_decoration_manager_ &&
+             strcmp(interface, "zxdg_decoration_manager_v1") == 0) {
+    connection->xdg_decoration_manager_ =
+        wl::Bind<struct zxdg_decoration_manager_v1>(registry, name,
+                                                    kMaxXdgDecorationVersion);
   }
 
   connection->ScheduleFlush();

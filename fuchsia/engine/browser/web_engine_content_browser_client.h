@@ -17,6 +17,7 @@
 #include "fuchsia/engine/browser/content_directory_loader_factory.h"
 #include "fuchsia/engine/browser/media_resource_provider_service.h"
 #include "mojo/public/cpp/bindings/binder_map.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 
 class WebEngineBrowserMainParts;
 
@@ -35,17 +36,19 @@ class WebEngineContentBrowserClient : public content::ContentBrowserClient {
   std::string GetProduct() final;
   std::string GetUserAgent() final;
   void OverrideWebkitPrefs(content::RenderViewHost* rvh,
-                           content::WebPreferences* web_prefs) final;
+                           blink::web_pref::WebPreferences* web_prefs) final;
   void RegisterBrowserInterfaceBindersForFrame(
       content::RenderFrameHost* render_frame_host,
       mojo::BinderMapWithContext<content::RenderFrameHost*>* map) final;
   void RegisterNonNetworkNavigationURLLoaderFactories(
       int frame_tree_node_id,
+      ukm::SourceIdObj ukm_source_id,
       NonNetworkURLLoaderFactoryMap* factories) final;
   void RegisterNonNetworkSubresourceURLLoaderFactories(
       int render_process_id,
       int render_frame_id,
       NonNetworkURLLoaderFactoryMap* factories) final;
+  bool ShouldEnableStrictSiteIsolation() final;
   void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
                                       int child_process_id) final;
   std::vector<std::unique_ptr<blink::URLLoaderThrottle>>

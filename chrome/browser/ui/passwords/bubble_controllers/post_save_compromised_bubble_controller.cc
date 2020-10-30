@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/passwords/bubble_controllers/post_save_compromised_bubble_controller.h"
 
+#include "base/metrics/histogram_functions.h"
+#include "base/notreached.h"
 #include "chrome/browser/ui/passwords/passwords_model_delegate.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
@@ -29,6 +31,7 @@ PostSaveCompromisedBubbleController::PostSaveCompromisedBubbleController(
     default:
       NOTREACHED();
   }
+  base::UmaHistogramEnumeration("PasswordBubble.CompromisedBubble.Type", type_);
 }
 
 PostSaveCompromisedBubbleController::~PostSaveCompromisedBubbleController() {
@@ -38,11 +41,17 @@ PostSaveCompromisedBubbleController::~PostSaveCompromisedBubbleController() {
     OnBubbleClosing();
 }
 
-base::string16 PostSaveCompromisedBubbleController::GetBody() const {
+base::string16 PostSaveCompromisedBubbleController::GetBody() {
   switch (type_) {
-    case BubbleType::kPasswordUpdatedSafeState:
-      return l10n_util::GetStringUTF16(
-          IDS_PASSWORD_MANAGER_SAFE_STATE_BODY_MESSAGE);
+    case BubbleType::kPasswordUpdatedSafeState: {
+      base::string16 settings =
+          l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_SAFE_STATE_SETTINGS);
+      size_t offset = 0;
+      base::string16 body = l10n_util::GetStringFUTF16(
+          IDS_PASSWORD_MANAGER_SAFE_STATE_BODY_MESSAGE, settings, &offset);
+      link_range_ = gfx::Range(offset, offset + settings.size());
+      return body;
+    }
     case BubbleType::kPasswordUpdatedWithMoreToFix:
       return l10n_util::GetPluralStringFUTF16(
           IDS_PASSWORD_MANAGER_MORE_TO_FIX_BODY_MESSAGE,
@@ -52,6 +61,10 @@ base::string16 PostSaveCompromisedBubbleController::GetBody() const {
           IDS_PASSWORD_MANAGER_UNSAFE_STATE_BODY_MESSAGE,
           delegate_->GetTotalNumberCompromisedPasswords());
   }
+}
+
+gfx::Range PostSaveCompromisedBubbleController::GetSettingLinkRange() const {
+  return link_range_;
 }
 
 base::string16 PostSaveCompromisedBubbleController::GetButtonText() const {
@@ -81,8 +94,28 @@ int PostSaveCompromisedBubbleController::GetImageID(bool dark) const {
 }
 
 void PostSaveCompromisedBubbleController::OnAccepted() {
+  using password_manager::PasswordCheckReferrer;
+  checked_clicked_ = true;
+  PasswordCheckReferrer referrer;
+  switch (type_) {
+    case BubbleType::kPasswordUpdatedSafeState:
+      NOTREACHED();
+      return;
+    case BubbleType::kPasswordUpdatedWithMoreToFix:
+      referrer = PasswordCheckReferrer::kMoreToFixBubble;
+      break;
+    case BubbleType::kUnsafeState:
+      referrer = PasswordCheckReferrer::kUnsafeStateBubble;
+      break;
+  }
   if (delegate_)
-    delegate_->NavigateToPasswordCheckup();
+    delegate_->NavigateToPasswordCheckup(referrer);
+}
+
+void PostSaveCompromisedBubbleController::OnSettingsClicked() {
+  if (delegate_)
+    delegate_->NavigateToPasswordManagerSettingsPage(
+        password_manager::ManagePasswordsReferrer::kSafeStateBubble);
 }
 
 base::string16 PostSaveCompromisedBubbleController::GetTitle() const {
@@ -98,4 +131,7 @@ base::string16 PostSaveCompromisedBubbleController::GetTitle() const {
   }
 }
 
-void PostSaveCompromisedBubbleController::ReportInteractions() {}
+void PostSaveCompromisedBubbleController::ReportInteractions() {
+  base::UmaHistogramBoolean("PasswordBubble.CompromisedBubble.CheckClicked",
+                            checked_clicked_);
+}

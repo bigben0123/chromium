@@ -99,6 +99,11 @@ class CertificateProviderService : public KeyedService {
 
   class Observer : public base::CheckedObserver {
    public:
+    // Called when an extension updates the certificates it provides.
+    virtual void OnCertificatesUpdated(
+        const std::string& extension_id,
+        const CertificateInfoList& certificate_infos) {}
+
     // Called when a sign request gets successfully completed.
     virtual void OnSignCompleted(
         const scoped_refptr<net::X509Certificate>& certificate,
@@ -129,12 +134,12 @@ class CertificateProviderService : public KeyedService {
 
   // Must be called when an extension replied to a previous certificate
   // request, after the new certificates were registered with
-  // SetCertificatesForExtension(). For each request, it is expected that every
-  // registered extension replies exactly once. |cert_request_id| must refer to
-  // a previously broadcast certificate request. Returns false if the request id
-  // is unknown or it was called before with the same combination of request id
-  // and extension id. E.g. the request could have timed out before an extension
-  // replies.
+  // SetCertificatesProvidedByExtension(). For each request, it is expected that
+  // every registered extension replies exactly once. |cert_request_id| must
+  // refer to a previously broadcast certificate request. Returns false if the
+  // request id is unknown or it was called before with the same combination of
+  // request id and extension id. E.g. the request could have timed out before
+  // an extension replies.
   bool SetExtensionCertificateReplyReceived(const std::string& extension_id,
                                             int cert_request_id);
 
@@ -146,9 +151,8 @@ class CertificateProviderService : public KeyedService {
   // If the signature could be calculated by the extension, |signature| is
   // provided in the reply and should be the signature of the data sent in the
   // sign request. Otherwise, in case of a failure, |signature| must be empty.
-  // The call is ignored if |sign_request_id| is not referring to a pending
-  // request.
-  void ReplyToSignRequest(const std::string& extension_id,
+  // Returns false if |sign_request_id| is not referring to a pending request.
+  bool ReplyToSignRequest(const std::string& extension_id,
                           int sign_request_id,
                           const std::vector<uint8_t>& signature);
 

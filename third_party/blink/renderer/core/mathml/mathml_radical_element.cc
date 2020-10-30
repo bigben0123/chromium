@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/core/mathml/mathml_radical_element.h"
 
-#include "third_party/blink/renderer/core/layout/ng/mathml/layout_ng_mathml_square_root.h"
+#include "third_party/blink/renderer/core/layout/ng/mathml/layout_ng_mathml_block_with_anonymous_mrow.h"
 
 namespace blink {
 
@@ -19,12 +19,12 @@ bool MathMLRadicalElement::HasIndex() const {
 LayoutObject* MathMLRadicalElement::CreateLayoutObject(
     const ComputedStyle& style,
     LegacyLayout legacy) {
-  // TODO(rbuis): legacy check should be removed.
+  DCHECK(!style.IsDisplayMathType() || legacy != LegacyLayout::kForce);
   if (!RuntimeEnabledFeatures::MathMLCoreEnabled() ||
-      legacy == LegacyLayout::kForce || !style.IsDisplayMathType())
+      !style.IsDisplayMathType())
     return MathMLElement::CreateLayoutObject(style, legacy);
   if (HasTagName(mathml_names::kMsqrtTag))
-    return new LayoutNGMathMLSquareRoot(this);
+    return new LayoutNGMathMLBlockWithAnonymousMrow(this);
   return new LayoutNGMathMLBlock(this);
 }
 

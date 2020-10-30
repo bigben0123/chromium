@@ -3,15 +3,15 @@
 # found in the LICENSE file.
 
 import("//build/config/features.gni")
-import("//build/config/jumbo.gni")
 
-jumbo_static_library("base") {
+declare_args() {
+  # Controls the product part of the user agent calculated in sync_util.cc.
+  sync_user_agent_product = "Chrome"
+}
+
+static_library("base") {
   sources = [
     "bind_to_task_runner.h",
-    "cancelation_observer.cc",
-    "cancelation_observer.h",
-    "cancelation_signal.cc",
-    "cancelation_signal.h",
     "client_tag_hash.cc",
     "client_tag_hash.h",
     "data_type_histogram.cc",
@@ -53,6 +53,8 @@ jumbo_static_library("base") {
     "sync_prefs.cc",
     "sync_prefs.h",
     "sync_stop_metadata_fate.h",
+    "sync_util.cc",
+    "sync_util.h",
     "syncer_error.cc",
     "syncer_error.h",
     "system_encryptor.cc",
@@ -63,8 +65,6 @@ jumbo_static_library("base") {
     "unique_position.h",
     "unrecoverable_error_info.cc",
     "unrecoverable_error_info.h",
-    "user_demographics.cc",
-    "user_demographics.h",
     "user_selectable_type.cc",
     "user_selectable_type.h",
     "weak_handle.cc",
@@ -85,14 +85,18 @@ jumbo_static_library("base") {
     "//components/pref_registry",
     "//components/prefs",
     "//components/version_info",
+    "//components/version_info:generate_version_info",
     "//crypto",
     "//net",
     "//third_party/zlib",
+    "//ui/base",
   ]
 
   if (is_chromeos) {
     deps += [ "//chromeos/constants" ]
   }
+
+  defines = [ "SYNC_USER_AGENT_PRODUCT=$sync_user_agent_product" ]
 }
 
 static_library("test_support") {

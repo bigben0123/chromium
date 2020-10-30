@@ -259,6 +259,9 @@ class FileManager extends cr.EventTarget {
     /** @private {?QuickViewController} */
     this.quickViewController_ = null;
 
+    /** @private {?FileTypeFiltersController} */
+    this.fileTypeFiltersController_ = null;
+
     /**
      * Records histograms of directory-changed event.
      * @private {?NavigationUma}
@@ -327,6 +330,12 @@ class FileManager extends cr.EventTarget {
      * @private {?NavigationModelFakeItem}
      */
     this.fakeDriveItem_ = null;
+
+    /**
+     * A fake entry for Recents.
+     * @private {?FakeEntry}
+     */
+    this.recentEntry_ = null;
   }
 
   /**
@@ -693,6 +702,7 @@ class FileManager extends cr.EventTarget {
     this.document_.addEventListener(
         'command',
         this.ui_.listContainer.clearHover.bind(this.ui_.listContainer));
+    CommandHandler.registerUndoDeleteToast(this);
   }
 
   /**
@@ -904,7 +914,7 @@ class FileManager extends cr.EventTarget {
     this.metadataModel_ = MetadataModel.create(this.volumeManager_);
     this.thumbnailModel_ = new ThumbnailModel(this.metadataModel_);
     this.providersModel_ = new ProvidersModel(this.volumeManager_);
-    this.fileFilter_ = new FileFilter(this.metadataModel_);
+    this.fileFilter_ = new FileFilter(this.volumeManager_);
 
     // Set the files-ng class for dialog header styling.
     const dialogHeader = queryRequiredElement('.dialog-header');
@@ -1051,6 +1061,10 @@ class FileManager extends cr.EventTarget {
         this.launchParams_.showAndroidPickerApps,
         this.launchParams_.includeAllFiles, this.launchParams_.typeList);
 
+    this.recentEntry_ = new FakeEntry(
+        str('RECENT_ROOT_LABEL'), VolumeManagerCommon.RootType.RECENT,
+        this.getSourceRestriction_());
+
     assert(this.launchParams_);
     this.selectionHandler_ = new FileSelectionHandler(
         assert(this.directoryModel_), assert(this.fileOperationManager_),
@@ -1121,6 +1135,13 @@ class FileManager extends cr.EventTarget {
         this.metadataModel_, this.volumeManager_, this.fileFilter_,
         this.namingController_, this.selectionHandler_, this.launchParams_);
 
+    // Create file-type filter controller.
+    if (util.isRecentsFilterEnabled()) {
+      this.fileTypeFiltersController_ = new FileTypeFiltersController(
+          this.ui_.fileTypeFilterContainer, this.directoryModel_,
+          this.recentEntry_);
+    }
+
     return directoryTreePromise;
   }
 
@@ -1144,10 +1165,7 @@ class FileManager extends cr.EventTarget {
                 !DialogType.isFolderDialog(this.launchParams_.type) ?
             new NavigationModelFakeItem(
                 str('RECENT_ROOT_LABEL'), NavigationModelItemType.RECENT,
-                new FakeEntry(
-                    str('RECENT_ROOT_LABEL'),
-                    VolumeManagerCommon.RootType.RECENT,
-                    this.getSourceRestriction_())) :
+                assert(this.recentEntry_)) :
             null,
         assert(this.directoryModel_), assert(this.androidAppListModel_));
 
@@ -1235,10 +1253,8 @@ class FileManager extends cr.EventTarget {
             nextCurrentDirEntry = inEntry;
           }
 
-          // If this dialog attempts to open file(s) and the selection is a
-          // directory, the selection should be the current directory.
-          if (DialogType.isOpenFileDialog(this.dialogType) &&
-              inEntry.isDirectory) {
+          // If the |selectionURL| is a directory make it the current directory.
+          if (inEntry.isDirectory) {
             nextCurrentDirEntry = inEntry;
           }
 
@@ -1251,6 +1267,24 @@ class FileManager extends cr.EventTarget {
       } catch (error) {
         console.warn(error.stack || error);
       }
+    }
+
+    // If searchQuery param is set, find the first directory that matches the
+    // query, and select it if exists.
+    const searchQuery = this.launchParams_.searchQuery;
+    if (searchQuery) {
+      metrics.startInterval('Load.ProcessInitialSearchQuery');
+      this.searchController_.setSearchQuery(searchQuery);
+      // Show a spinner, as the crossover search function call could be slow.
+      const hideSpinnerCallback = this.spinnerController_.show();
+      const queryMatchedDirEntry =
+          await crossoverSearchUtils.findQueryMatchedDirectoryEntry(
+              this.directoryTree.dataModel_, this.directoryModel_, searchQuery);
+      if (queryMatchedDirEntry) {
+        nextCurrentDirEntry = queryMatchedDirEntry;
+      }
+      hideSpinnerCallback();
+      metrics.recordInterval('Load.ProcessInitialSearchQuery');
     }
 
     // Resolve the currentDirectoryURL to currentDirectoryEntry (if not done by
@@ -1376,6 +1410,9 @@ class FileManager extends cr.EventTarget {
         });
         if (opt_selectionEntry) {
           this.directoryModel_.selectEntry(opt_selectionEntry);
+        }
+        if (this.launchParams_.searchQuery) {
+          this.searchController_.setSearchQuery(this.launchParams_.searchQuery);
         }
       } else {
         console.warn('No entry for finishSetupCurrentDirectory_');

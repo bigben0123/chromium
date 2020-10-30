@@ -410,6 +410,9 @@ void EnterpriseEnrollmentHelperImpl::ReportEnrollmentStatus(
         case policy::DM_STATUS_SERVICE_DEVICE_ID_CONFLICT:
           UMA(policy::kMetricEnrollmentRegisterPolicyDeviceIdConflict);
           break;
+        case policy::DM_STATUS_SERVICE_TOO_MANY_REQUESTS:
+          UMA(policy::kMetricEnrollmentTooManyRequests);
+          break;
         case policy::DM_STATUS_SERVICE_POLICY_NOT_FOUND:
           UMA(policy::kMetricEnrollmentRegisterPolicyNotFound);
           break;
@@ -458,6 +461,9 @@ void EnterpriseEnrollmentHelperImpl::ReportEnrollmentStatus(
           break;
         case policy::DM_STATUS_SERVICE_ENTERPRISE_TOS_HAS_NOT_BEEN_ACCEPTED:
           UMA(policy::kMetricEnrollmentRegisterEnterpriseTosHasNotBeenAccepted);
+          break;
+        case policy::DM_STATUS_SERVICE_ILLEGAL_ACCOUNT_FOR_PACKAGED_EDU_LICENSE:
+          UMA(policy::kMetricEnrollmentIllegalAccountForPackagedEDULicense);
           break;
       }
       break;

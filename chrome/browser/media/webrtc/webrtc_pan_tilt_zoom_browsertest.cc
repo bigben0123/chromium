@@ -11,6 +11,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
+#include "media/base/media_switches.h"
 
 namespace {
 
@@ -226,11 +227,6 @@ class WebRtcPanTiltZoomTrackBrowserTest
     : public WebRtcTestBase,
       public testing::WithParamInterface<TrackTestConfig> {
  public:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(
-        switches::kEnableExperimentalWebPlatformFeatures);
-  }
-
   void SetUpInProcessBrowserTestFixture() override {
     DetectErrorsInJavaScript();
   }
@@ -334,11 +330,6 @@ class WebRtcPanTiltZoomConstraintsBrowserTest
     : public WebRtcTestBase,
       public ::testing::WithParamInterface<std::string> {
  public:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(
-        switches::kEnableExperimentalWebPlatformFeatures);
-  }
-
   const char* Constraint() { return GetParam().c_str(); }
 
   void SetUpInProcessBrowserTestFixture() override {
@@ -433,11 +424,15 @@ class WebRtcPanTiltZoomPermissionRequestBrowserTest
   void SetUpOnMainThread() override {
     WebRtcTestBase::SetUpOnMainThread();
 
+    media::VideoCaptureControlSupport control_support;
+    control_support.pan = IsPanTiltZoomSupported();
+    control_support.tilt = IsPanTiltZoomSupported();
+    control_support.zoom = IsPanTiltZoomSupported();
     blink::MediaStreamDevices video_devices;
     blink::MediaStreamDevice fake_video_device(
         blink::mojom::MediaStreamType::DEVICE_VIDEO_CAPTURE, "fake_video_dev",
-        "Fake Video Device", media::MEDIA_VIDEO_FACING_NONE, base::nullopt,
-        IsPanTiltZoomSupported());
+        "Fake Video Device", control_support, media::MEDIA_VIDEO_FACING_NONE,
+        base::nullopt);
     video_devices.push_back(fake_video_device);
     MediaCaptureDevicesDispatcher::GetInstance()->SetTestVideoCaptureDevices(
         video_devices);
@@ -481,12 +476,14 @@ class WebRtcPanTiltZoomCameraDevicesBrowserTest : public WebRtcTestBase {
         "MediaCapturePanTilt,PermissionsRequestRevoke");
   }
 
-  void SetVideoCaptureDevice(bool pan_tilt_zoom_supported) {
+  void SetVideoCaptureDevice(bool pan_supported,
+                             bool tilt_supported,
+                             bool zoom_supported) {
     blink::MediaStreamDevices video_devices;
     blink::MediaStreamDevice fake_video_device(
         blink::mojom::MediaStreamType::DEVICE_VIDEO_CAPTURE, "fake_video_dev",
-        "Fake Video Device", media::MEDIA_VIDEO_FACING_NONE, base::nullopt,
-        pan_tilt_zoom_supported);
+        "Fake Video Device", {pan_supported, tilt_supported, zoom_supported},
+        media::MEDIA_VIDEO_FACING_NONE, base::nullopt);
     video_devices.push_back(fake_video_device);
     MediaCaptureDevicesDispatcher::GetInstance()->SetTestVideoCaptureDevices(
         video_devices);
@@ -504,7 +501,8 @@ IN_PROC_BROWSER_TEST_F(WebRtcPanTiltZoomCameraDevicesBrowserTest,
 
   // Simulate camera device with no PTZ support and request PTZ camera
   // permission.
-  SetVideoCaptureDevice(false /* pan_tilt_zoom_supported */);
+  SetVideoCaptureDevice(/*pan_supported=*/false, /*tilt_supported=*/false,
+                        /*zoom_supported=*/false);
   std::string result;
   EXPECT_TRUE(content::ExecuteScriptAndExtractString(
       tab->GetMainFrame(), "runRequestPanTiltZoom();", &result));
@@ -523,7 +521,8 @@ IN_PROC_BROWSER_TEST_F(WebRtcPanTiltZoomCameraDevicesBrowserTest,
   EXPECT_EQ(pan_tilt_zoom, "prompt");
 
   // Simulate camera device with PTZ support.
-  SetVideoCaptureDevice(true /* pan_tilt_zoom_supported */);
+  SetVideoCaptureDevice(/*pan_supported=*/true, /*tilt_supported=*/true,
+                        /*zoom_supported=*/true);
 
   // Camera PTZ permission should still not be granted.
   EXPECT_TRUE(content::ExecuteScriptAndExtractString(
@@ -537,7 +536,8 @@ IN_PROC_BROWSER_TEST_F(WebRtcPanTiltZoomCameraDevicesBrowserTest,
   content::WebContents* tab = OpenTestPageInNewTab(kMainHtmlPage);
 
   // Simulate camera device with PTZ support and request PTZ camera permission.
-  SetVideoCaptureDevice(true /* pan_tilt_zoom_supported */);
+  SetVideoCaptureDevice(/*pan_supported=*/true, /*tilt_supported=*/true,
+                        /*zoom_supported=*/true);
   std::string result;
   EXPECT_TRUE(content::ExecuteScriptAndExtractString(
       tab->GetMainFrame(), "runRequestPanTiltZoom();", &result));
@@ -556,10 +556,84 @@ IN_PROC_BROWSER_TEST_F(WebRtcPanTiltZoomCameraDevicesBrowserTest,
   EXPECT_EQ(pan_tilt_zoom, "granted");
 
   // Simulate camera device with no PTZ support.
-  SetVideoCaptureDevice(false /* pan_tilt_zoom_supported */);
+  SetVideoCaptureDevice(/*pan_supported=*/false, /*tilt_supported=*/false,
+                        /*zoom_supported=*/false);
 
   // Camera PTZ permission should still be granted.
   EXPECT_TRUE(content::ExecuteScriptAndExtractString(
       tab->GetMainFrame(), "getPanTiltZoomPermission();", &pan_tilt_zoom));
   EXPECT_EQ(pan_tilt_zoom, "granted");
+}
+
+class WebRtcPanTiltZoomFakeCameraDevicesBrowserTest : public WebRtcTestBase {
+ public:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitch(switches::kUseFakeDeviceForMediaStream);
+  }
+
+  void SetUpInProcessBrowserTestFixture() override {
+    DetectErrorsInJavaScript();
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(WebRtcPanTiltZoomFakeCameraDevicesBrowserTest,
+                       TestPageVisible) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  content::WebContents* tab = OpenTestPageInNewTab(kMainHtmlPage);
+
+  // Access PTZ camera.
+  std::string result;
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      tab->GetMainFrame(),
+      "runGetUserMedia({ video: { pan: true, tilt: true, zoom: true } });",
+      &result));
+  EXPECT_EQ(result, "runGetUserMedia-success");
+
+  // Hide page.
+  tab->WasHidden();
+  base::string16 expected_title = base::ASCIIToUTF16("hidden");
+  EXPECT_EQ(expected_title,
+            content::TitleWatcher(tab, expected_title).WaitAndGetTitle());
+
+  // Pan can't be set when page is hidden.
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      tab->GetMainFrame(), "applyConstraints({ advanced: [{ pan: 102 }] });",
+      &result));
+  EXPECT_EQ(result, "applyConstraints-failure-SecurityError");
+
+  // Tilt can't be set when page is hidden.
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      tab->GetMainFrame(), "applyConstraints({ advanced: [{ tilt: 102 }] });",
+      &result));
+  EXPECT_EQ(result, "applyConstraints-failure-SecurityError");
+
+  // Zoom can't be set when page is hidden.
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      tab->GetMainFrame(), "applyConstraints({ advanced: [{ zoom: 102 }] });",
+      &result));
+  EXPECT_EQ(result, "applyConstraints-failure-SecurityError");
+
+  // Show page.
+  tab->WasShown();
+  expected_title = base::ASCIIToUTF16("visible");
+  EXPECT_EQ(expected_title,
+            content::TitleWatcher(tab, expected_title).WaitAndGetTitle());
+
+  // Pan can be set when page is shown again.
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      tab->GetMainFrame(), "applyConstraints({ advanced: [{ pan: 102 }] });",
+      &result));
+  EXPECT_EQ(result, "applyConstraints-success");
+
+  // Tilt can be set when page is shown again.
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      tab->GetMainFrame(), "applyConstraints({ advanced: [{ tilt: 102 }] });",
+      &result));
+  EXPECT_EQ(result, "applyConstraints-success");
+
+  // Zoom can be set when page is shown again.
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      tab->GetMainFrame(), "applyConstraints({ advanced: [{ zoom: 102 }] });",
+      &result));
+  EXPECT_EQ(result, "applyConstraints-success");
 }

@@ -27,7 +27,7 @@
 #include "sql/statement.h"
 #include "sql/transaction.h"
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_MAC)
 #include "base/mac/mac_util.h"
 #endif
 
@@ -112,7 +112,7 @@ sql::InitStatus HistoryDatabase::Init(const base::FilePath& history_name) {
   if (!committer.Begin())
     return LogInitFailure(InitStep::TRANSACTION_BEGIN);
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_MAC)
   // Exclude the history file from backups.
   base::mac::SetFileBackupExclusion(history_name);
 #endif
@@ -368,6 +368,10 @@ SegmentID HistoryDatabase::GetSegmentID(VisitID visit_id) {
   if (!s.Step() || s.GetColumnType(0) == sql::ColumnType::kNull)
     return 0;
   return s.ColumnInt64(0);
+}
+
+bool HistoryDatabase::GetVisitsForUrl2(URLID url_id, VisitVector* visits) {
+  return GetVisitsForURL(url_id, visits);
 }
 
 base::Time HistoryDatabase::GetEarlyExpirationThreshold() {

@@ -100,6 +100,7 @@ class PinRequestView::FocusableLabelButton : public views::LabelButton {
       : views::LabelButton(listener, text) {
     SetInstallFocusRingOnFocus(true);
     focus_ring()->SetColor(ShelfConfig::Get()->shelf_focus_border_color());
+    SetFocusBehavior(FocusBehavior::ALWAYS);
   }
 
   FocusableLabelButton(const FocusableLabelButton&) = delete;
@@ -154,8 +155,7 @@ PinRequestViewState PinRequestView::TestApi::state() const {
 // static
 SkColor PinRequestView::GetChildUserDialogColor(bool using_blur) {
   SkColor color = AshColorProvider::Get()->GetBaseLayerColor(
-      AshColorProvider::BaseLayerType::kOpaque,
-      AshColorProvider::AshColorMode::kDark);
+      AshColorProvider::BaseLayerType::kOpaque);
 
   SkColor extracted_color =
       Shell::Get()->wallpaper_controller()->GetProminentColor(
@@ -182,6 +182,12 @@ PinRequestView::PinRequestView(PinRequest request, Delegate* delegate)
       default_accessible_title_(request.accessible_title.empty()
                                     ? request.title
                                     : request.accessible_title) {
+  // MODAL_TYPE_SYSTEM is used to get a semi-transparent background behind the
+  // pin request view, when it is used directly on a widget. The overlay
+  // consumes all the inputs from the user, so that they can only interact with
+  // the pin request view while it is visible.
+  SetModalType(ui::MODAL_TYPE_SYSTEM);
+
   // Main view contains all other views aligned vertically and centered.
   auto layout = std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kVertical,
@@ -305,6 +311,8 @@ PinRequestView::PinRequestView(PinRequest request, Delegate* delegate)
 
   add_spacer(kDescriptionToAccessCodeDistanceDp);
 
+  LoginPalette palette = CreateDefaultLoginPalette();
+
   // Access code input view.
   if (request.pin_length.has_value()) {
     CHECK_GT(request.pin_length.value(), 0);
@@ -315,29 +323,31 @@ PinRequestView::PinRequestView(PinRequest request, Delegate* delegate)
         base::BindRepeating(&PinRequestView::SubmitCode,
                             base::Unretained(this)),
         base::BindRepeating(&PinRequestView::OnBack, base::Unretained(this)),
-        request.obscure_pin));
+        request.obscure_pin, palette.pin_input_text_color));
+    access_code_view_->SetFocusBehavior(FocusBehavior::ALWAYS);
   } else {
-    access_code_view_ = AddChildView(std::make_unique<FlexCodeInput>(
+    auto flex_code_input = std::make_unique<FlexCodeInput>(
         base::BindRepeating(&PinRequestView::OnInputChange,
                             base::Unretained(this), false),
         base::BindRepeating(&PinRequestView::SubmitCode,
                             base::Unretained(this)),
         base::BindRepeating(&PinRequestView::OnBack, base::Unretained(this)),
-        request.obscure_pin));
+        request.obscure_pin, palette.pin_input_text_color);
+    flex_code_input->SetAccessibleName(default_accessible_title_);
+    access_code_view_ = AddChildView(std::move(flex_code_input));
   }
-  access_code_view_->SetFocusBehavior(FocusBehavior::ALWAYS);
 
   add_spacer(kAccessCodeToPinKeyboardDistanceDp);
 
   // Pin keyboard. Note that the keyboard's own submit button is disabled via
   // passing a null |on_submit| callback.
-  pin_keyboard_view_ =
-      new LoginPinView(LoginPinView::Style::kAlphanumeric,
-                       base::BindRepeating(&AccessCodeInput::InsertDigit,
-                                           base::Unretained(access_code_view_)),
-                       base::BindRepeating(&AccessCodeInput::Backspace,
-                                           base::Unretained(access_code_view_)),
-                       /*on_submit=*/LoginPinView::OnPinSubmit());
+  pin_keyboard_view_ = new LoginPinView(
+      LoginPinView::Style::kAlphanumeric, CreateDefaultLoginPalette(),
+      base::BindRepeating(&AccessCodeInput::InsertDigit,
+                          base::Unretained(access_code_view_)),
+      base::BindRepeating(&AccessCodeInput::Backspace,
+                          base::Unretained(access_code_view_)),
+      /*on_submit=*/LoginPinView::OnPinSubmit());
   // Backspace key is always enabled and |access_code_| field handles it.
   pin_keyboard_view_->OnPasswordTextChanged(false);
   AddChildView(pin_keyboard_view_);
@@ -359,7 +369,6 @@ PinRequestView::PinRequestView(PinRequest request, Delegate* delegate)
   help_button_->layer()->SetFillsBoundsOpaquely(false);
   help_button_->SetTextSubpixelRenderingEnabled(false);
   help_button_->SetEnabledTextColors(kTextColor);
-  help_button_->SetFocusBehavior(FocusBehavior::ALWAYS);
   help_button_->SetVisible(request.help_button_enabled);
   footer->AddChildView(help_button_);
 
@@ -403,14 +412,6 @@ void PinRequestView::RequestFocus() {
 
 gfx::Size PinRequestView::CalculatePreferredSize() const {
   return GetPinRequestViewSize();
-}
-
-ui::ModalType PinRequestView::GetModalType() const {
-  // MODAL_TYPE_SYSTEM is used to get a semi-transparent background behind the
-  // pin request view, when it is used directly on a widget. The overlay
-  // consumes all the inputs from the user, so that they can only interact with
-  // the pin request view while it is visible.
-  return ui::MODAL_TYPE_SYSTEM;
 }
 
 views::View* PinRequestView::GetInitiallyFocusedView() {

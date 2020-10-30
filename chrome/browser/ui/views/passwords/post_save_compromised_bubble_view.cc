@@ -12,7 +12,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/views/bubble/bubble_frame_view.h"
-#include "ui/views/controls/label.h"
+#include "ui/views/controls/styled_label.h"
 #include "ui/views/layout/fill_layout.h"
 
 PostSaveCompromisedBubbleView::PostSaveCompromisedBubbleView(
@@ -32,11 +32,18 @@ PostSaveCompromisedBubbleView::PostSaveCompromisedBubbleView(
     SetButtonLabel(ui::DIALOG_BUTTON_OK, std::move(button));
   }
 
-  auto label = std::make_unique<views::Label>(controller_.GetBody(),
-                                              CONTEXT_BODY_TEXT_LARGE,
-                                              views::style::STYLE_SECONDARY);
-  label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  label->SetMultiLine(true);
+  auto label = std::make_unique<views::StyledLabel>();
+  label->SetText(controller_.GetBody());
+  label->SetTextContext(views::style::CONTEXT_DIALOG_BODY_TEXT);
+  label->SetDefaultTextStyle(views::style::STYLE_SECONDARY);
+  gfx::Range range = controller_.GetSettingLinkRange();
+  if (!range.is_empty()) {
+    label->AddStyleRange(
+        range,
+        views::StyledLabel::RangeStyleInfo::CreateForLink(base::BindRepeating(
+            &PostSaveCompromisedBubbleController::OnSettingsClicked,
+            base::Unretained(&controller_))));
+  }
   AddChildView(std::move(label));
 
   SetAcceptCallback(
@@ -54,17 +61,6 @@ PostSaveCompromisedBubbleView::GetController() {
 const PostSaveCompromisedBubbleController*
 PostSaveCompromisedBubbleView::GetController() const {
   return &controller_;
-}
-
-gfx::Size PostSaveCompromisedBubbleView::CalculatePreferredSize() const {
-  const int width = ChromeLayoutProvider::Get()->GetDistanceMetric(
-                        DISTANCE_BUBBLE_PREFERRED_WIDTH) -
-                    margins().width();
-  return gfx::Size(width, GetHeightForWidth(width));
-}
-
-bool PostSaveCompromisedBubbleView::ShouldShowCloseButton() const {
-  return true;
 }
 
 void PostSaveCompromisedBubbleView::OnThemeChanged() {

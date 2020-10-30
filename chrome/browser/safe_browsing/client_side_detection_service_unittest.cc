@@ -86,13 +86,15 @@ class ClientSideDetectionServiceTest : public testing::Test {
                                        float score,
                                        bool is_extended_reporting,
                                        bool is_enhanced_reporting) {
-    ClientPhishingRequest* request = new ClientPhishingRequest();
+    std::unique_ptr<ClientPhishingRequest> request =
+        std::make_unique<ClientPhishingRequest>(ClientPhishingRequest());
     request->set_url(phishing_url.spec());
     request->set_client_score(score);
     request->set_is_phishing(true);  // client thinks the URL is phishing.
+
     base::RunLoop run_loop;
     csd_service_->SendClientReportPhishingRequest(
-        request, is_extended_reporting, is_enhanced_reporting,
+        std::move(request), is_extended_reporting, is_enhanced_reporting,
         base::Bind(&ClientSideDetectionServiceTest::SendRequestDone,
                    base::Unretained(this), run_loop.QuitWhenIdleClosure()));
     phishing_url_ = phishing_url;
@@ -397,20 +399,20 @@ TEST_F(ClientSideDetectionServiceTest, TestModelFollowsPrefs) {
   profile_->GetPrefs()->SetBoolean(prefs::kSafeBrowsingEnabled, true);
   ASSERT_NE(csd_service_->model_loader_, nullptr);
   EXPECT_EQ(csd_service_->model_loader_->name(),
-            "client_model_v5_variation_0.pb");
+            "client_model_v5_variation_4.pb");
 
   // Safe Browsing extended reporting is enabled
   profile_->GetPrefs()->SetBoolean(prefs::kSafeBrowsingScoutReportingEnabled,
                                    true);
   ASSERT_NE(csd_service_->model_loader_, nullptr);
   EXPECT_EQ(csd_service_->model_loader_->name(),
-            "client_model_v5_ext_variation_0.pb");
+            "client_model_v5_ext_variation_4.pb");
 
   // Safe Browsing enhanced protection is enabled.
   profile_->GetPrefs()->SetBoolean(prefs::kSafeBrowsingEnhanced, true);
   ASSERT_NE(csd_service_->model_loader_, nullptr);
   EXPECT_EQ(csd_service_->model_loader_->name(),
-            "client_model_v5_ext_variation_0.pb");
+            "client_model_v5_ext_variation_4.pb");
 }
 
 }  // namespace safe_browsing

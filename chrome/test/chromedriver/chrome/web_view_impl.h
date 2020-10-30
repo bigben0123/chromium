@@ -20,7 +20,6 @@ class Value;
 }
 
 struct BrowserInfo;
-class DebuggerTracker;
 struct DeviceMetrics;
 class DevToolsClient;
 class DomTracker;
@@ -139,6 +138,8 @@ class WebViewImpl : public WebView {
   Status IsPendingNavigation(const Timeout* timeout,
                              bool* is_pending) const override;
   JavaScriptDialogManager* GetJavaScriptDialogManager() override;
+  MobileEmulationOverrideManager* GetMobileEmulationOverrideManager()
+      const override;
   Status OverrideGeolocation(const Geoposition& geoposition) override;
   Status OverrideNetworkConditions(
       const NetworkConditions& network_conditions) override;
@@ -164,6 +165,10 @@ class WebViewImpl : public WebView {
                                  int y,
                                  int xoffset,
                                  int yoffset) override;
+  Status GetNodeIdByElement(const std::string& frame,
+                            const base::DictionaryValue& element,
+                            int* node_id) override;
+
   bool IsNonBlocking() const override;
   bool IsOOPIF(const std::string& frame_id) override;
   FrameTracker* GetFrameTracker() const override;
@@ -218,7 +223,6 @@ class WebViewImpl : public WebView {
   std::unique_ptr<DownloadDirectoryOverrideManager>
       download_directory_override_manager_;
   std::unique_ptr<HeapSnapshotTaker> heap_snapshot_taker_;
-  std::unique_ptr<DebuggerTracker> debugger_;
   std::unique_ptr<CastTracker> cast_tracker_;
 };
 
@@ -274,7 +278,6 @@ Status GetNodeIdFromFunction(DevToolsClient* client,
                              bool* found_node,
                              int* node_id,
                              bool w3c_compliant);
-
 }  // namespace internal
 
 #endif  // CHROME_TEST_CHROMEDRIVER_CHROME_WEB_VIEW_IMPL_H_

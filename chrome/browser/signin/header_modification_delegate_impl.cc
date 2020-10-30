@@ -4,6 +4,7 @@
 
 #include "chrome/browser/signin/header_modification_delegate_impl.h"
 
+#include "build/build_config.h"
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/extensions/api/identity/web_auth_flow.h"
 #include "chrome/browser/profiles/profile_io_data.h"
@@ -23,7 +24,6 @@
 #include "extensions/browser/guest_view/web_view/web_view_renderer_state.h"
 
 #if defined(OS_CHROMEOS)
-#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/constants/chromeos_pref_names.h"
 #endif
 
@@ -60,23 +60,38 @@ void HeaderModificationDelegateImpl::ProcessRequest(
 
 #if defined(OS_CHROMEOS)
   bool is_secondary_account_addition_allowed = true;
-  if (profile_->IsChild() &&
-      !base::FeatureList::IsEnabled(chromeos::features::kEduCoexistence)) {
-    is_secondary_account_addition_allowed = false;
-  }
   if (!prefs->GetBoolean(
           chromeos::prefs::kSecondaryGoogleAccountSigninAllowed)) {
     is_secondary_account_addition_allowed = false;
   }
 #endif
 
+  ConsentLevel consent_level = ConsentLevel::kSync;
+#if defined(OS_ANDROID)
+  if (base::FeatureList::IsEnabled(kMobileIdentityConsistency))
+    consent_level = ConsentLevel::kNotRequired;
+#endif
+
+  IdentityManager* identity_manager =
+      IdentityManagerFactory::GetForProfile(profile_);
+  CoreAccountInfo account =
+      identity_manager->GetPrimaryAccountInfo(consent_level);
+  base::Optional<bool> is_child_account = base::nullopt;
+  if (!account.IsEmpty()) {
+    base::Optional<AccountInfo> extended_account_info =
+        identity_manager->FindExtendedAccountInfoForAccountWithRefreshToken(
+            account);
+    if (extended_account_info.has_value()) {
+      is_child_account = base::make_optional<bool>(
+          extended_account_info.value().is_child_account);
+    }
+  }
+
   FixAccountConsistencyRequestHeader(
       request_adapter, redirect_url, profile_->IsOffTheRecord(),
       prefs->GetInteger(prefs::kIncognitoModeAvailability),
       AccountConsistencyModeManager::GetMethodForProfile(profile_),
-      IdentityManagerFactory::GetForProfile(profile_)
-          ->GetPrimaryAccountInfo()
-          .gaia,
+      account.gaia, is_child_account,
 #if defined(OS_CHROMEOS)
       is_secondary_account_addition_allowed,
 #endif
@@ -107,7 +122,8 @@ bool HeaderModificationDelegateImpl::ShouldIgnoreGuestWebViewRequest(
     GURL identity_api_site =
         extensions::WebViewGuest::GetSiteForGuestPartitionConfig(
             extensions::WebAuthFlow::GetWebViewPartitionConfig(
-                extensions::WebAuthFlow::GET_AUTH_TOKEN));
+                extensions::WebAuthFlow::GET_AUTH_TOKEN,
+                contents->GetBrowserContext()));
     if (contents->GetSiteInstance()->GetSiteURL() != identity_api_site)
       return true;
 

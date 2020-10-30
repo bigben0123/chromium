@@ -482,37 +482,6 @@ class CryptohomeClientImpl : public CryptohomeClient {
   }
 
   // CryptohomeClient override.
-  void TpmAttestationIsPrepared(DBusMethodCallback<bool> callback) override {
-    dbus::MethodCall method_call(
-        cryptohome::kCryptohomeInterface,
-        cryptohome::kCryptohomeTpmIsAttestationPrepared);
-    return CallBoolMethod(&method_call, std::move(callback));
-  }
-
-  // CryptohomeClient override.
-  void TpmAttestationGetEnrollmentId(
-      bool ignore_cache,
-      DBusMethodCallback<TpmAttestationDataResult> callback) override {
-    dbus::MethodCall method_call(
-        cryptohome::kCryptohomeInterface,
-        cryptohome::kCryptohomeTpmAttestationGetEnrollmentId);
-    dbus::MessageWriter writer(&method_call);
-    writer.AppendBool(ignore_cache);
-    proxy_->CallMethod(
-        &method_call, kTpmDBusTimeoutMs,
-        base::BindOnce(&CryptohomeClientImpl::OnTpmAttestationDataMethod,
-                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
-  }
-
-  // CryptohomeClient override.
-  void TpmAttestationIsEnrolled(DBusMethodCallback<bool> callback) override {
-    dbus::MethodCall method_call(
-        cryptohome::kCryptohomeInterface,
-        cryptohome::kCryptohomeTpmIsAttestationEnrolled);
-    return CallBoolMethod(&method_call, std::move(callback));
-  }
-
-  // CryptohomeClient override.
   void AsyncTpmAttestationCreateEnrollRequest(
       attestation::PrivacyCAType pca_type,
       AsyncMethodCallback callback) override {
@@ -724,78 +693,6 @@ class CryptohomeClientImpl : public CryptohomeClient {
   }
 
   // CryptohomeClient override.
-  void TpmAttestationGetKeyPayload(
-      attestation::AttestationKeyType key_type,
-      const cryptohome::AccountIdentifier& id,
-      const std::string& key_name,
-      DBusMethodCallback<TpmAttestationDataResult> callback) override {
-    dbus::MethodCall method_call(
-        cryptohome::kCryptohomeInterface,
-        cryptohome::kCryptohomeTpmAttestationGetKeyPayload);
-    dbus::MessageWriter writer(&method_call);
-    bool is_user_specific = (key_type == attestation::KEY_USER);
-    writer.AppendBool(is_user_specific);
-    writer.AppendString(id.account_id());
-    writer.AppendString(key_name);
-    proxy_->CallMethod(
-        &method_call, kTpmDBusTimeoutMs,
-        base::BindOnce(&CryptohomeClientImpl::OnTpmAttestationDataMethod,
-                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
-  }
-
-  // CryptohomeClient override.
-  void TpmAttestationSetKeyPayload(attestation::AttestationKeyType key_type,
-                                   const cryptohome::AccountIdentifier& id,
-                                   const std::string& key_name,
-                                   const std::string& payload,
-                                   DBusMethodCallback<bool> callback) override {
-    dbus::MethodCall method_call(
-        cryptohome::kCryptohomeInterface,
-        cryptohome::kCryptohomeTpmAttestationSetKeyPayload);
-    dbus::MessageWriter writer(&method_call);
-    bool is_user_specific = (key_type == attestation::KEY_USER);
-    writer.AppendBool(is_user_specific);
-    writer.AppendString(id.account_id());
-    writer.AppendString(key_name);
-    writer.AppendArrayOfBytes(reinterpret_cast<const uint8_t*>(payload.data()),
-                              payload.size());
-    CallBoolMethod(&method_call, std::move(callback));
-  }
-
-  // CryptohomeClient override.
-  void TpmAttestationDeleteKeysByPrefix(
-      attestation::AttestationKeyType key_type,
-      const cryptohome::AccountIdentifier& id,
-      const std::string& key_prefix,
-      DBusMethodCallback<bool> callback) override {
-    dbus::MethodCall method_call(
-        cryptohome::kCryptohomeInterface,
-        cryptohome::kCryptohomeTpmAttestationDeleteKeys);
-    dbus::MessageWriter writer(&method_call);
-    bool is_user_specific = (key_type == attestation::KEY_USER);
-    writer.AppendBool(is_user_specific);
-    writer.AppendString(id.account_id());
-    writer.AppendString(key_prefix);
-    CallBoolMethod(&method_call, std::move(callback));
-  }
-
-  // CryptohomeClient override.
-  void TpmAttestationDeleteKey(attestation::AttestationKeyType key_type,
-                               const cryptohome::AccountIdentifier& id,
-                               const std::string& key_name,
-                               DBusMethodCallback<bool> callback) override {
-    dbus::MethodCall method_call(
-        cryptohome::kCryptohomeInterface,
-        cryptohome::kCryptohomeTpmAttestationDeleteKey);
-    dbus::MessageWriter writer(&method_call);
-    bool is_user_specific = (key_type == attestation::KEY_USER);
-    writer.AppendBool(is_user_specific);
-    writer.AppendString(id.account_id());
-    writer.AppendString(key_name);
-    CallBoolMethod(&method_call, std::move(callback));
-  }
-
-  // CryptohomeClient override.
   void TpmGetVersion(DBusMethodCallback<TpmVersionInfo> callback) override {
     dbus::MethodCall method_call(
         cryptohome::kCryptohomeInterface,
@@ -937,6 +834,38 @@ class CryptohomeClientImpl : public CryptohomeClient {
     dbus::MessageWriter writer(&method_call);
     writer.AppendProtoAsArrayOfBytes(id);
     writer.AppendProtoAsArrayOfBytes(auth);
+    writer.AppendProtoAsArrayOfBytes(request);
+
+    proxy_->CallMethod(
+        &method_call, kTpmDBusTimeoutMs,
+        base::BindOnce(&CryptohomeClientImpl::OnBaseReplyMethod,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+  }
+
+  void StartFingerprintAuthSession(
+      const cryptohome::AccountIdentifier& id,
+      const cryptohome::StartFingerprintAuthSessionRequest& request,
+      DBusMethodCallback<cryptohome::BaseReply> callback) override {
+    dbus::MethodCall method_call(
+        cryptohome::kCryptohomeInterface,
+        cryptohome::kCryptohomeStartFingerprintAuthSession);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendProtoAsArrayOfBytes(id);
+    writer.AppendProtoAsArrayOfBytes(request);
+
+    proxy_->CallMethod(
+        &method_call, kTpmDBusTimeoutMs,
+        base::BindOnce(&CryptohomeClientImpl::OnBaseReplyMethod,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+  }
+
+  void EndFingerprintAuthSession(
+      const cryptohome::EndFingerprintAuthSessionRequest& request,
+      DBusMethodCallback<cryptohome::BaseReply> callback) override {
+    dbus::MethodCall method_call(
+        cryptohome::kCryptohomeInterface,
+        cryptohome::kCryptohomeEndFingerprintAuthSession);
+    dbus::MessageWriter writer(&method_call);
     writer.AppendProtoAsArrayOfBytes(request);
 
     proxy_->CallMethod(

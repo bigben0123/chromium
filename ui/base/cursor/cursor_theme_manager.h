@@ -7,12 +7,13 @@
 
 #include <string>
 
+#include "base/component_export.h"
 #include "base/observer_list.h"
 #include "ui/base/cursor/cursor_theme_manager_observer.h"
 
 namespace ui {
 
-class CursorThemeManager {
+class COMPONENT_EXPORT(UI_BASE_CURSOR_THEME_MANAGER) CursorThemeManager {
  public:
   CursorThemeManager(const CursorThemeManager&) = delete;
   CursorThemeManager& operator=(const CursorThemeManager&) = delete;
@@ -26,6 +27,9 @@ class CursorThemeManager {
 
   void RemoveObserver(CursorThemeManagerObserver* observer);
 
+  virtual std::string GetCursorThemeName() = 0;
+  virtual int GetCursorThemeSize() = 0;
+
  protected:
   CursorThemeManager();
 
@@ -33,9 +37,6 @@ class CursorThemeManager {
   cursor_theme_observers() {
     return cursor_theme_observers_;
   }
-
-  virtual std::string GetCursorThemeName() = 0;
-  virtual int GetCursorThemeSize() = 0;
 
  private:
   base::ObserverList<CursorThemeManagerObserver> cursor_theme_observers_;

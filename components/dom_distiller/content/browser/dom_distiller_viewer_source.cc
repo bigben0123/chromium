@@ -37,12 +37,11 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/common/web_preferences.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/url_util.h"
-#include "net/url_request/url_request.h"
 #include "services/network/public/mojom/content_security_policy.mojom.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/blink/public/common/web_preferences/web_preferences.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace dom_distiller {
@@ -212,10 +211,10 @@ void DomDistillerViewerSource::StartDataRequest(
     return;
 #if !defined(OS_ANDROID)
   // Don't allow loading of mixed content on Reader Mode pages.
-  content::WebPreferences prefs =
-      web_contents->GetRenderViewHost()->GetWebkitPreferences();
+  blink::web_pref::WebPreferences prefs =
+      web_contents->GetOrCreateWebPreferences();
   prefs.strict_mixed_content_checking = true;
-  web_contents->GetRenderViewHost()->UpdateWebkitPreferences(prefs);
+  web_contents->SetWebPreferences(prefs);
 #endif  // !defined(OS_ANDROID)
   if (kViewerCssPath == path) {
     std::string css = viewer::GetCss();
@@ -296,6 +295,12 @@ std::string DomDistillerViewerSource::GetContentSecurityPolicy(
     return "style-src 'self' https://fonts.googleapis.com;";
   } else if (directive == network::mojom::CSPDirectiveName::ChildSrc) {
     return "child-src *;";
+  } else if (directive ==
+                 network::mojom::CSPDirectiveName::RequireTrustedTypesFor ||
+             directive == network::mojom::CSPDirectiveName::TrustedTypes) {
+    // This removes require-trusted-types-for and trusted-types directives
+    // from the CSP header.
+    return std::string();
   }
 
   return content::URLDataSource::GetContentSecurityPolicy(directive);

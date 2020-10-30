@@ -4,6 +4,7 @@
 
 #include <stddef.h>
 
+#include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
@@ -116,7 +117,7 @@ class FaviconWaiter : public favicon::FaviconDriverObserver {
 
   favicon::ContentFaviconDriver* driver_;
   GURL target_favicon_url_;
-  base::Closure quit_closure_;
+  base::RepeatingClosure quit_closure_;
 
   DISALLOW_COPY_AND_ASSIGN(FaviconWaiter);
 };

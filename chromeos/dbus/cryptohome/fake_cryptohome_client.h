@@ -99,11 +99,6 @@ class COMPONENT_EXPORT(CRYPTOHOME_CLIENT) FakeCryptohomeClient
   void InstallAttributesIsReady(DBusMethodCallback<bool> callback) override;
   bool InstallAttributesIsInvalid(bool* is_invalid) override;
   bool InstallAttributesIsFirstInstall(bool* is_first_install) override;
-  void TpmAttestationIsPrepared(DBusMethodCallback<bool> callback) override;
-  void TpmAttestationGetEnrollmentId(
-      bool ignore_cache,
-      DBusMethodCallback<TpmAttestationDataResult> callback) override;
-  void TpmAttestationIsEnrolled(DBusMethodCallback<bool> callback) override;
   void AsyncTpmAttestationCreateEnrollRequest(
       chromeos::attestation::PrivacyCAType pca_type,
       AsyncMethodCallback callback) override;
@@ -158,27 +153,6 @@ class COMPONENT_EXPORT(CRYPTOHOME_CLIENT) FakeCryptohomeClient
       const std::string& key_name,
       const std::string& challenge,
       AsyncMethodCallback callback) override;
-  void TpmAttestationGetKeyPayload(
-      attestation::AttestationKeyType key_type,
-      const cryptohome::AccountIdentifier& cryptohome_id,
-      const std::string& key_name,
-      DBusMethodCallback<TpmAttestationDataResult> callback) override;
-  void TpmAttestationSetKeyPayload(
-      attestation::AttestationKeyType key_type,
-      const cryptohome::AccountIdentifier& cryptohome_id,
-      const std::string& key_name,
-      const std::string& payload,
-      DBusMethodCallback<bool> callback) override;
-  void TpmAttestationDeleteKeysByPrefix(
-      attestation::AttestationKeyType key_type,
-      const cryptohome::AccountIdentifier& cryptohome_id,
-      const std::string& key_prefix,
-      DBusMethodCallback<bool> callback) override;
-  void TpmAttestationDeleteKey(
-      attestation::AttestationKeyType key_type,
-      const cryptohome::AccountIdentifier& cryptohome_id,
-      const std::string& key_name,
-      DBusMethodCallback<bool> callback) override;
   void TpmGetVersion(DBusMethodCallback<TpmVersionInfo> callback) override;
   void GetKeyDataEx(
       const cryptohome::AccountIdentifier& cryptohome_id,
@@ -251,6 +225,13 @@ class COMPONENT_EXPORT(CRYPTOHOME_CLIENT) FakeCryptohomeClient
                              DBusMethodCallback<int64_t> callback) override;
   void CheckHealth(const cryptohome::CheckHealthRequest& request,
                    DBusMethodCallback<cryptohome::BaseReply> callback) override;
+  void StartFingerprintAuthSession(
+      const cryptohome::AccountIdentifier& id,
+      const cryptohome::StartFingerprintAuthSessionRequest& request,
+      DBusMethodCallback<cryptohome::BaseReply> callback) override;
+  void EndFingerprintAuthSession(
+      const cryptohome::EndFingerprintAuthSessionRequest& request,
+      DBusMethodCallback<cryptohome::BaseReply> callback) override;
 
   /////////// Test helpers ////////////
 
@@ -307,23 +288,6 @@ class COMPONENT_EXPORT(CRYPTOHOME_CLIENT) FakeCryptohomeClient
     cryptohome_error_ = error;
   }
 
-  void set_tpm_attestation_enrollment_id(bool ignore_cache,
-                                         const std::string& eid) {
-    if (ignore_cache) {
-      tpm_attestation_enrollment_id_ignore_cache_ = eid;
-    } else {
-      tpm_attestation_enrollment_id_ = eid;
-    }
-  }
-
-  void set_tpm_attestation_is_enrolled(bool enrolled) {
-    tpm_attestation_is_enrolled_ = enrolled;
-  }
-
-  void set_tpm_attestation_is_prepared(bool prepared) {
-    tpm_attestation_is_prepared_ = prepared;
-  }
-
   void set_tpm_attestation_does_key_exist_should_succeed(bool should_succeed) {
     tpm_attestation_does_key_exist_should_succeed_ = should_succeed;
   }
@@ -352,12 +316,6 @@ class COMPONENT_EXPORT(CRYPTOHOME_CLIENT) FakeCryptohomeClient
 
   void SetTpmAttestationDeviceCertificate(const std::string& key_name,
                                           const std::string& certificate);
-
-  base::Optional<std::string> GetTpmAttestationDeviceKeyPayload(
-      const std::string& key_name) const;
-
-  void SetTpmAttestationDeviceKeyPayload(const std::string& key_name,
-                                         const std::string& payload);
 
   // Calls TpmInitStatusUpdated() on Observer instances.
   void NotifyTpmInitStatusUpdated(bool ready,
@@ -482,20 +440,11 @@ class COMPONENT_EXPORT(CRYPTOHOME_CLIENT) FakeCryptohomeClient
   // Device attestation certificate mapped by key_name.
   std::map<std::string, std::string> device_certificate_map_;
 
-  // Device key payload data mapped by key_name.
-  std::map<std::string, std::string> device_key_payload_map_;
-
   base::RepeatingTimer dircrypto_migration_progress_timer_;
   uint64_t dircrypto_migration_progress_ = 0;
 
   bool needs_dircrypto_migration_ = false;
   bool run_default_dircrypto_migration_ = true;
-  std::string tpm_attestation_enrollment_id_ignore_cache_ =
-      "6fcc0ebddec3db95cdcf82476d594f4d60db934c5b47fa6085c707b2a93e205b";
-  std::string tpm_attestation_enrollment_id_ =
-      "6fcc0ebddec3db95cdcf82476d594f4d60db934c5b47fa6085c707b2a93e205b";
-  bool tpm_attestation_is_enrolled_ = true;
-  bool tpm_attestation_is_prepared_ = true;
   bool tpm_attestation_does_key_exist_should_succeed_ = true;
   bool supports_low_entropy_credentials_ = false;
   // Controls if CheckKeyEx actually checks the key.

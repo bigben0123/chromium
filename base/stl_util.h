@@ -171,6 +171,23 @@ constexpr std::add_const_t<T>& as_const(T& t) noexcept {
 template <typename T>
 void as_const(const T&& t) = delete;
 
+// Simplified C++14 implementation of  C++20's std::to_address.
+// Note: This does not consider specializations of pointer_traits<>::to_address,
+// since that member function may only be present in C++20 and later.
+//
+// Reference: https://wg21.link/pointer.conversion#lib:to_address
+template <typename T>
+constexpr T* to_address(T* p) noexcept {
+  static_assert(!std::is_function<T>::value,
+                "Error: T must not be a function type.");
+  return p;
+}
+
+template <typename Ptr>
+constexpr auto to_address(const Ptr& p) noexcept {
+  return to_address(p.operator->());
+}
+
 // Returns a const reference to the underlying container of a container adapter.
 // Works for std::priority_queue, std::queue, and std::stack.
 template <class A>
@@ -447,10 +464,22 @@ typename Map::iterator TryEmplace(Map& map,
                                   std::forward<Args>(args)...);
 }
 
-// Returns true if the container is sorted.
+// Returns true if the container is sorted. Requires constexpr std::begin/end,
+// which exists for arrays in C++14.
+// Note that std::is_sorted is constexpr beginning C++20 and this should be
+// switched to use it when C++20 is supported.
 template <typename Container>
-bool STLIsSorted(const Container& cont) {
-  return std::is_sorted(std::begin(cont), std::end(cont));
+constexpr bool STLIsSorted(const Container& cont) {
+  auto it = std::begin(cont);
+  const auto end = std::end(cont);
+  if (it == end)
+    return true;
+
+  for (auto prev = it++; it != end; prev = it++) {
+    if (*it < *prev)
+      return false;
+  }
+  return true;
 }
 
 // Returns a new ResultType containing the difference of two sorted containers.
@@ -699,6 +728,14 @@ T* OptionalOrNullptr(base::Optional<T>& optional) {
 template <class T>
 const T* OptionalOrNullptr(const base::Optional<T>& optional) {
   return optional.has_value() ? &optional.value() : nullptr;
+}
+
+// Helper for creating an Optional<T> from a potentially nullptr T*.
+template <class T>
+base::Optional<T> OptionalFromPtr(const T* value) {
+  if (value)
+    return base::Optional<T>(*value);
+  return base::nullopt;
 }
 
 }  // namespace base

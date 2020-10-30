@@ -18,7 +18,6 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.SyncFirstSetupCompleteSource;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.sync.FakeProfileSyncService;
-import org.chromium.chrome.browser.sync.GoogleServiceAuthError;
 import org.chromium.chrome.browser.sync.SyncTestRule;
 import org.chromium.chrome.browser.sync.settings.SyncSettingsUtils;
 import org.chromium.chrome.browser.sync.settings.SyncSettingsUtils.SyncError;
@@ -27,6 +26,7 @@ import org.chromium.chrome.test.util.ChromeRenderTestRule;
 import org.chromium.chrome.test.util.InfoBarUtil;
 import org.chromium.chrome.test.util.browser.sync.SyncTestUtil;
 import org.chromium.components.embedder_support.util.UrlConstants;
+import org.chromium.components.signin.base.GoogleServiceAuthError;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 import java.io.IOException;
@@ -49,7 +49,8 @@ import java.io.IOException;
     };
 
     @Rule
-    public final ChromeRenderTestRule mRenderTestRule = new ChromeRenderTestRule();
+    public final ChromeRenderTestRule mRenderTestRule =
+            ChromeRenderTestRule.Builder.withPublicCorpus().build();
 
     @Before
     public void setUp() {
@@ -107,7 +108,7 @@ import java.io.IOException;
     public void testSyncErrorInfoBarNotShownWhenNoError() {
         Assert.assertEquals("InfoBar should not be shown before signing in", 0,
                 mSyncTestRule.getInfoBars().size());
-        mSyncTestRule.setUpAccountAndSignInForTesting();
+        mSyncTestRule.setUpAccountAndEnableSyncForTesting();
         SyncTestUtil.waitForSyncActive();
         mFakeProfileSyncService.setEngineInitialized(true);
         mFakeProfileSyncService.setAuthError(GoogleServiceAuthError.State.NONE);
@@ -181,13 +182,13 @@ import java.io.IOException;
     }
 
     private void showSyncErrorInfoBarForAuthError() {
-        mSyncTestRule.setUpAccountAndSignInForTesting();
+        mSyncTestRule.setUpAccountAndEnableSyncForTesting();
         mFakeProfileSyncService.setAuthError(GoogleServiceAuthError.State.INVALID_GAIA_CREDENTIALS);
         mSyncTestRule.loadUrlInNewTab(UrlConstants.CHROME_BLANK_URL);
     }
 
     private void showSyncErrorInfoBarForPassphraseRequired() {
-        mSyncTestRule.setUpAccountAndSignInForTesting();
+        mSyncTestRule.setUpAccountAndEnableSyncForTesting();
         mFakeProfileSyncService.setEngineInitialized(true);
         mFakeProfileSyncService.setPassphraseRequiredForPreferredDataTypes(true);
         mSyncTestRule.loadUrlInNewTab(UrlConstants.CHROME_BLANK_URL);

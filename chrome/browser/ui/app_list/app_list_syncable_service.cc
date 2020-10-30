@@ -5,13 +5,13 @@
 #include "chrome/browser/ui/app_list/app_list_syncable_service.h"
 
 #include <algorithm>
+#include <set>
 #include <utility>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
-#include "base/macros.h"
 #include "base/one_shot_event.h"
 #include "base/stl_util.h"
 #include "base/values.h"
@@ -35,7 +35,6 @@
 #include "chrome/browser/ui/app_list/chrome_app_list_model_updater.h"
 #include "chrome/browser/ui/app_list/page_break_app_item.h"
 #include "chrome/browser/ui/app_list/page_break_constants.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
@@ -120,8 +119,7 @@ void SetAppIsDefaultForTest(Profile* profile, const std::string& id) {
 bool IsUnRemovableDefaultApp(const std::string& id) {
   return id == extension_misc::kChromeAppId ||
          id == extensions::kWebStoreAppId ||
-         id == file_manager::kFileManagerAppId ||
-         id == extension_misc::kGeniusAppId;
+         id == file_manager::kFileManagerAppId;
 }
 
 void UninstallExtension(extensions::ExtensionService* service,
@@ -237,7 +235,8 @@ class AppListSyncableService::ModelUpdaterObserver
     DVLOG(2) << owner_ << ": ModelUpdaterObserver Added";
     owner_->GetModelUpdater()->AddObserver(this);
   }
-
+  ModelUpdaterObserver(const ModelUpdaterObserver&) = delete;
+  ModelUpdaterObserver& operator=(const ModelUpdaterObserver&) = delete;
   ~ModelUpdaterObserver() override {
     owner_->GetModelUpdater()->RemoveObserver(this);
     DVLOG(2) << owner_ << ": ModelUpdaterObserver Removed";
@@ -246,6 +245,9 @@ class AppListSyncableService::ModelUpdaterObserver
  private:
   // ChromeAppListModelUpdaterObserver
   void OnAppListItemAdded(ChromeAppListItem* item) override {
+    // Only sync folders and page breaks which are added from Ash.
+    if (!item->is_folder() && !item->is_page_break())
+      return;
     DCHECK(adding_item_id_.empty());
     adding_item_id_ = item->id();  // Ignore updates while adding an item.
     VLOG(2) << owner_ << " OnAppListItemAdded: " << item->ToDebugString();
@@ -284,8 +286,6 @@ class AppListSyncableService::ModelUpdaterObserver
 
   AppListSyncableService* owner_;
   std::string adding_item_id_;
-
-  DISALLOW_COPY_AND_ASSIGN(ModelUpdaterObserver);
 };
 
 // AppListSyncableService
@@ -311,9 +311,7 @@ void AppListSyncableService::SetAppIsDefaultForTest(Profile* profile,
 AppListSyncableService::AppListSyncableService(Profile* profile)
     : profile_(profile),
       extension_system_(extensions::ExtensionSystem::Get(profile)),
-      extension_registry_(extensions::ExtensionRegistry::Get(profile)),
-      initial_sync_data_processed_(false),
-      first_app_list_sync_(true) {
+      extension_registry_(extensions::ExtensionRegistry::Get(profile)) {
   if (g_model_updater_factory_callback_for_test_)
     model_updater_ = g_model_updater_factory_callback_for_test_->Run();
   else
@@ -1070,6 +1068,8 @@ base::Optional<syncer::ModelError> AppListSyncableService::ProcessSyncChanges(
   }
 
   HandleUpdateFinished(false /* clean_up_after_init_sync */);
+
+  GetModelUpdater()->NotifyProcessSyncChangesFinished();
 
   return base::nullopt;
 }

@@ -3,11 +3,11 @@
 # found in the LICENSE file.
 
 import("//build/config/chromecast_build.gni")
-import("//build/config/jumbo.gni")
+import("//build/config/chromeos/ui_mode.gni")
 import("//media/media_options.gni")
 import("//testing/test.gni")
 
-jumbo_component("services") {
+component("services") {
   output_name = "media_mojo_services"
   sources = [
     "deferred_destroy_unique_receiver_set.h",
@@ -87,6 +87,7 @@ jumbo_component("services") {
   ]
 
   deps = [
+    "//build:chromeos_buildflags",
     "//gpu/ipc/service",
     "//media",
     "//media:shared_memory_support",
@@ -139,6 +140,10 @@ jumbo_component("services") {
     if (is_mac) {
       deps += [ "//sandbox" ]
     }
+  }
+  if (is_ash) {
+    deps +=
+        [ "//chromeos/components/cdm_factory_daemon:cdm_factory_daemon_gpu" ]
   }
 }
 
@@ -193,7 +198,7 @@ source_set("unit_tests") {
     deps += [ "//media/cdm:cdm_api" ]
   }
 
-  if (is_chromeos) {
+  if (is_ash) {
     deps += [
       "//components/chromeos_camera:mjpeg_decode_accelerator_service_unittest",
     ]

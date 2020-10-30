@@ -9,11 +9,10 @@
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
-#include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_ui_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -23,11 +22,13 @@
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/declarative_user_script_manager.h"
 #include "extensions/browser/extension_action.h"
+#include "extensions/browser/extension_action_manager.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/api/declarative/declarative_constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/image_util.h"
+#include "extensions/common/script_constants.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 
@@ -50,6 +51,12 @@ const char kIconNotSufficientlyVisible[] =
     "The specified icon is not sufficiently visible";
 
 bool g_allow_invisible_icons_content_action = true;
+
+void RecordContentActionCreated(
+    declarative_content_constants::ContentActionType type) {
+  base::UmaHistogramEnumeration("Extensions.DeclarativeContentActionCreated",
+                                type);
+}
 
 //
 // The following are concrete actions.
@@ -74,23 +81,13 @@ class ShowExtensionAction : public ContentAction {
       return nullptr;
     }
 
-    auto action = std::make_unique<ShowExtensionAction>();
-    // Sanity check for https://crbug.com/1010336.
-    // |browser_context| is null in unit tests.
-    CHECK(!browser_context || action->GetAction(browser_context, extension));
-    return action;
+    RecordContentActionCreated(
+        declarative_content_constants::ContentActionType::kShowAction);
+    return std::make_unique<ShowExtensionAction>();
   }
 
   // Implementation of ContentAction:
   void Apply(const ApplyInfo& apply_info) const override {
-    // Sanity check for https://crbug.com/1010336.
-    // This check fails on the 2 cases that could cause
-    // ExtensionActionManager::GetExtensionAction to return null so we can
-    // understand null-related crashes.
-    CHECK(ActionInfo::GetExtensionActionInfo(apply_info.extension));
-    CHECK(ExtensionRegistry::Get(apply_info.browser_context)
-              ->enabled_extensions()
-              .Contains(apply_info.extension->id()));
     ExtensionAction* action =
         GetAction(apply_info.browser_context, apply_info.extension);
     action->DeclarativeShow(ExtensionTabUtil::GetTabId(apply_info.tab));
@@ -242,6 +239,8 @@ std::unique_ptr<ContentAction> RequestContentScript::Create(
   if (!InitScriptData(dict, error, &script_data))
     return std::unique_ptr<ContentAction>();
 
+  RecordContentActionCreated(
+      declarative_content_constants::ContentActionType::kRequestContentScript);
   return base::WrapUnique(
       new RequestContentScript(browser_context, extension, script_data));
 }
@@ -349,7 +348,10 @@ void RequestContentScript::InitScript(const HostID& host_id,
   script_.set_host_id(host_id);
   script_.set_run_location(UserScript::BROWSER_DRIVEN);
   script_.set_match_all_frames(script_data.all_frames);
-  script_.set_match_about_blank(script_data.match_about_blank);
+  script_.set_match_origin_as_fallback(
+      script_data.match_about_blank
+          ? MatchOriginAsFallbackBehavior::kMatchForAboutSchemeAndClimbTree
+          : MatchOriginAsFallbackBehavior::kNever);
   for (auto it = script_data.css_file_names.cbegin();
        it != script_data.css_file_names.cend(); ++it) {
     GURL url = extension->GetResourceURL(*it);
@@ -416,17 +418,20 @@ std::unique_ptr<ContentAction> SetIcon::Create(
   const SkBitmap bitmap = image.AsBitmap();
   const bool is_sufficiently_visible =
       extensions::image_util::IsIconSufficientlyVisible(bitmap);
-  UMA_HISTOGRAM_BOOLEAN("Extensions.DeclarativeSetIconWasVisible",
-                        is_sufficiently_visible);
+  base::UmaHistogramBoolean("Extensions.DeclarativeSetIconWasVisible",
+                            is_sufficiently_visible);
   const bool is_sufficiently_visible_rendered =
       extensions::ui_util::IsRenderedIconSufficientlyVisibleForBrowserContext(
           bitmap, browser_context);
-  UMA_HISTOGRAM_BOOLEAN("Extensions.DeclarativeSetIconWasVisibleRendered",
-                        is_sufficiently_visible_rendered);
+  base::UmaHistogramBoolean("Extensions.DeclarativeSetIconWasVisibleRendered",
+                            is_sufficiently_visible_rendered);
   if (!is_sufficiently_visible && !g_allow_invisible_icons_content_action) {
     *error = kIconNotSufficientlyVisible;
     return nullptr;
   }
+
+  RecordContentActionCreated(
+      declarative_content_constants::ContentActionType::kSetIcon);
   return std::make_unique<SetIcon>(image);
 }
 

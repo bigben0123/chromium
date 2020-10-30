@@ -25,6 +25,7 @@ import org.chromium.weblayer.NewTabType;
 import org.chromium.weblayer.Profile;
 import org.chromium.weblayer.Tab;
 import org.chromium.weblayer.TabCallback;
+import org.chromium.weblayer.TestWebLayer;
 import org.chromium.weblayer.WebLayer;
 
 import java.io.File;
@@ -50,6 +51,9 @@ public class WebLayerBrowserTestsActivity extends NativeBrowserTestActivity {
         });
 
         try {
+            // Browser tests cannot be run in WebView compatibility mode since the class loader
+            // WebLayer uses needs to match the class loader used for setup.
+            TestWebLayer.disableWebViewCompatibilityMode();
             WebLayer.loadAsync(getApplication(), webLayer -> {
                 mWebLayer = webLayer;
                 createShell();
@@ -114,5 +118,16 @@ public class WebLayerBrowserTestsActivity extends NativeBrowserTestActivity {
     protected File getPrivateDataDirectory() {
         return new File(UrlUtils.getIsolatedTestRoot(),
                 WebLayerBrowserTestsApplication.PRIVATE_DATA_DIRECTORY_SUFFIX);
+    }
+
+    @Override
+    /**
+     * Ensure that the user data directory gets overridden to getPrivateDataDirectory() (which is
+     * cleared at the start of every run); the directory that ANDROID_APP_DATA_DIR is set to in the
+     * context of Java browsertests is not cleared as it also holds persistent state, which
+     * causes test failures due to state bleedthrough. See crbug.com/617734 for details.
+     */
+    protected String getUserDataDirectoryCommandLineSwitch() {
+        return "weblayer-user-data-dir";
     }
 }

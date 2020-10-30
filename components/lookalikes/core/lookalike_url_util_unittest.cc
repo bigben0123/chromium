@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_feature_list.h"
 #include "components/lookalikes/core/features.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -198,7 +197,7 @@ TEST(LookalikeUrlUtilTest, TargetEmbeddingTest) {
       {"scholar.foo.google.com.foo.com", "google.com",
        TargetEmbeddingType::kInterstitial},
 
-      // Targets should be longer than 6 characters.
+      // e2LDs should be longer than 3 characters.
       {"hp.com-foo.com", "", TargetEmbeddingType::kNone},
 
       // Targets with common words as e2LD are not considered embedded targets
@@ -210,8 +209,15 @@ TEST(LookalikeUrlUtilTest, TargetEmbeddingTest) {
       {"foo.office.org-foo.com", "", TargetEmbeddingType::kNone},
 
       // Targets could be embedded without their dots and dashes.
+      {"googlecom-foo.com", "google.com", TargetEmbeddingType::kInterstitial},
       {"foo.googlecom-foo.com", "google.com",
        TargetEmbeddingType::kInterstitial},
+      // But should not be detected if they're using a common word. weather.com
+      // is on the top domain list, but 'weather' is a common word.
+      {"weathercom-foo.com", "", TargetEmbeddingType::kNone},
+      // And should also not be detected if they're too short. vk.com is on the
+      // top domain list, but is shorter than kMinE2LDLengthForTargetEmbedding.
+      {"vkcom-foo.com", "", TargetEmbeddingType::kNone},
 
       // Ensure legitimate domains don't trigger.
       {"foo.google.com", "", TargetEmbeddingType::kNone},
@@ -238,6 +244,28 @@ TEST(LookalikeUrlUtilTest, TargetEmbeddingTest) {
 
       // Skeleton matching should work against engaged sites at the eTLD level.
       {"subdomain.highéngagement.com-foo.com", "highengagement.com",
+       TargetEmbeddingType::kInterstitial},
+
+      // Domains should be allowed to embed themselves.
+      {"highengagement.com.highengagement.com", "", TargetEmbeddingType::kNone},
+      {"subdomain.highengagement.com.highengagement.com", "",
+       TargetEmbeddingType::kNone},
+      {"nothighengagement.highengagement.com.highengagement.com", "",
+       TargetEmbeddingType::kNone},
+      {"google.com.google.com", "", TargetEmbeddingType::kNone},
+      {"www.google.com.google.com", "", TargetEmbeddingType::kNone},
+
+      // Detect embeddings at the end of the domain, too.
+      {"www-google.com", "google.com", TargetEmbeddingType::kInterstitial},
+      {"www-highengagement.com", "highengagement.com",
+       TargetEmbeddingType::kInterstitial},
+      {"subdomain-highengagement.com", "subdomain.highengagement.com",
+       TargetEmbeddingType::kInterstitial},
+      {"google-com.google-com.com", "google.com",
+       TargetEmbeddingType::kInterstitial},
+      {"subdomain.google-com.google-com.com", "google.com",
+       TargetEmbeddingType::kInterstitial},
+      {"google.com-google.com-google.com", "google.com",
        TargetEmbeddingType::kInterstitial},
   };
 

@@ -18,7 +18,6 @@
 #include "ui/base/x/selection_utils.h"
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/image/image_skia.h"
-#include "ui/gfx/x/x11.h"
 #include "url/gurl.h"
 
 namespace ui {
@@ -61,9 +60,7 @@ class COMPONENT_EXPORT(UI_BASE_X) XOSExchangeDataProvider
   }
 
   // Overridden from OSExchangeDataProvider:
-#if defined(USE_OZONE)
   std::unique_ptr<OSExchangeDataProvider> Clone() const override;
-#endif
   void MarkOriginatedFromRenderer() override;
   bool DidOriginateFromRenderer() const override;
   void SetString(const base::string16& data) override;
@@ -84,6 +81,8 @@ class COMPONENT_EXPORT(UI_BASE_X) XOSExchangeDataProvider
   bool HasURL(FilenameToURLPolicy policy) const override;
   bool HasFile() const override;
   bool HasCustomFormat(const ClipboardFormatType& format) const override;
+  void SetFileContents(const base::FilePath& filename,
+                       const std::string& file_contents) override;
 
   void SetHtml(const base::string16& html, const GURL& base_url) override;
   bool GetHtml(base::string16* html, GURL* base_url) const override;
@@ -92,6 +91,9 @@ class COMPONENT_EXPORT(UI_BASE_X) XOSExchangeDataProvider
                     const gfx::Vector2d& cursor_offset) override;
   gfx::ImageSkia GetDragImage() const override;
   gfx::Vector2d GetDragImageOffset() const override;
+
+  void SetSource(std::unique_ptr<DataTransferEndpoint> data_source) override;
+  DataTransferEndpoint* GetSource() const override;
 
  protected:
   friend class OSExchangeDataProviderX11Test;

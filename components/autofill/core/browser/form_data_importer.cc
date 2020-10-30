@@ -19,10 +19,12 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "components/autofill/core/browser/address_profiles/address_profile_save_manager.h"
 #include "components/autofill/core/browser/autofill_client.h"
 #include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
+#include "components/autofill/core/browser/data_model/autofill_structured_address_name.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
 #include "components/autofill/core/browser/data_model/phone_number.h"
 #include "components/autofill/core/browser/form_structure.h"
@@ -40,6 +42,8 @@
 #include "components/variations/service/variations_service.h"
 
 namespace autofill {
+
+using structured_address::VerificationStatus;
 
 namespace {
 
@@ -131,7 +135,8 @@ bool IsMinimumAddress(const AutofillProfile& profile,
   // Check the |ADDRESS_HOME_LINE1| requirement.
   bool is_line1_missing = false;
   if (country.requires_line1() &&
-      profile.GetRawInfo(ADDRESS_HOME_LINE1).empty()) {
+      profile.GetRawInfo(ADDRESS_HOME_LINE1).empty() &&
+      profile.GetRawInfo(ADDRESS_HOME_STREET_NAME).empty()) {
     if (import_log_buffer) {
       *import_log_buffer << LogMessage::kImportAddressProfileFromFormFailed
                          << "Missing required ADDRESS_HOME_LINE1." << CTag{};
@@ -226,6 +231,8 @@ FormDataImporter::FormDataImporter(AutofillClient* client,
                                                   payments_client,
                                                   app_locale,
                                                   personal_data_manager)),
+      address_profile_save_manager_(
+          std::make_unique<AddressProfileSaveManager>(personal_data_manager)),
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
       local_card_migration_manager_(
           std::make_unique<LocalCardMigrationManager>(client,
@@ -540,7 +547,12 @@ bool FormDataImporter::ImportAddressProfileForSection(
     // If we don't know the type of the field, or the user hasn't entered any
     // information into the field, or the field is non-focusable (hidden), then
     // skip it.
-    if (!field->IsFieldFillable() || !field->is_focusable || value.empty())
+    // TODO(crbug.com/1101280): Remove |skip_unfocussable_field|
+    bool skip_unfocussable_field =
+        !field->is_focusable &&
+        !base::FeatureList::IsEnabled(
+            features::kAutofillProfileImportFromUnfocusableFields);
+    if (!field->IsFieldFillable() || skip_unfocussable_field || value.empty())
       continue;
 
     AutofillType field_type = field->Type();
@@ -574,8 +586,10 @@ bool FormDataImporter::ImportAddressProfileForSection(
     // We need to store phone data in the variables, before building the whole
     // number at the end. If |value| is not from a phone field, home.SetInfo()
     // returns false and data is stored directly in |candidate_profile|.
-    if (!combined_phone.SetInfo(field_type, value))
-      candidate_profile.SetInfo(field_type, value, app_locale_);
+    if (!combined_phone.SetInfo(field_type, value)) {
+      candidate_profile.SetInfoWithVerificationStatus(
+          field_type, value, app_locale_, VerificationStatus::kObserved);
+    }
 
     // Reject profiles with invalid country information.
     if (server_field_type == ADDRESS_HOME_COUNTRY &&
@@ -588,10 +602,16 @@ bool FormDataImporter::ImportAddressProfileForSection(
         // match the |app_locale|. Try setting the value again using the
         // language of the page. Note, there should be a locale associated with
         // every language code.
-        std::string page_language = client_->GetPageLanguage();
+        std::string page_language;
+        const translate::LanguageState* language_state =
+            client_->GetLanguageState();
+        if (language_state)
+          page_language = language_state->original_language();
         // Retry to set the country of there is known page language.
-        if (!page_language.empty())
-          candidate_profile.SetInfo(field_type, value, page_language);
+        if (!page_language.empty()) {
+          candidate_profile.SetInfoWithVerificationStatus(
+              field_type, value, page_language, VerificationStatus::kObserved);
+        }
       }
       // Check if the country code was still not determined correctly.
       if (candidate_profile.GetRawInfo(ADDRESS_HOME_COUNTRY).empty()) {
@@ -610,8 +630,9 @@ bool FormDataImporter::ImportAddressProfileForSection(
     base::string16 constructed_number;
     if (!combined_phone.ParseNumber(candidate_profile, app_locale_,
                                     &constructed_number) ||
-        !candidate_profile.SetInfo(AutofillType(PHONE_HOME_WHOLE_NUMBER),
-                                   constructed_number, app_locale_)) {
+        !candidate_profile.SetInfoWithVerificationStatus(
+            AutofillType(PHONE_HOME_WHOLE_NUMBER), constructed_number,
+            app_locale_, VerificationStatus::kObserved)) {
       if (import_log_buffer) {
         *import_log_buffer << LogMessage::kImportAddressProfileFromFormFailed
                            << "Invalid phone number." << CTag{};
@@ -664,8 +685,12 @@ bool FormDataImporter::ImportAddressProfileForSection(
 
   if (!all_fullfilled)
     return false;
+
+  if (!candidate_profile.FinalizeAfterImport())
+    return false;
+
   std::string guid =
-      personal_data_manager_->SaveImportedProfile(candidate_profile);
+      address_profile_save_manager_->SaveProfile(candidate_profile);
 
   return !guid.empty();
 }
@@ -732,10 +757,7 @@ bool FormDataImporter::ImportCreditCard(
       // If the card is a local card and it has a nickname stored in the local
       // database, copy the nickname to the |candidate_credit_card| so that the
       // nickname also shows in the Upstream bubble.
-      if (base::FeatureList::IsEnabled(
-              features::kAutofillEnableSurfacingServerCardNickname)) {
-        candidate_credit_card.SetNickname(card_copy.nickname());
-      }
+      candidate_credit_card.SetNickname(card_copy.nickname());
 
       // If we should not return the local card, return that we merged it,
       // without setting |imported_credit_card|.

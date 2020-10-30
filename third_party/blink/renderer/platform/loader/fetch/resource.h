@@ -99,8 +99,6 @@ enum class ResourceType : uint8_t {
 // with the loader to obtain the resource from the network.
 class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
                                  public MemoryPressureListener {
-  USING_GARBAGE_COLLECTED_MIXIN(Resource);
-
  public:
   // An enum representing whether a resource match with another resource.
   // There are three kinds of status.
@@ -171,7 +169,9 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
     return resource_request_;
   }
   const ResourceRequestHead& LastResourceRequest() const;
-  const ResourceResponse* LastResourceResponse() const;
+  const ResourceResponse& LastResourceResponse() const;
+  // Returns zero if there are no redirects.
+  size_t RedirectChainSize() const;
 
   virtual void SetRevalidatingRequest(const ResourceRequestHead&);
 
@@ -463,7 +463,7 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
   }
 
   void SetCachePolicyBypassingCache();
-  void SetPreviewsState(WebURLRequest::PreviewsState);
+  void SetPreviewsState(PreviewsState);
   void ClearRangeRequestHeader();
 
   SharedBuffer* Data() const { return data_.get(); }

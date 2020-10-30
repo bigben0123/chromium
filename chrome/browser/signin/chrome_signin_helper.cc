@@ -44,7 +44,6 @@
 #include "content/public/browser/browser_thread.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "net/http/http_response_headers.h"
-#include "net/url_request/url_request.h"
 #include "third_party/blink/public/mojom/loader/resource_load_info.mojom-shared.h"
 
 #if defined(OS_ANDROID)
@@ -71,9 +70,9 @@ namespace signin {
 const void* const kManageAccountsHeaderReceivedUserDataKey =
     &kManageAccountsHeaderReceivedUserDataKey;
 
-namespace {
+const char kChromeMirrorHeaderSource[] = "Chrome";
 
-const char kChromeManageAccountsHeader[] = "X-Chrome-Manage-Accounts";
+namespace {
 
 // Key for RequestDestructionObserverUserData.
 const void* const kRequestDestructionObserverUserDataKey =
@@ -474,7 +473,15 @@ void ProcessDiceResponseHeaderIfExists(ResponseAdapter* response,
 
 }  // namespace
 
-ChromeRequestAdapter::ChromeRequestAdapter() : RequestAdapter(nullptr) {}
+ChromeRequestAdapter::ChromeRequestAdapter(
+    const GURL& url,
+    const net::HttpRequestHeaders& original_headers,
+    net::HttpRequestHeaders* modified_headers,
+    std::vector<std::string>* headers_to_remove)
+    : RequestAdapter(url,
+                     original_headers,
+                     modified_headers,
+                     headers_to_remove) {}
 
 ChromeRequestAdapter::~ChromeRequestAdapter() = default;
 
@@ -493,6 +500,7 @@ void FixAccountConsistencyRequestHeader(
     int incognito_availibility,
     AccountConsistencyMethod account_consistency,
     std::string gaia_id,
+    const base::Optional<bool>& is_child_account,
 #if defined(OS_CHROMEOS)
     bool is_secondary_account_addition_allowed,
 #endif
@@ -539,9 +547,10 @@ void FixAccountConsistencyRequestHeader(
 #endif
 
   // Mirror header:
-  AppendOrRemoveMirrorRequestHeader(request, redirect_url, gaia_id,
-                                    account_consistency, cookie_settings,
-                                    profile_mode_mask);
+  AppendOrRemoveMirrorRequestHeader(
+      request, redirect_url, gaia_id, is_child_account, account_consistency,
+      cookie_settings, profile_mode_mask, kChromeMirrorHeaderSource,
+      /*force_account_consistency=*/false);
 }
 
 void ProcessAccountConsistencyResponseHeaders(ResponseAdapter* response,

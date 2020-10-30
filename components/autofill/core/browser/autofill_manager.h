@@ -32,6 +32,7 @@
 #include "components/autofill/core/browser/form_types.h"
 #include "components/autofill/core/browser/metrics/address_form_event_logger.h"
 #include "components/autofill/core/browser/metrics/credit_card_form_event_logger.h"
+#include "components/autofill/core/browser/payments/autofill_offer_manager.h"
 #include "components/autofill/core/browser/payments/card_unmask_delegate.h"
 #include "components/autofill/core/browser/payments/credit_card_access_manager.h"
 #include "components/autofill/core/browser/payments/full_card_request.h"
@@ -40,10 +41,6 @@
 #include "components/autofill/core/browser/ui/popup_types.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/signatures.h"
-
-#if defined(OS_ANDROID) || defined(OS_IOS)
-#include "components/autofill/core/browser/autofill_assistant.h"
-#endif
 
 namespace gfx {
 class RectF;
@@ -220,7 +217,7 @@ class AutofillManager : public AutofillHandler,
   void DidSuppressPopup(const FormData& form, const FormFieldData& field);
 
   // AutofillHandler:
-  void OnFocusNoLongerOnForm() override;
+  void OnFocusNoLongerOnForm(bool had_interacted_form) override;
   void OnFocusOnFormFieldImpl(const FormData& form,
                               const FormFieldData& field,
                               const gfx::RectF& bounding_box) override;
@@ -261,6 +258,15 @@ class AutofillManager : public AutofillHandler,
   // Returns the last form the autofill manager considered in this frame.
   virtual const FormData& last_query_form() const;
 
+  // Exposed to ContentAutofillDriver to help with recording WebOTP metrics.
+  bool has_parsed_forms() const { return has_parsed_forms_; }
+  bool has_observed_phone_number_field() const {
+    return has_observed_phone_number_field_;
+  }
+  bool has_observed_one_time_code_field() const {
+    return has_observed_one_time_code_field_;
+  }
+
 #if defined(UNIT_TEST)
   // A public wrapper that calls |DeterminePossibleFieldTypesForUpload| for
   // testing purposes only.
@@ -279,8 +285,8 @@ class AutofillManager : public AutofillHandler,
   // purposes only.
   void OnLoadedServerPredictionsForTest(
       std::string response,
-      const FormAndFieldSignatures& signatures) {
-    OnLoadedServerPredictions(response, signatures);
+      const std::vector<FormSignature>& queried_form_signatures) {
+    OnLoadedServerPredictions(response, queried_form_signatures);
   }
 
   // A public wrapper that calls |MakeFrontendID| for testing purposes only.
@@ -367,7 +373,7 @@ class AutofillManager : public AutofillHandler,
                                     const gfx::RectF& bounding_box) override;
   bool ShouldParseForms(const std::vector<FormData>& forms,
                         const base::TimeTicks timestamp) override;
-  void OnFormsParsed(const std::vector<FormStructure*>& form_structures,
+  void OnFormsParsed(const std::vector<const FormData*>& forms,
                      const base::TimeTicks timestamp) override;
 
   AutofillMetrics::FormInteractionsUkmLogger* form_interactions_ukm_logger() {
@@ -381,6 +387,9 @@ class AutofillManager : public AutofillHandler,
 
   // Exposed for testing.
   bool is_rich_query_enabled() const { return is_rich_query_enabled_; }
+
+  // Exposed for testing.
+  FormData* pending_form_data() { return pending_form_data_.get(); }
 
  private:
   // Keeps track of the filling context for a form, used to make refill attemps.
@@ -419,6 +428,10 @@ class AutofillManager : public AutofillHandler,
     // Address suggestions are not shown because the field is annotated with
     // autocomplete=off and the directive is being observed by the browser.
     kAutocompleteOff,
+    // Suggestions are not shown because this form is on a secure site, but
+    // submits insecurely. This is only used when the user has started typing,
+    // otherwise a warning is shown.
+    kInsecureForm,
   };
 
   // The context for the list of suggestions available for a given field to be
@@ -437,7 +450,7 @@ class AutofillManager : public AutofillHandler,
   // AutofillDownloadManager::Observer:
   void OnLoadedServerPredictions(
       std::string response,
-      const FormAndFieldSignatures& signatures) override;
+      const std::vector<FormSignature>& queried_form_signatures) override;
 
   // CreditCardAccessManager::Accessor
   void OnCreditCardFetched(
@@ -593,6 +606,9 @@ class AutofillManager : public AutofillHandler,
                                std::vector<Suggestion>* suggestions,
                                SuggestionsContext* context);
 
+  // Retrieves the page language from |client_|
+  std::string GetPageLanguage() const override;
+
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
   // Whether to show the option to use virtual card in the autofill popup.
   bool ShouldShowVirtualCardOption(FormStructure* form_structure);
@@ -652,6 +668,13 @@ class AutofillManager : public AutofillHandler,
   // Has the user edited a field that was previously autofilled?
   bool user_did_edit_autofilled_field_ = false;
 
+  // Does |this| have any parsed forms?
+  bool has_parsed_forms_ = false;
+  // Is there a field with autocomplete="one-time-code" observed?
+  bool has_observed_one_time_code_field_ = false;
+  // Is there a field with phone number collection observed?
+  bool has_observed_phone_number_field_ = false;
+
   // When the user first interacted with a potentially fillable form on this
   // page.
   base::TimeTicks initial_interaction_timestamp_;
@@ -661,6 +684,10 @@ class AutofillManager : public AutofillHandler,
 
   // The credit card access manager, used to access local and server cards.
   std::unique_ptr<CreditCardAccessManager> credit_card_access_manager_;
+
+  // The autofill offer manager, used to to retrieve offers for card
+  // suggestions.
+  AutofillOfferManager* offer_manager_;
 
   // Collected information about the autofill form where a credit card will be
   // filled.
@@ -687,10 +714,6 @@ class AutofillManager : public AutofillHandler,
 
   // Delegate used in test to get notifications on certain events.
   AutofillManagerTestDelegate* test_delegate_ = nullptr;
-
-#if defined(OS_ANDROID) || defined(OS_IOS)
-  AutofillAssistant autofill_assistant_;
-#endif
 
   // A map of form names to FillingContext instances used to make refill
   // attempts for dynamic forms.

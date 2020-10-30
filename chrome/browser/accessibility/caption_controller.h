@@ -43,7 +43,7 @@ class CaptionController : public BrowserListObserver, public KeyedService {
  public:
   // These values are persisted to logs. Entries should not be renumbered and
   // numeric values should never be reused. These should be the same as
-  // LiveCaptionsSessionEvent in enums.xml.
+  // LiveCaptionSessionEvent in enums.xml.
   enum class SessionEvent {
     // We began receiving captions for an audio stream.
     kStreamStarted = 0,
@@ -71,6 +71,10 @@ class CaptionController : public BrowserListObserver, public KeyedService {
       content::WebContents* web_contents,
       const chrome::mojom::TranscriptionResultPtr& transcription_result);
 
+  // Alerts the CaptionBubbleController that belongs to the appropriate browser
+  // that there is an error in the speech recognition service.
+  void OnError(content::WebContents* web_contents);
+
   CaptionBubbleController* GetCaptionBubbleControllerForBrowser(
       Browser* browser);
 
@@ -83,8 +87,10 @@ class CaptionController : public BrowserListObserver, public KeyedService {
   void OnBrowserRemoved(Browser* browser) override;
 
   void OnLiveCaptionEnabledChanged();
+  void OnLiveCaptionLanguageChanged();
   bool IsLiveCaptionEnabled();
   void UpdateSpeechRecognitionServiceEnabled();
+  void UpdateSpeechRecognitionLanguage();
   void UpdateUIEnabled();
   void UpdateCaptionStyle();
 

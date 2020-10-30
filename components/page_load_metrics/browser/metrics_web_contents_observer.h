@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "base/memory/read_only_shared_memory_region.h"
 #include "base/observer_list.h"
 #include "base/time/time.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_data.h"
@@ -25,6 +26,10 @@
 #include "services/network/public/mojom/fetch_api.mojom-forward.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/mojom/loader/resource_load_info.mojom.h"
+
+namespace blink {
+struct MobileFriendliness;
+}  // namespace blink
 
 namespace content {
 class NavigationHandle;
@@ -161,7 +166,8 @@ class MetricsWebContentsObserver
       mojom::FrameRenderDataUpdatePtr render_data,
       mojom::CpuTimingPtr cpu_timing,
       mojom::DeferredResourceCountsPtr new_deferred_resource_data,
-      mojom::InputTimingPtr input_timing_delta);
+      mojom::InputTimingPtr input_timing_delta,
+      const blink::MobileFriendliness& mobile_friendliness);
 
   // Informs the observers of the currently committed load that the event
   // corresponding to |event_key| has occurred. This should not be called within
@@ -180,19 +186,19 @@ class MetricsWebContentsObserver
       content::NavigationHandle* navigation_handle);
 
   // page_load_metrics::mojom::PageLoadMetrics implementation.
-  void UpdateTiming(mojom::PageLoadTimingPtr timing,
-                    mojom::FrameMetadataPtr metadata,
-                    mojom::PageLoadFeaturesPtr new_features,
-                    std::vector<mojom::ResourceDataUpdatePtr> resources,
-                    mojom::FrameRenderDataUpdatePtr render_data,
-                    mojom::CpuTimingPtr cpu_timing,
-                    mojom::DeferredResourceCountsPtr new_deferred_resource_data,
-                    mojom::InputTimingPtr input_timing) override;
+  void UpdateTiming(
+      mojom::PageLoadTimingPtr timing,
+      mojom::FrameMetadataPtr metadata,
+      mojom::PageLoadFeaturesPtr new_features,
+      std::vector<mojom::ResourceDataUpdatePtr> resources,
+      mojom::FrameRenderDataUpdatePtr render_data,
+      mojom::CpuTimingPtr cpu_timing,
+      mojom::DeferredResourceCountsPtr new_deferred_resource_data,
+      mojom::InputTimingPtr input_timing,
+      const blink::MobileFriendliness& mobile_friendliness) override;
 
-  // Update the throughput samples on the browser side, and report it to UKM at
-  // page shuts down / nagivates away, report it to UKM.
-  void SubmitThroughputData(
-      mojom::ThroughputUkmDataPtr throughput_data) override;
+  void SetUpSharedMemoryForSmoothness(
+      base::ReadOnlySharedMemoryRegion shared_memory) override;
 
   // Common part for UpdateThroughput and OnTimingUpdated.
   bool DoesTimingUpdateHaveError();
@@ -286,6 +292,9 @@ class MetricsWebContentsObserver
   std::vector<std::unique_ptr<PageLoadTracker>> aborted_provisional_loads_;
 
   std::unique_ptr<PageLoadTracker> committed_load_;
+
+  // This is currently set only for the main frame.
+  base::ReadOnlySharedMemoryRegion ukm_smoothness_data_;
 
   // A page can be stored in back-forward cache - in this case its
   // PageLoadTracker should be preserved as well. Here we store PageLoadTracker

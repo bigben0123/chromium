@@ -61,12 +61,6 @@ const PrefsForManagedContentSettingsMapEntry
          ContentSettingsType::NOTIFICATIONS, CONTENT_SETTING_ALLOW},
         {prefs::kManagedNotificationsBlockedForUrls,
          ContentSettingsType::NOTIFICATIONS, CONTENT_SETTING_BLOCK},
-        {prefs::kManagedPluginsAllowedForUrls, ContentSettingsType::PLUGINS,
-         CONTENT_SETTING_ALLOW,
-         content_settings::WildcardsInPrimaryPattern::NOT_ALLOWED},
-        {prefs::kManagedPluginsBlockedForUrls, ContentSettingsType::PLUGINS,
-         CONTENT_SETTING_BLOCK,
-         content_settings::WildcardsInPrimaryPattern::NOT_ALLOWED},
         {prefs::kManagedPopupsAllowedForUrls, ContentSettingsType::POPUPS,
          CONTENT_SETTING_ALLOW},
         {prefs::kManagedPopupsBlockedForUrls, ContentSettingsType::POPUPS,
@@ -75,8 +69,27 @@ const PrefsForManagedContentSettingsMapEntry
          CONTENT_SETTING_ASK},
         {prefs::kManagedWebUsbBlockedForUrls, ContentSettingsType::USB_GUARD,
          CONTENT_SETTING_BLOCK},
+        {prefs::kManagedFileSystemReadAskForUrls,
+         ContentSettingsType::FILE_SYSTEM_READ_GUARD, CONTENT_SETTING_ASK},
+        {prefs::kManagedFileSystemReadBlockedForUrls,
+         ContentSettingsType::FILE_SYSTEM_READ_GUARD, CONTENT_SETTING_BLOCK},
+        {prefs::kManagedFileSystemWriteAskForUrls,
+         ContentSettingsType::FILE_SYSTEM_WRITE_GUARD, CONTENT_SETTING_ASK},
+        {prefs::kManagedFileSystemWriteBlockedForUrls,
+         ContentSettingsType::FILE_SYSTEM_WRITE_GUARD, CONTENT_SETTING_BLOCK},
         {prefs::kManagedLegacyCookieAccessAllowedForDomains,
-         ContentSettingsType::LEGACY_COOKIE_ACCESS, CONTENT_SETTING_ALLOW}};
+         ContentSettingsType::LEGACY_COOKIE_ACCESS, CONTENT_SETTING_ALLOW},
+        {prefs::kManagedSerialAskForUrls, ContentSettingsType::SERIAL_GUARD,
+         CONTENT_SETTING_ASK},
+        {prefs::kManagedSerialBlockedForUrls, ContentSettingsType::SERIAL_GUARD,
+         CONTENT_SETTING_BLOCK},
+        {prefs::kManagedSensorsAllowedForUrls, ContentSettingsType::SENSORS,
+         CONTENT_SETTING_ALLOW},
+        {prefs::kManagedSensorsBlockedForUrls, ContentSettingsType::SENSORS,
+         CONTENT_SETTING_BLOCK},
+        {prefs::kManagedInsecurePrivateNetworkAllowedForUrls,
+         ContentSettingsType::INSECURE_PRIVATE_NETWORK, CONTENT_SETTING_ALLOW},
+};
 
 class VectorRuleIterator : public RuleIterator {
  public:
@@ -128,14 +141,23 @@ const PolicyProvider::PrefsForManagedDefaultMapEntry
          prefs::kManagedDefaultInsecureContentSetting},
         {ContentSettingsType::NOTIFICATIONS,
          prefs::kManagedDefaultNotificationsSetting},
-        {ContentSettingsType::PLUGINS, prefs::kManagedDefaultPluginsSetting},
         {ContentSettingsType::POPUPS, prefs::kManagedDefaultPopupsSetting},
         {ContentSettingsType::BLUETOOTH_GUARD,
          prefs::kManagedDefaultWebBluetoothGuardSetting},
         {ContentSettingsType::USB_GUARD,
          prefs::kManagedDefaultWebUsbGuardSetting},
+        {ContentSettingsType::FILE_SYSTEM_READ_GUARD,
+         prefs::kManagedDefaultFileSystemReadGuardSetting},
+        {ContentSettingsType::FILE_SYSTEM_WRITE_GUARD,
+         prefs::kManagedDefaultFileSystemWriteGuardSetting},
         {ContentSettingsType::LEGACY_COOKIE_ACCESS,
-         prefs::kManagedDefaultLegacyCookieAccessSetting}};
+         prefs::kManagedDefaultLegacyCookieAccessSetting},
+        {ContentSettingsType::SERIAL_GUARD,
+         prefs::kManagedDefaultSerialGuardSetting},
+        {ContentSettingsType::SENSORS, prefs::kManagedDefaultSensorsSetting},
+        {ContentSettingsType::INSECURE_PRIVATE_NETWORK,
+         prefs::kManagedDefaultInsecurePrivateNetworkSetting},
+};
 
 // static
 void PolicyProvider::RegisterProfilePrefs(
@@ -152,15 +174,24 @@ void PolicyProvider::RegisterProfilePrefs(
   registry->RegisterListPref(prefs::kManagedJavaScriptBlockedForUrls);
   registry->RegisterListPref(prefs::kManagedNotificationsAllowedForUrls);
   registry->RegisterListPref(prefs::kManagedNotificationsBlockedForUrls);
-  registry->RegisterListPref(prefs::kManagedPluginsAllowedForUrls);
-  registry->RegisterListPref(prefs::kManagedPluginsBlockedForUrls);
   registry->RegisterListPref(prefs::kManagedPopupsAllowedForUrls);
   registry->RegisterListPref(prefs::kManagedPopupsBlockedForUrls);
   registry->RegisterListPref(prefs::kManagedWebUsbAllowDevicesForUrls);
   registry->RegisterListPref(prefs::kManagedWebUsbAskForUrls);
   registry->RegisterListPref(prefs::kManagedWebUsbBlockedForUrls);
+  registry->RegisterListPref(prefs::kManagedFileSystemReadAskForUrls);
+  registry->RegisterListPref(prefs::kManagedFileSystemReadBlockedForUrls);
+  registry->RegisterListPref(prefs::kManagedFileSystemWriteAskForUrls);
+  registry->RegisterListPref(prefs::kManagedFileSystemWriteBlockedForUrls);
   registry->RegisterListPref(
       prefs::kManagedLegacyCookieAccessAllowedForDomains);
+  registry->RegisterListPref(prefs::kManagedSerialAskForUrls);
+  registry->RegisterListPref(prefs::kManagedSerialBlockedForUrls);
+  registry->RegisterListPref(prefs::kManagedSensorsAllowedForUrls);
+  registry->RegisterListPref(prefs::kManagedSensorsBlockedForUrls);
+  registry->RegisterListPref(
+      prefs::kManagedInsecurePrivateNetworkAllowedForUrls);
+
   // Preferences for default content setting policies. If a policy is not set of
   // the corresponding preferences below is set to CONTENT_SETTING_DEFAULT.
   registry->RegisterIntegerPref(prefs::kManagedDefaultAdsSetting,
@@ -179,16 +210,27 @@ void PolicyProvider::RegisterProfilePrefs(
                                 CONTENT_SETTING_DEFAULT);
   registry->RegisterIntegerPref(prefs::kManagedDefaultMediaStreamSetting,
                                 CONTENT_SETTING_DEFAULT);
-  registry->RegisterIntegerPref(prefs::kManagedDefaultPluginsSetting,
-                                CONTENT_SETTING_DEFAULT);
   registry->RegisterIntegerPref(prefs::kManagedDefaultPopupsSetting,
                                 CONTENT_SETTING_DEFAULT);
   registry->RegisterIntegerPref(prefs::kManagedDefaultWebBluetoothGuardSetting,
                                 CONTENT_SETTING_DEFAULT);
   registry->RegisterIntegerPref(prefs::kManagedDefaultWebUsbGuardSetting,
                                 CONTENT_SETTING_DEFAULT);
+  registry->RegisterIntegerPref(
+      prefs::kManagedDefaultFileSystemReadGuardSetting,
+      CONTENT_SETTING_DEFAULT);
+  registry->RegisterIntegerPref(
+      prefs::kManagedDefaultFileSystemWriteGuardSetting,
+      CONTENT_SETTING_DEFAULT);
   registry->RegisterIntegerPref(prefs::kManagedDefaultLegacyCookieAccessSetting,
                                 CONTENT_SETTING_DEFAULT);
+  registry->RegisterIntegerPref(prefs::kManagedDefaultSerialGuardSetting,
+                                CONTENT_SETTING_DEFAULT);
+  registry->RegisterIntegerPref(prefs::kManagedDefaultSensorsSetting,
+                                CONTENT_SETTING_DEFAULT);
+  registry->RegisterIntegerPref(
+      prefs::kManagedDefaultInsecurePrivateNetworkSetting,
+      CONTENT_SETTING_DEFAULT);
 }
 
 PolicyProvider::PolicyProvider(PrefService* prefs) : prefs_(prefs) {
@@ -216,14 +258,26 @@ PolicyProvider::PolicyProvider(PrefService* prefs) : prefs_(prefs) {
       prefs::kManagedNotificationsAllowedForUrls, callback);
   pref_change_registrar_.Add(
       prefs::kManagedNotificationsBlockedForUrls, callback);
-  pref_change_registrar_.Add(prefs::kManagedPluginsAllowedForUrls, callback);
-  pref_change_registrar_.Add(prefs::kManagedPluginsBlockedForUrls, callback);
   pref_change_registrar_.Add(prefs::kManagedPopupsAllowedForUrls, callback);
   pref_change_registrar_.Add(prefs::kManagedPopupsBlockedForUrls, callback);
   pref_change_registrar_.Add(prefs::kManagedWebUsbAskForUrls, callback);
   pref_change_registrar_.Add(prefs::kManagedWebUsbBlockedForUrls, callback);
+  pref_change_registrar_.Add(prefs::kManagedFileSystemReadAskForUrls, callback);
+  pref_change_registrar_.Add(prefs::kManagedFileSystemReadBlockedForUrls,
+                             callback);
+  pref_change_registrar_.Add(prefs::kManagedFileSystemWriteAskForUrls,
+                             callback);
+  pref_change_registrar_.Add(prefs::kManagedFileSystemWriteBlockedForUrls,
+                             callback);
   pref_change_registrar_.Add(prefs::kManagedLegacyCookieAccessAllowedForDomains,
                              callback);
+  pref_change_registrar_.Add(prefs::kManagedSerialAskForUrls, callback);
+  pref_change_registrar_.Add(prefs::kManagedSerialBlockedForUrls, callback);
+  pref_change_registrar_.Add(prefs::kManagedSensorsAllowedForUrls, callback);
+  pref_change_registrar_.Add(prefs::kManagedSensorsBlockedForUrls, callback);
+  pref_change_registrar_.Add(
+      prefs::kManagedInsecurePrivateNetworkAllowedForUrls, callback);
+
   // The following preferences are only used to indicate if a default content
   // setting is managed and to hold the managed default setting value. If the
   // value for any of the following preferences is set then the corresponding
@@ -243,14 +297,22 @@ PolicyProvider::PolicyProvider(PrefService* prefs) : prefs_(prefs) {
       prefs::kManagedDefaultNotificationsSetting, callback);
   pref_change_registrar_.Add(
       prefs::kManagedDefaultMediaStreamSetting, callback);
-  pref_change_registrar_.Add(prefs::kManagedDefaultPluginsSetting, callback);
   pref_change_registrar_.Add(prefs::kManagedDefaultPopupsSetting, callback);
   pref_change_registrar_.Add(prefs::kManagedDefaultWebBluetoothGuardSetting,
                              callback);
   pref_change_registrar_.Add(prefs::kManagedDefaultWebUsbGuardSetting,
                              callback);
+  pref_change_registrar_.Add(prefs::kManagedDefaultFileSystemReadGuardSetting,
+                             callback);
+  pref_change_registrar_.Add(prefs::kManagedDefaultFileSystemWriteGuardSetting,
+                             callback);
   pref_change_registrar_.Add(prefs::kManagedDefaultLegacyCookieAccessSetting,
                              callback);
+  pref_change_registrar_.Add(prefs::kManagedDefaultSerialGuardSetting,
+                             callback);
+  pref_change_registrar_.Add(prefs::kManagedDefaultSensorsSetting, callback);
+  pref_change_registrar_.Add(
+      prefs::kManagedDefaultInsecurePrivateNetworkSetting, callback);
 }
 
 PolicyProvider::~PolicyProvider() {
@@ -326,21 +388,20 @@ void PolicyProvider::GetContentSettingsFromPreferences(
           << "Replacing invalid secondary pattern '"
           << pattern_pair.second.ToString() << "' with wildcard";
 
-      // Currently all settings that can set pattern pairs support embedded
-      // exceptions. However if a new content setting is added that doesn't,
-      // this DCHECK should be changed to an actual check which ignores such
-      // patterns for that type.
-      DCHECK(pattern_pair.first == pattern_pair.second ||
-             pattern_pair.second == ContentSettingsPattern::Wildcard() ||
-             content_settings::WebsiteSettingsRegistry::GetInstance()
-                 ->Get(content_type)
-                 ->SupportsEmbeddedExceptions());
+      // All settings that can set pattern pairs support embedded exceptions.
+      if (pattern_pair.first != pattern_pair.second &&
+          pattern_pair.second != ContentSettingsPattern::Wildcard() &&
+          !content_settings::WebsiteSettingsRegistry::GetInstance()
+               ->Get(content_type)
+               ->SupportsSecondaryPattern()) {
+        continue;
+      }
 
       if (base::FeatureList::IsEnabled(
               content_settings::kDisallowWildcardsInPluginContentSettings) &&
           kPrefsForManagedContentSettingsMap[i].wildcards_in_primary_pattern ==
               WildcardsInPrimaryPattern::NOT_ALLOWED &&
-          pattern_pair.first.HasWildcards()) {
+          pattern_pair.first.HasHostWildcards()) {
         discarded_rules_value_map_[content_type].push_back(
             Rule(pattern_pair.first, secondary_pattern,
                  base::Value(kPrefsForManagedContentSettingsMap[i].setting),
@@ -472,13 +533,6 @@ void PolicyProvider::UpdateManagedDefaultSetting(
          prefs_->IsManagedPreference(entry.pref_name));
   base::AutoLock auto_lock(lock_);
   int setting = prefs_->GetInteger(entry.pref_name);
-  // TODO(wfh): Remove once HDB is enabled by default.
-  if (entry.pref_name == prefs::kManagedDefaultPluginsSetting) {
-    static constexpr base::Feature kIgnoreDefaultPluginsSetting = {
-        "IgnoreDefaultPluginsSetting", base::FEATURE_DISABLED_BY_DEFAULT};
-    if (base::FeatureList::IsEnabled(kIgnoreDefaultPluginsSetting))
-      setting = CONTENT_SETTING_DEFAULT;
-  }
   if (setting == CONTENT_SETTING_DEFAULT) {
     value_map_.DeleteValue(ContentSettingsPattern::Wildcard(),
                            ContentSettingsPattern::Wildcard(),
@@ -537,6 +591,10 @@ void PolicyProvider::OnPreferenceChanged(const std::string& name) {
       name == prefs::kManagedCookiesAllowedForUrls ||
       name == prefs::kManagedCookiesBlockedForUrls ||
       name == prefs::kManagedCookiesSessionOnlyForUrls ||
+      name == prefs::kManagedFileSystemReadAskForUrls ||
+      name == prefs::kManagedFileSystemReadBlockedForUrls ||
+      name == prefs::kManagedFileSystemWriteAskForUrls ||
+      name == prefs::kManagedFileSystemWriteBlockedForUrls ||
       name == prefs::kManagedImagesAllowedForUrls ||
       name == prefs::kManagedImagesBlockedForUrls ||
       name == prefs::kManagedInsecureContentAllowedForUrls ||
@@ -545,11 +603,16 @@ void PolicyProvider::OnPreferenceChanged(const std::string& name) {
       name == prefs::kManagedJavaScriptBlockedForUrls ||
       name == prefs::kManagedNotificationsAllowedForUrls ||
       name == prefs::kManagedNotificationsBlockedForUrls ||
-      name == prefs::kManagedPluginsAllowedForUrls ||
-      name == prefs::kManagedPluginsBlockedForUrls ||
       name == prefs::kManagedPopupsAllowedForUrls ||
       name == prefs::kManagedPopupsBlockedForUrls ||
-      name == prefs::kManagedLegacyCookieAccessAllowedForDomains) {
+      name == prefs::kManagedWebUsbAskForUrls ||
+      name == prefs::kManagedWebUsbBlockedForUrls ||
+      name == prefs::kManagedLegacyCookieAccessAllowedForDomains ||
+      name == prefs::kManagedSerialAskForUrls ||
+      name == prefs::kManagedSerialBlockedForUrls ||
+      name == prefs::kManagedSensorsAllowedForUrls ||
+      name == prefs::kManagedSensorsBlockedForUrls ||
+      name == prefs::kManagedInsecurePrivateNetworkAllowedForUrls) {
     ReadManagedContentSettings(true);
     ReadManagedDefaultSettings();
   }

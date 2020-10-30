@@ -167,7 +167,7 @@ class BrowserCloseTest : public testing::Test {
       Browser::CreateParams params(profile, true);
       params.type = Browser::TYPE_NORMAL;
       params.window = window;
-      Browser* browser = new Browser(params);
+      Browser* browser = Browser::Create(params);
 
       windows.push_back(window);
       browsers.push_back(browser);
@@ -269,7 +269,7 @@ TEST_F(BrowserCloseTest, LastRegular) {
   EXPECT_EQ(Browser::DownloadCloseType::kBrowserShutdown,
             browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
   EXPECT_EQ(num_downloads_blocking, 1);
-#if defined(OS_MACOSX) || defined(OS_CHROMEOS)
+#if defined(OS_MAC) || defined(OS_CHROMEOS)
   EXPECT_EQ(true, browser->CanCloseWithInProgressDownloads());
 #else
   EXPECT_EQ(false, browser->CanCloseWithInProgressDownloads());

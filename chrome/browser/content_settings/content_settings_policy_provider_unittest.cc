@@ -86,41 +86,6 @@ TEST_F(PolicyProviderTest, ManagedDefaultContentSettings) {
   provider.ShutdownOnUIThread();
 }
 
-TEST_F(PolicyProviderTest, ManagedDefaultPluginSettingsExperiment) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitFromCommandLine("IgnoreDefaultPluginsSetting",
-                                          std::string());
-
-  TestingProfile profile;
-  sync_preferences::TestingPrefServiceSyncable* prefs =
-      profile.GetTestingPrefService();
-  PolicyProvider provider(prefs);
-
-  // ForceDefaultPluginsSettingAsk overrides this to ASK.
-  prefs->SetManagedPref(prefs::kManagedDefaultPluginsSetting,
-                        std::make_unique<base::Value>(CONTENT_SETTING_BLOCK));
-  prefs->SetManagedPref(prefs::kManagedDefaultJavaScriptSetting,
-                        std::make_unique<base::Value>(CONTENT_SETTING_BLOCK));
-
-  std::unique_ptr<RuleIterator> plugin_rule_iterator(provider.GetRuleIterator(
-      ContentSettingsType::PLUGINS, std::string(), false));
-  // Policy should be removed when running under experiment.
-  EXPECT_FALSE(plugin_rule_iterator);
-
-  std::unique_ptr<RuleIterator> js_rule_iterator(provider.GetRuleIterator(
-      ContentSettingsType::JAVASCRIPT, std::string(), false));
-  // Other policies should be left alone.
-  EXPECT_TRUE(js_rule_iterator->HasNext());
-  Rule rule = js_rule_iterator->Next();
-  EXPECT_FALSE(js_rule_iterator->HasNext());
-
-  EXPECT_EQ(ContentSettingsPattern::Wildcard(), rule.primary_pattern);
-  EXPECT_EQ(ContentSettingsPattern::Wildcard(), rule.secondary_pattern);
-  EXPECT_EQ(CONTENT_SETTING_BLOCK, ValueToContentSetting(&rule.value));
-
-  provider.ShutdownOnUIThread();
-}
-
 // When a default-content-setting is set to a managed setting a
 // CONTENT_SETTINGS_CHANGED notification should be fired. The same should happen
 // if the managed setting is removed.
@@ -199,40 +164,6 @@ TEST_F(PolicyProviderTest, GettingManagedContentSettings) {
   provider.ShutdownOnUIThread();
 }
 
-TEST_F(PolicyProviderTest, ResourceIdentifier) {
-  TestingProfile profile;
-  sync_preferences::TestingPrefServiceSyncable* prefs =
-      profile.GetTestingPrefService();
-
-  auto value = std::make_unique<base::ListValue>();
-  value->AppendString("[*.]google.com");
-  prefs->SetManagedPref(prefs::kManagedPluginsAllowedForUrls, std::move(value));
-
-  PolicyProvider provider(prefs);
-
-  GURL youtube_url("http://www.youtube.com");
-  GURL google_url("http://mail.google.com");
-
-  EXPECT_EQ(CONTENT_SETTING_DEFAULT,
-            TestUtils::GetContentSetting(&provider, youtube_url, youtube_url,
-                                         ContentSettingsType::PLUGINS,
-                                         "someplugin", false));
-
-  // There is currently no policy support for resource content settings.
-  // Resource identifiers are simply ignored by the PolicyProvider.
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            TestUtils::GetContentSetting(&provider, google_url, google_url,
-                                         ContentSettingsType::PLUGINS,
-                                         std::string(), false));
-
-  EXPECT_EQ(CONTENT_SETTING_DEFAULT,
-            TestUtils::GetContentSetting(&provider, google_url, google_url,
-                                         ContentSettingsType::PLUGINS,
-                                         "someplugin", false));
-
-  provider.ShutdownOnUIThread();
-}
-
 TEST_F(PolicyProviderTest, AutoSelectCertificateList) {
   TestingProfile profile;
   sync_preferences::TestingPrefServiceSyncable* prefs =
@@ -292,42 +223,6 @@ TEST_F(PolicyProviderTest, InvalidManagedDefaultContentSetting) {
   std::unique_ptr<RuleIterator> rule_iterator(provider.GetRuleIterator(
       ContentSettingsType::COOKIES, std::string(), false));
   EXPECT_FALSE(rule_iterator);
-
-  provider.ShutdownOnUIThread();
-}
-
-TEST_F(PolicyProviderTest, WildcardsMatchingTest) {
-  // Enabling the feature which disallows wildcard matching for Plugin content
-  // settings
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitFromCommandLine(
-      "DisallowWildcardsInPluginContentSettings", std::string());
-
-  TestingProfile profile;
-  sync_preferences::TestingPrefServiceSyncable* prefs =
-      profile.GetTestingPrefService();
-
-  auto value = std::make_unique<base::ListValue>();
-  value->AppendString("[*.]google.com");
-  value->AppendString("http://drive.google.com:443");
-  prefs->SetManagedPref(prefs::kManagedPluginsAllowedForUrls, std::move(value));
-
-  PolicyProvider provider(prefs);
-
-  GURL google_mail_url("http://mail.google.com");
-  GURL google_drive_url("http://drive.google.com:443");
-
-  // mail.google.com doesnt match because it's not an exact match
-  EXPECT_EQ(CONTENT_SETTING_DEFAULT,
-            TestUtils::GetContentSetting(
-                &provider, google_mail_url, google_mail_url,
-                ContentSettingsType::PLUGINS, std::string(), false));
-
-  // drive.google.com matches because it's an exact match
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            TestUtils::GetContentSetting(
-                &provider, google_drive_url, google_drive_url,
-                ContentSettingsType::PLUGINS, std::string(), false));
 
   provider.ShutdownOnUIThread();
 }

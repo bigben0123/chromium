@@ -24,20 +24,21 @@ import {Viewport} from './viewport.js';
  */
 let ViewerInkHostElement;
 
-// Controller for annotation mode, on Chrome OS only. Fires the following events
-// from its event target:
-// has-unsaved-changes: Fired to indicate there are ink annotations that have
-//     not been saved.
-// set-annotation-undo-state: Contains information about whether undo or redo
-//     options are available.
-export class InkController extends ContentController {
+/**
+ * Controller for annotation mode, on Chrome OS only. Fires the following events
+ * from its event target:
+ *   has-unsaved-changes: Fired to indicate there are ink annotations that have
+ *       not been saved.
+ *   set-annotation-undo-state: Contains information about whether undo or redo
+ *       options are available.
+ *  @implements {ContentController}
+ */
+export class InkController {
   /**
    * @param {!Viewport} viewport
    * @param {!HTMLDivElement} contentElement
    */
   constructor(viewport, contentElement) {
-    super();
-
     /** @private {!Viewport} */
     this.viewport_ = viewport;
 
@@ -54,6 +55,23 @@ export class InkController extends ContentController {
     this.tool_ = null;
   }
 
+  /**
+   * @return {boolean}
+   * @override
+   */
+  get isActive() {
+    // TODO(crbug.com/1134208): Implement when InkController is a singleton.
+    return false;
+  }
+
+  /**
+   * @param {boolean} isActive
+   * @override
+   */
+  set isActive(isActive) {
+    // TODO(crbug.com/1134208): Implement when InkController is a singleton.
+  }
+
   /** @return {!EventTarget} */
   getEventTarget() {
     return this.eventTarget_;
@@ -67,6 +85,12 @@ export class InkController extends ContentController {
     }
   }
 
+  beforeZoom() {}
+
+  afterZoom() {}
+
+  print() {}
+
   /** @override */
   rotateClockwise() {
     // TODO(dstockwell): implement rotation
@@ -76,6 +100,9 @@ export class InkController extends ContentController {
   rotateCounterclockwise() {
     // TODO(dstockwell): implement rotation
   }
+
+  /** @override */
+  setDisplayAnnotations(displayAnnotations) {}
 
   /** @override */
   setTwoUpView(enableTwoUpView) {
@@ -91,6 +118,9 @@ export class InkController extends ContentController {
   save(requestType) {
     return this.inkHost_.saveDocument();
   }
+
+  /** @override */
+  saveAttachment(index) {}
 
   /** @override */
   undo() {
@@ -117,7 +147,9 @@ export class InkController extends ContentController {
             new CustomEvent('set-annotation-undo-state', {detail: e.detail}));
       });
     }
-    return this.inkHost_.load(filename, data);
+    return this.inkHost_.load(filename, data).then(() => {
+      this.eventTarget_.dispatchEvent(new CustomEvent('loaded'));
+    });
   }
 
   /** @override */

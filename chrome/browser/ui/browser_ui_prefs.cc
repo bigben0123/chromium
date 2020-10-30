@@ -94,6 +94,7 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterStringPref(prefs::kWebRTCUDPPortRange, std::string());
   registry->RegisterBooleanPref(prefs::kWebRtcEventLogCollectionAllowed, false);
   registry->RegisterListPref(prefs::kWebRtcLocalIpsAllowedUrls);
+  registry->RegisterBooleanPref(prefs::kWebRTCAllowLegacyTLSProtocols, false);
 
   // Dictionaries to keep track of default tasks in the file browser.
   registry->RegisterDictionaryPref(
@@ -113,7 +114,7 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(prefs::kClickToCallEnabled, true);
 #endif  // BUILDFLAG(ENABLE_CLICK_TO_CALL)
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   // This really belongs in platform code, but there's no good place to
   // initialize it between the time when the AppController is created
   // (where there's no profile) and the time the controller gets another
@@ -135,12 +136,18 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
 
   registry->RegisterBooleanPref(prefs::kEnterpriseHardwarePlatformAPIEnabled,
                                 false);
-  registry->RegisterBooleanPref(prefs::kAllowPopupsDuringPageUnload, false);
   registry->RegisterBooleanPref(prefs::kUserFeedbackAllowed, true);
   registry->RegisterBooleanPref(prefs::kAllowSyncXHRInPageDismissal, false);
   registry->RegisterBooleanPref(
       prefs::kExternalProtocolDialogShowAlwaysOpenCheckbox, true);
   registry->RegisterBooleanPref(prefs::kScreenCaptureAllowed, true);
+
+#if !defined(OS_ANDROID)
+  registry->RegisterBooleanPref(prefs::kCaretBrowsingEnabled, false);
+  registry->RegisterBooleanPref(prefs::kCloudPrintDeprecationWarningsSuppressed,
+                                false);
+  registry->RegisterBooleanPref(prefs::kShowCaretBrowsingDialog, true);
+#endif
 
 #if !defined(OS_CHROMEOS)
   registry->RegisterBooleanPref(prefs::kAccessibilityFocusHighlightEnabled,

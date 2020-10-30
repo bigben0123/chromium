@@ -332,37 +332,6 @@ bool FakeCryptohomeClient::InstallAttributesIsFirstInstall(
   return true;
 }
 
-void FakeCryptohomeClient::TpmAttestationIsPrepared(
-    DBusMethodCallback<bool> callback) {
-  auto result = service_is_available_
-                    ? base::make_optional(tpm_attestation_is_prepared_)
-                    : base::nullopt;
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback), result));
-}
-
-void FakeCryptohomeClient::TpmAttestationGetEnrollmentId(
-    bool ignore_cache,
-    DBusMethodCallback<TpmAttestationDataResult> callback) {
-  auto result =
-      service_is_available_
-          ? base::make_optional(TpmAttestationDataResult{
-                true, ignore_cache ? tpm_attestation_enrollment_id_ignore_cache_
-                                   : tpm_attestation_enrollment_id_})
-          : base::nullopt;
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback), result));
-}
-
-void FakeCryptohomeClient::TpmAttestationIsEnrolled(
-    DBusMethodCallback<bool> callback) {
-  auto result = service_is_available_
-                    ? base::make_optional(tpm_attestation_is_enrolled_)
-                    : base::nullopt;
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback), result));
-}
-
 void FakeCryptohomeClient::AsyncTpmAttestationCreateEnrollRequest(
     chromeos::attestation::PrivacyCAType pca_type,
     AsyncMethodCallback callback) {
@@ -491,59 +460,6 @@ void FakeCryptohomeClient::TpmAttestationSignSimpleChallenge(
   signed_data.set_data(challenge + kTwentyBytesNonce);
   signed_data.set_signature(kSignature);
   ReturnAsyncMethodData(std::move(callback), signed_data.SerializeAsString());
-}
-
-void FakeCryptohomeClient::TpmAttestationGetKeyPayload(
-    attestation::AttestationKeyType key_type,
-    const cryptohome::AccountIdentifier& cryptohome_id,
-    const std::string& key_name,
-    DBusMethodCallback<TpmAttestationDataResult> callback) {
-  TpmAttestationDataResult result;
-  if (key_type == attestation::KEY_DEVICE) {
-    const auto it = device_key_payload_map_.find(key_name);
-    if (it != device_key_payload_map_.end()) {
-      result.success = true;
-      result.data = it->second;
-    }
-  }
-
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback), std::move(result)));
-}
-
-void FakeCryptohomeClient::TpmAttestationSetKeyPayload(
-    attestation::AttestationKeyType key_type,
-    const cryptohome::AccountIdentifier& cryptohome_id,
-    const std::string& key_name,
-    const std::string& payload,
-    DBusMethodCallback<bool> callback) {
-  bool result = false;
-  // Currently only KEY_DEVICE case is supported just because there's no user
-  // for KEY_USER.
-  if (key_type == attestation::KEY_DEVICE) {
-    device_key_payload_map_[key_name] = payload;
-    result = true;
-  }
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback), result));
-}
-
-void FakeCryptohomeClient::TpmAttestationDeleteKeysByPrefix(
-    attestation::AttestationKeyType key_type,
-    const cryptohome::AccountIdentifier& cryptohome_id,
-    const std::string& key_prefix,
-    DBusMethodCallback<bool> callback) {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback), true));
-}
-
-void FakeCryptohomeClient::TpmAttestationDeleteKey(
-    attestation::AttestationKeyType key_type,
-    const cryptohome::AccountIdentifier& cryptohome_id,
-    const std::string& key_name,
-    DBusMethodCallback<bool> callback) {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback), true));
 }
 
 void FakeCryptohomeClient::TpmGetVersion(
@@ -790,6 +706,19 @@ void FakeCryptohomeClient::CheckHealth(
   ReturnProtobufMethodCallback(reply, std::move(callback));
 }
 
+void FakeCryptohomeClient::StartFingerprintAuthSession(
+    const cryptohome::AccountIdentifier& id,
+    const cryptohome::StartFingerprintAuthSessionRequest& request,
+    DBusMethodCallback<cryptohome::BaseReply> callback) {
+  ReturnProtobufMethodCallback(cryptohome::BaseReply(), std::move(callback));
+}
+
+void FakeCryptohomeClient::EndFingerprintAuthSession(
+    const cryptohome::EndFingerprintAuthSessionRequest& request,
+    DBusMethodCallback<cryptohome::BaseReply> callback) {
+  ReturnProtobufMethodCallback(cryptohome::BaseReply(), std::move(callback));
+}
+
 void FakeCryptohomeClient::SetServiceIsAvailable(bool is_available) {
   service_is_available_ = is_available;
   if (!is_available)
@@ -822,20 +751,6 @@ void FakeCryptohomeClient::SetTpmAttestationDeviceCertificate(
     const std::string& key_name,
     const std::string& certificate) {
   device_certificate_map_[key_name] = certificate;
-}
-
-void FakeCryptohomeClient::SetTpmAttestationDeviceKeyPayload(
-    const std::string& key_name,
-    const std::string& payload) {
-  device_key_payload_map_[key_name] = payload;
-}
-
-base::Optional<std::string>
-FakeCryptohomeClient::GetTpmAttestationDeviceKeyPayload(
-    const std::string& key_name) const {
-  const auto it = device_key_payload_map_.find(key_name);
-  return it == device_key_payload_map_.end() ? base::nullopt
-                                             : base::make_optional(it->second);
 }
 
 void FakeCryptohomeClient::NotifyLowDiskSpace(uint64_t disk_free_bytes) {

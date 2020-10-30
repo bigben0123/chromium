@@ -19,7 +19,6 @@
 #include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/debug/dump_without_crashing.h"
-#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
@@ -37,7 +36,6 @@
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
 #include "content/browser/browsing_data/browsing_data_remover_impl.h"
 #include "content/browser/child_process_security_policy_impl.h"
-#include "content/browser/content_service_delegate_impl.h"
 #include "content/browser/download/download_manager_impl.h"
 #include "content/browser/media/browser_feature_provider.h"
 #include "content/browser/permissions/permission_controller_impl.h"
@@ -61,10 +59,6 @@
 #include "media/learning/common/media_learning_tasks.h"
 #include "media/learning/impl/learning_session_impl.h"
 #include "media/mojo/services/video_decode_perf_history.h"
-#include "net/cookies/cookie_store.h"
-#include "net/url_request/url_request_context.h"
-#include "services/content/service.h"
-#include "services/network/public/cpp/features.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "storage/browser/database/database_tracker.h"
 #include "storage/browser/file_system/external_mount_points.h"
@@ -77,19 +71,11 @@ namespace {
 
 class ContentServiceHolder : public base::SupportsUserData::Data {
  public:
-  explicit ContentServiceHolder(BrowserContext* browser_context)
-      : delegate_(browser_context) {
-    delegate_.AddService(&service_);
-  }
+  explicit ContentServiceHolder(BrowserContext* browser_context) {}
 
   ~ContentServiceHolder() override = default;
 
-  content::Service& service() { return service_; }
-
  private:
-  ContentServiceDelegateImpl delegate_;
-  content::Service service_{&delegate_};
-
   DISALLOW_COPY_AND_ASSIGN(ContentServiceHolder);
 };
 
@@ -340,11 +326,26 @@ void BrowserContext::DeliverPushMessage(
     int64_t service_worker_registration_id,
     const std::string& message_id,
     base::Optional<std::string> payload,
-    base::OnceCallback<void(blink::mojom::PushDeliveryStatus)> callback) {
+    base::OnceCallback<void(blink::mojom::PushEventStatus)> callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   PushMessagingRouter::DeliverMessage(
       browser_context, origin, service_worker_registration_id, message_id,
       std::move(payload), std::move(callback));
+}
+
+// static
+void BrowserContext::FirePushSubscriptionChangeEvent(
+    BrowserContext* browser_context,
+    const GURL& origin,
+    int64_t service_worker_registration_id,
+    blink::mojom::PushSubscriptionPtr new_subscription,
+    blink::mojom::PushSubscriptionPtr old_subscription,
+    base::OnceCallback<void(blink::mojom::PushEventStatus)> callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  PushMessagingRouter::FireSubscriptionChangeEvent(
+      browser_context, origin, service_worker_registration_id,
+      std::move(new_subscription), std::move(old_subscription),
+      std::move(callback));
 }
 
 // static
@@ -411,11 +412,13 @@ void BrowserContext::SaveSessionState(BrowserContext* browser_context) {
                      base::WrapRefCounted(database_tracker)));
 
   if (BrowserThread::IsThreadInitialized(BrowserThread::IO)) {
-    GetIOThreadTaskRunner({})->PostTask(
-        FROM_HERE,
-        base::BindOnce(&SaveSessionStateOnIOThread,
-                       static_cast<AppCacheServiceImpl*>(
-                           storage_partition->GetAppCacheService())));
+    auto* appcache_service = static_cast<AppCacheServiceImpl*>(
+        storage_partition->GetAppCacheService());
+    if (appcache_service) {
+      GetIOThreadTaskRunner({})->PostTask(
+          FROM_HERE,
+          base::BindOnce(&SaveSessionStateOnIOThread, appcache_service));
+    }
   }
 
   storage_partition->GetCookieManagerForBrowserProcess()
@@ -466,10 +469,34 @@ BrowserContext::~BrowserContext() {
     base::debug::DumpWithoutCrashing();
   }
 
-  // Clean up any isolated origins and other security state associated with this
-  // BrowserContext.
+  // Verify that there are no outstanding RenderProcessHosts that reference
+  // this context. Trigger a crash report if there are still references so
+  // we can detect/diagnose potential UAFs.
+  std::string rph_crash_key_value;
   ChildProcessSecurityPolicyImpl* policy =
       ChildProcessSecurityPolicyImpl::GetInstance();
+  for (RenderProcessHost::iterator host_iterator =
+           RenderProcessHost::AllHostsIterator();
+       !host_iterator.IsAtEnd(); host_iterator.Advance()) {
+    RenderProcessHost* host = host_iterator.GetCurrentValue();
+    if (host->GetBrowserContext() == this) {
+      rph_crash_key_value +=
+          "{ " + host->GetInfoForBrowserContextDestructionCrashReporting() +
+          " }";
+    }
+  }
+  if (!rph_crash_key_value.empty()) {
+    NOTREACHED() << "rph_with_bc_reference : " << rph_crash_key_value;
+
+    static auto* crash_key = base::debug::AllocateCrashKeyString(
+        "rph_with_bc_reference", base::debug::CrashKeySize::Size256);
+    base::debug::ScopedCrashKeyString auto_clear(crash_key,
+                                                 rph_crash_key_value);
+    base::debug::DumpWithoutCrashing();
+  }
+
+  // Clean up any isolated origins and other security state associated with this
+  // BrowserContext.
   policy->RemoveStateForBrowserContext(*this);
 
   if (GetUserData(kDownloadManagerKeyName))
@@ -505,19 +532,6 @@ std::string BrowserContext::CreateRandomMediaDeviceIDSalt() {
 
 const std::string& BrowserContext::UniqueId() {
   return unique_id_;
-}
-
-void BrowserContext::BindNavigableContentsFactory(
-    mojo::PendingReceiver<content::mojom::NavigableContentsFactory> receiver) {
-  auto* service_holder =
-      static_cast<ContentServiceHolder*>(GetUserData(kContentServiceKey));
-  if (!service_holder) {
-    auto new_holder = std::make_unique<ContentServiceHolder>(this);
-    service_holder = new_holder.get();
-    SetUserData(kContentServiceKey, std::move(new_holder));
-  }
-
-  service_holder->service().BindNavigableContentsFactory(std::move(receiver));
 }
 
 media::VideoDecodePerfHistory* BrowserContext::GetVideoDecodePerfHistory() {
@@ -603,10 +617,6 @@ SharedCorsOriginAccessList* BrowserContext::GetSharedCorsOriginAccessList() {
   static const base::NoDestructor<scoped_refptr<SharedCorsOriginAccessList>>
       empty_list(SharedCorsOriginAccessList::Create());
   return empty_list->get();
-}
-
-bool BrowserContext::ShouldEnableOutOfBlinkCors() {
-  return base::FeatureList::IsEnabled(network::features::kOutOfBlinkCors);
 }
 
 NativeFileSystemPermissionContext*

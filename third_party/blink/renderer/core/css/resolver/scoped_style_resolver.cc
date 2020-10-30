@@ -79,8 +79,8 @@ void ScopedStyleResolver::AddFontFaceRules(const RuleSet& rule_set) {
     if (FontFace* font_face = FontFace::Create(&document, font_face_rule))
       css_font_selector->GetFontFaceCache()->Add(font_face_rule, font_face);
   }
-  if (font_face_rules.size() && document.GetStyleResolver())
-    document.GetStyleResolver()->InvalidateMatchedPropertiesCache();
+  if (font_face_rules.size())
+    document.GetStyleResolver().InvalidateMatchedPropertiesCache();
 }
 
 void ScopedStyleResolver::AppendActiveStyleSheets(
@@ -143,7 +143,7 @@ void ScopedStyleResolver::ResetAuthorStyle() {
 }
 
 StyleRuleKeyframes* ScopedStyleResolver::KeyframeStylesForAnimation(
-    const StringImpl* animation_name) {
+    const AtomicString& animation_name) {
   if (keyframes_rule_map_.IsEmpty())
     return nullptr;
 
@@ -155,16 +155,16 @@ StyleRuleKeyframes* ScopedStyleResolver::KeyframeStylesForAnimation(
 }
 
 void ScopedStyleResolver::AddKeyframeStyle(StyleRuleKeyframes* rule) {
-  AtomicString s(rule->GetName());
+  AtomicString name = rule->GetName();
 
   if (rule->IsVendorPrefixed()) {
-    KeyframesRuleMap::iterator it = keyframes_rule_map_.find(s.Impl());
+    KeyframesRuleMap::iterator it = keyframes_rule_map_.find(name);
     if (it == keyframes_rule_map_.end())
-      keyframes_rule_map_.Set(s.Impl(), rule);
+      keyframes_rule_map_.Set(name, rule);
     else if (it->value->IsVendorPrefixed())
-      keyframes_rule_map_.Set(s.Impl(), rule);
+      keyframes_rule_map_.Set(name, rule);
   } else {
-    keyframes_rule_map_.Set(s.Impl(), rule);
+    keyframes_rule_map_.Set(name, rule);
   }
 }
 

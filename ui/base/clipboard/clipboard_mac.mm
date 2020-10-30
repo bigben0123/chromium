@@ -27,6 +27,7 @@
 #include "ui/base/clipboard/clipboard_metrics.h"
 #include "ui/base/clipboard/clipboard_util_mac.h"
 #include "ui/base/clipboard/custom_data_helper.h"
+#include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
@@ -69,8 +70,12 @@ uint64_t ClipboardMac::GetSequenceNumber(ClipboardBuffer buffer) const {
   return [pb changeCount];
 }
 
-bool ClipboardMac::IsFormatAvailable(const ClipboardFormatType& format,
-                                     ClipboardBuffer buffer) const {
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
+bool ClipboardMac::IsFormatAvailable(
+    const ClipboardFormatType& format,
+    ClipboardBuffer buffer,
+    const DataTransferEndpoint* data_dst) const {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, ClipboardBuffer::kCopyPaste);
 
@@ -115,18 +120,24 @@ void ClipboardMac::Clear(ClipboardBuffer buffer) {
   [pb declareTypes:@[] owner:nil];
 }
 
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
 void ClipboardMac::ReadAvailableTypes(
     ClipboardBuffer buffer,
+    const DataTransferEndpoint* data_dst,
     std::vector<base::string16>* types) const {
   DCHECK(CalledOnValidThread());
   DCHECK(types);
 
   types->clear();
-  if (IsFormatAvailable(ClipboardFormatType::GetPlainTextType(), buffer))
+  if (IsFormatAvailable(ClipboardFormatType::GetPlainTextType(), buffer,
+                        data_dst))
     types->push_back(base::UTF8ToUTF16(kMimeTypeText));
-  if (IsFormatAvailable(ClipboardFormatType::GetHtmlType(), buffer))
+  if (IsFormatAvailable(ClipboardFormatType::GetHtmlType(), buffer, data_dst))
     types->push_back(base::UTF8ToUTF16(kMimeTypeHTML));
-  if (IsFormatAvailable(ClipboardFormatType::GetRtfType(), buffer))
+  if (IsFormatAvailable(ClipboardFormatType::GetSvgType(), buffer, data_dst))
+    types->push_back(base::UTF8ToUTF16(kMimeTypeSvg));
+  if (IsFormatAvailable(ClipboardFormatType::GetRtfType(), buffer, data_dst))
     types->push_back(base::UTF8ToUTF16(kMimeTypeRTF));
 
   NSPasteboard* pb = GetPasteboard();
@@ -140,9 +151,12 @@ void ClipboardMac::ReadAvailableTypes(
   }
 }
 
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
 std::vector<base::string16>
 ClipboardMac::ReadAvailablePlatformSpecificFormatNames(
-    ClipboardBuffer buffer) const {
+    ClipboardBuffer buffer,
+    const DataTransferEndpoint* data_dst) const {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, ClipboardBuffer::kCopyPaste);
 
@@ -156,7 +170,10 @@ ClipboardMac::ReadAvailablePlatformSpecificFormatNames(
   return type_names;
 }
 
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
 void ClipboardMac::ReadText(ClipboardBuffer buffer,
+                            const DataTransferEndpoint* data_dst,
                             base::string16* result) const {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, ClipboardBuffer::kCopyPaste);
@@ -167,7 +184,10 @@ void ClipboardMac::ReadText(ClipboardBuffer buffer,
   *result = base::SysNSStringToUTF16(contents);
 }
 
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
 void ClipboardMac::ReadAsciiText(ClipboardBuffer buffer,
+                                 const DataTransferEndpoint* data_dst,
                                  std::string* result) const {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, ClipboardBuffer::kCopyPaste);
@@ -181,7 +201,10 @@ void ClipboardMac::ReadAsciiText(ClipboardBuffer buffer,
     result->assign([contents UTF8String]);
 }
 
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
 void ClipboardMac::ReadHTML(ClipboardBuffer buffer,
+                            const DataTransferEndpoint* data_dst,
                             base::string16* markup,
                             std::string* src_url,
                             uint32_t* fragment_start,
@@ -213,22 +236,44 @@ void ClipboardMac::ReadHTML(ClipboardBuffer buffer,
   *fragment_end = static_cast<uint32_t>(markup->length());
 }
 
-void ClipboardMac::ReadRTF(ClipboardBuffer buffer, std::string* result) const {
+void ClipboardMac::ReadSvg(ClipboardBuffer buffer,
+                           const DataTransferEndpoint* data_dst,
+                           base::string16* result) const {
+  DCHECK(CalledOnValidThread());
+  DCHECK_EQ(buffer, ClipboardBuffer::kCopyPaste);
+  RecordRead(ClipboardFormatMetric::kSvg);
+  NSPasteboard* pb = GetPasteboard();
+  NSString* contents = [pb stringForType:kImageSvg];
+
+  *result = base::SysNSStringToUTF16(contents);
+}
+
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
+void ClipboardMac::ReadRTF(ClipboardBuffer buffer,
+                           const DataTransferEndpoint* data_dst,
+                           std::string* result) const {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, ClipboardBuffer::kCopyPaste);
   RecordRead(ClipboardFormatMetric::kRtf);
 
-  return ReadData(ClipboardFormatType::GetRtfType(), result);
+  return ReadData(ClipboardFormatType::GetRtfType(), data_dst, result);
 }
 
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
 void ClipboardMac::ReadImage(ClipboardBuffer buffer,
+                             const DataTransferEndpoint* data_dst,
                              ReadImageCallback callback) const {
   RecordRead(ClipboardFormatMetric::kImage);
   std::move(callback).Run(ReadImageInternal(buffer, GetPasteboard()));
 }
 
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
 void ClipboardMac::ReadCustomData(ClipboardBuffer buffer,
                                   const base::string16& type,
+                                  const DataTransferEndpoint* data_dst,
                                   base::string16* result) const {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, ClipboardBuffer::kCopyPaste);
@@ -242,7 +287,11 @@ void ClipboardMac::ReadCustomData(ClipboardBuffer buffer,
   }
 }
 
-void ClipboardMac::ReadBookmark(base::string16* title, std::string* url) const {
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
+void ClipboardMac::ReadBookmark(const DataTransferEndpoint* data_dst,
+                                base::string16* title,
+                                std::string* url) const {
   DCHECK(CalledOnValidThread());
   RecordRead(ClipboardFormatMetric::kBookmark);
   NSPasteboard* pb = GetPasteboard();
@@ -261,7 +310,10 @@ void ClipboardMac::ReadBookmark(base::string16* title, std::string* url) const {
   }
 }
 
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
 void ClipboardMac::ReadData(const ClipboardFormatType& format,
+                            const DataTransferEndpoint* data_dst,
                             std::string* result) const {
   DCHECK(CalledOnValidThread());
   RecordRead(ClipboardFormatMetric::kData);
@@ -271,8 +323,12 @@ void ClipboardMac::ReadData(const ClipboardFormatType& format,
     result->assign(static_cast<const char*>([data bytes]), [data length]);
 }
 
-void ClipboardMac::WritePortableRepresentations(ClipboardBuffer buffer,
-                                                const ObjectMap& objects) {
+// |data_src| is not used. It's only passed to be consistent with other
+// platforms.
+void ClipboardMac::WritePortableRepresentations(
+    ClipboardBuffer buffer,
+    const ObjectMap& objects,
+    std::unique_ptr<DataTransferEndpoint> data_src) {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, ClipboardBuffer::kCopyPaste);
 
@@ -283,9 +339,12 @@ void ClipboardMac::WritePortableRepresentations(ClipboardBuffer buffer,
     DispatchPortableRepresentation(object.first, object.second);
 }
 
+// |data_src| is not used. It's only passed to be consistent with other
+// platforms.
 void ClipboardMac::WritePlatformRepresentations(
     ClipboardBuffer buffer,
-    std::vector<Clipboard::PlatformRepresentation> platform_representations) {
+    std::vector<Clipboard::PlatformRepresentation> platform_representations,
+    std::unique_ptr<DataTransferEndpoint> data_src) {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, ClipboardBuffer::kCopyPaste);
 
@@ -316,6 +375,14 @@ void ClipboardMac::WriteHTML(const char* markup_data,
   NSPasteboard* pb = GetPasteboard();
   [pb addTypes:@[ NSHTMLPboardType ] owner:nil];
   [pb setString:html_fragment forType:NSHTMLPboardType];
+}
+
+void ClipboardMac::WriteSvg(const char* markup_data, size_t markup_len) {
+  std::string svg_str(markup_data, markup_len);
+  NSString* svg = base::SysUTF8ToNSString(svg_str);
+  NSPasteboard* pb = GetPasteboard();
+  [pb addTypes:@[ kImageSvg ] owner:nil];
+  [pb setString:svg forType:kImageSvg];
 }
 
 void ClipboardMac::WriteRTF(const char* rtf_data, size_t data_len) {

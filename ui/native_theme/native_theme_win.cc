@@ -11,6 +11,7 @@
 #include <vssym32.h>
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/check.h"
 #include "base/command_line.h"
 #include "base/notreached.h"
@@ -293,6 +294,7 @@ NativeThemeWin::NativeThemeWin(bool configure_web_instance,
   // Initialize the cached system colors.
   UpdateSystemColors();
   set_preferred_color_scheme(CalculatePreferredColorScheme());
+  set_preferred_contrast(CalculatePreferredContrast());
 
   memset(theme_handles_, 0, sizeof(theme_handles_));
 
@@ -316,6 +318,7 @@ void NativeThemeWin::ConfigureWebInstance() {
   web_instance->set_use_dark_colors(ShouldUseDarkColors());
   web_instance->set_high_contrast(UsesHighContrastColors());
   web_instance->set_preferred_color_scheme(GetPreferredColorScheme());
+  web_instance->set_preferred_contrast(GetPreferredContrast());
   web_instance->set_system_colors(GetSystemColors());
 }
 
@@ -346,6 +349,7 @@ void NativeThemeWin::OnSysColorChange() {
   if (!IsForcedHighContrast())
     set_high_contrast(IsUsingHighContrastThemeInternal());
   set_preferred_color_scheme(CalculatePreferredColorScheme());
+  set_preferred_contrast(CalculatePreferredContrast());
   NotifyObservers();
 }
 
@@ -611,6 +615,7 @@ base::Optional<SkColor> NativeThemeWin::GetPlatformHighContrastColor(
     case kColorId_TableBackgroundAlternate:
     case kColorId_TooltipBackground:
     case kColorId_ProminentButtonDisabledColor:
+    case kColorId_NotificationDefaultBackground:
       return system_colors_[SystemThemeColor::kWindow];
 
     // Window Text
@@ -623,6 +628,7 @@ base::Optional<SkColor> NativeThemeWin::GetPlatformHighContrastColor(
     case kColorId_TableHeaderText:
     case kColorId_TableGroupingIndicatorColor:
     case kColorId_TableHeaderSeparator:
+    case kColorId_TooltipIcon:
     case kColorId_TooltipText:
     case kColorId_ThrobberSpinningColor:
     case kColorId_ThrobberLightColor:
@@ -678,6 +684,7 @@ base::Optional<SkColor> NativeThemeWin::GetPlatformHighContrastColor(
     case kColorId_FocusedMenuItemBackgroundColor:
     case kColorId_LabelTextSelectionBackgroundFocused:
     case kColorId_TextfieldSelectionBackgroundFocused:
+    case kColorId_TooltipIconHovered:
     case kColorId_TreeSelectionBackgroundFocused:
     case kColorId_TreeSelectionBackgroundUnfocused:
     case kColorId_TableSelectionBackgroundFocused:
@@ -740,6 +747,39 @@ NativeThemeWin::CalculatePreferredColorScheme() const {
   if (luminance < 0.33)
     return NativeTheme::PreferredColorScheme::kDark;
   return NativeTheme::PreferredColorScheme::kLight;
+}
+
+NativeTheme::PreferredContrast NativeThemeWin::CalculatePreferredContrast()
+    const {
+  if (!UsesHighContrastColors())
+    return NativeTheme::CalculatePreferredContrast();
+
+  // According to the spec [1], "when the user agent can determine whether the
+  // forced color palette chosen by the user has a high or low contrast, one of
+  // 'prefers-contrast: more' or 'prefers-contrast: less' must match in addition
+  // to 'prefers-contrast: forced'."
+  //
+  // Using WCAG definitions [2], we have decided to match 'more' in Forced
+  // Colors Mode if the contrast ratio between the foreground and background
+  // color is 7:1 or greater.
+  //
+  // "A contrast ratio of 3:1 is the minimum level recommended by [[ISO-9241-3]]
+  // and [[ANSI-HFES-100-1988]] for standard text and vision"[2]. Given this,
+  // we will start by matching to 'less' in Forced Colors Mode if the contrast
+  // ratio between the foreground and background color is 2.5:1 or less.
+  //
+  // These ratios will act as an experimental baseline that we can adjust based
+  // on user feedback.
+  //
+  // [1] https://www.w3.org/TR/css-color-adjust-1/#forced
+  // [2] https://www.w3.org/WAI/WCAG21/Understanding/contrast-enhanced
+  SkColor bg_color = system_colors_[SystemThemeColor::kWindow];
+  SkColor fg_color = system_colors_[SystemThemeColor::kWindowText];
+  float contrast_ratio = color_utils::GetContrastRatio(bg_color, fg_color);
+  if (contrast_ratio >= 7)
+    return NativeTheme::PreferredContrast::kMore;
+  return contrast_ratio <= 2.5 ? NativeTheme::PreferredContrast::kLess
+                               : NativeTheme::PreferredContrast::kNoPreference;
 }
 
 NativeTheme::ColorScheme NativeThemeWin::GetDefaultSystemColorScheme() const {

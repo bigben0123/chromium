@@ -18,6 +18,9 @@
 
 class GURL;
 class Profile;
+namespace apps {
+struct ShareTarget;
+}
 namespace base {
 class Time;
 }
@@ -31,6 +34,7 @@ namespace web_app {
 class AppRegistrarObserver;
 class WebAppRegistrar;
 class WebApp;
+class OsIntegrationManager;
 
 enum class ExternalInstallSource;
 
@@ -87,7 +91,16 @@ class AppRegistrar {
   virtual std::string GetAppDescription(const AppId& app_id) const = 0;
   virtual base::Optional<SkColor> GetAppThemeColor(
       const AppId& app_id) const = 0;
-  virtual const GURL& GetAppLaunchURL(const AppId& app_id) const = 0;
+  virtual base::Optional<SkColor> GetAppBackgroundColor(
+      const AppId& app_id) const = 0;
+  virtual const GURL& GetAppStartUrl(const AppId& app_id) const = 0;
+  virtual const std::string* GetAppLaunchQueryParams(
+      const AppId& app_id) const = 0;
+  virtual const apps::ShareTarget* GetAppShareTarget(
+      const AppId& app_id) const = 0;
+
+  // Returns the start_url with launch_query_params appended to the end if any.
+  GURL GetAppLaunchUrl(const AppId& app_id) const;
 
   // TODO(crbug.com/910016): Replace uses of this with GetAppScope().
   virtual base::Optional<GURL> GetAppScopeInternal(
@@ -95,6 +108,8 @@ class AppRegistrar {
 
   virtual DisplayMode GetAppDisplayMode(const AppId& app_id) const = 0;
   virtual DisplayMode GetAppUserDisplayMode(const AppId& app_id) const = 0;
+  virtual std::vector<DisplayMode> GetAppDisplayModeOverride(
+      const AppId& app_id) const = 0;
 
   virtual base::Time GetAppLastLaunchTime(const AppId& app_id) const = 0;
   virtual base::Time GetAppInstallTime(const AppId& app_id) const = 0;
@@ -105,16 +120,20 @@ class AppRegistrar {
       const AppId& app_id) const = 0;
 
   // Represents which icon sizes we successfully downloaded from the IconInfos.
-  virtual std::vector<SquareSizePx> GetAppDownloadedIconSizes(
+  virtual SortedSizesPx GetAppDownloadedIconSizesAny(
       const AppId& app_id) const = 0;
 
   // Returns the "shortcuts" field from the app manifest, use |AppIconManager|
   // to load shortcuts menu icons bitmaps data.
-  virtual std::vector<WebApplicationShortcutsMenuItemInfo> GetAppShortcutInfos(
+  virtual std::vector<WebApplicationShortcutsMenuItemInfo>
+  GetAppShortcutsMenuItemInfos(const AppId& app_id) const = 0;
+
+  // Returns the Run on OS Login mode.
+  virtual RunOnOsLoginMode GetAppRunOnOsLoginMode(
       const AppId& app_id) const = 0;
 
   // Represents which icon sizes we successfully downloaded from the
-  // ShortcutInfos.
+  // ShortcutsMenuItemInfos.
   virtual std::vector<std::vector<SquareSizePx>>
   GetAppDownloadedShortcutsMenuIconsSizes(const AppId& app_id) const = 0;
 
@@ -123,6 +142,8 @@ class AppRegistrar {
   // Safe downcast.
   virtual WebAppRegistrar* AsWebAppRegistrar() = 0;
   virtual extensions::BookmarkAppRegistrar* AsBookmarkAppRegistrar();
+
+  void SetSubsystems(OsIntegrationManager* os_integration_manager);
 
   // Returns the "scope" field from the app manifest, or infers a scope from the
   // "start_url" field if unavailable. Returns an invalid GURL iff the |app_id|
@@ -159,7 +180,13 @@ class AppRegistrar {
   // complete installation via the PendingAppManager.
   bool IsPlaceholderApp(const AppId& app_id) const;
 
+  // Computes and returns the DisplayMode, accounting for user preference
+  // to launch in a browser window and entries in the web app manifest.
   DisplayMode GetAppEffectiveDisplayMode(const AppId& app_id) const;
+
+  // Computes and returns the DisplayMode only accounting for
+  // entries in the web app manifest.
+  DisplayMode GetEffectiveDisplayModeFromManifest(const AppId& app_id) const;
 
   // TODO(crbug.com/897314): Finish experiment by legitimising it as a
   // DisplayMode or removing entirely.
@@ -182,8 +209,14 @@ class AppRegistrar {
   void NotifyWebAppInstallTimeChanged(const AppId& app_id,
                                       const base::Time& time);
 
+  // Notify when OS hooks installation is finished during Web App installation.
+  void NotifyWebAppInstalledWithOsHooks(const AppId& app_id);
+
  protected:
   Profile* profile() const { return profile_; }
+  OsIntegrationManager& os_integration_manager() {
+    return *os_integration_manager_;
+  }
 
   void NotifyWebAppProfileWillBeDeleted(const AppId& app_id);
   void NotifyAppRegistrarShutdown();
@@ -192,6 +225,7 @@ class AppRegistrar {
   Profile* const profile_;
 
   base::ObserverList<AppRegistrarObserver, /*check_empty=*/true> observers_;
+  OsIntegrationManager* os_integration_manager_ = nullptr;
 };
 
 }  // namespace web_app

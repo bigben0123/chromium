@@ -141,8 +141,11 @@ class FakeInterfaceFactory : public media::mojom::InterfaceFactory {
       mojo::PendingReceiver<media::mojom::Renderer> receiver) override {}
 #endif  // defined(OS_ANDROID
   void CreateCdm(const std::string& key_system,
-                 mojo::PendingReceiver<media::mojom::ContentDecryptionModule>
-                     receiver) override {}
+                 const media::CdmConfig& cdm_config,
+                 CreateCdmCallback callback) override {
+    std::move(callback).Run(mojo::NullRemote(), base::nullopt,
+                            mojo::NullRemote(), "CDM creation not supported");
+  }
 
  private:
   media::MojoCdmServiceContext cdm_service_context_;
@@ -166,8 +169,8 @@ class VideoDecoderBrokerTest : public testing::Test {
     done_cb.Run();
   }
   void OnDecodeDoneWithClosure(base::RepeatingClosure done_cb,
-                               media::DecodeStatus status) {
-    OnDecodeDone(status);
+                               media::Status status) {
+    OnDecodeDone(std::move(status));
     done_cb.Run();
   }
 
@@ -177,7 +180,7 @@ class VideoDecoderBrokerTest : public testing::Test {
   }
 
   MOCK_METHOD1(OnInit, void(media::Status status));
-  MOCK_METHOD1(OnDecodeDone, void(media::DecodeStatus));
+  MOCK_METHOD1(OnDecodeDone, void(media::Status));
   MOCK_METHOD0(OnResetDone, void());
 
   void OnOutput(scoped_refptr<media::VideoFrame> frame) {
@@ -235,9 +238,9 @@ class VideoDecoderBrokerTest : public testing::Test {
 
   void DecodeBuffer(
       scoped_refptr<media::DecoderBuffer> buffer,
-      media::DecodeStatus expected_status = media::DecodeStatus::OK) {
+      media::StatusCode expected_status = media::StatusCode::kOk) {
     base::RunLoop run_loop;
-    EXPECT_CALL(*this, OnDecodeDone(expected_status));
+    EXPECT_CALL(*this, OnDecodeDone(HasStatusCode(expected_status)));
     decoder_broker_->Decode(
         buffer, WTF::Bind(&VideoDecoderBrokerTest::OnDecodeDoneWithClosure,
                           WTF::Unretained(this), run_loop.QuitClosure()));
@@ -325,7 +328,8 @@ TEST_F(VideoDecoderBrokerTest, Decode_WithMojoDecoder) {
   ConstructDecoder(*execution_context);
   EXPECT_EQ(GetDisplayName(), "EmptyWebCodecsVideoDecoder");
 
-  media::VideoDecoderConfig config = media::TestVideoConfig::Normal();
+  // Use an extra-large video to ensure we don't get a software decoder
+  media::VideoDecoderConfig config = media::TestVideoConfig::ExtraLarge();
   InitializeDecoder(config);
   EXPECT_EQ(GetDisplayName(), "MojoVideoDecoder");
 

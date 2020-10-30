@@ -58,6 +58,7 @@
 #include "third_party/blink/renderer/core/frame/deprecation.h"
 #include "third_party/blink/renderer/core/frame/frame.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/page_dismissal_scope.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/html/forms/form_data.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
@@ -72,7 +73,6 @@
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer_view.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/core/url/url_search_params.h"
-#include "third_party/blink/renderer/core/xmlhttprequest/main_thread_disallow_synchronous_xhr_scope.h"
 #include "third_party/blink/renderer/core/xmlhttprequest/xml_http_request_upload.h"
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
@@ -272,36 +272,30 @@ class XMLHttpRequest::BlobLoader final
 };
 
 XMLHttpRequest* XMLHttpRequest::Create(ScriptState* script_state) {
-  ExecutionContext* context = ExecutionContext::From(script_state);
-  DOMWrapperWorld& world = script_state->World();
-  v8::Isolate* isolate = script_state->GetIsolate();
-
-  return world.IsIsolatedWorld()
-             ? MakeGarbageCollected<XMLHttpRequest>(
-                   context, isolate, true, world.IsolatedWorldSecurityOrigin())
-             : MakeGarbageCollected<XMLHttpRequest>(context, isolate, false,
-                                                    nullptr);
+  return MakeGarbageCollected<XMLHttpRequest>(
+      ExecutionContext::From(script_state), script_state->GetIsolate(),
+      &script_state->World());
 }
 
 XMLHttpRequest* XMLHttpRequest::Create(ExecutionContext* context) {
   v8::Isolate* isolate = context->GetIsolate();
   CHECK(isolate);
 
-  return MakeGarbageCollected<XMLHttpRequest>(context, isolate, false, nullptr);
+  return MakeGarbageCollected<XMLHttpRequest>(context, isolate, nullptr);
 }
 
-XMLHttpRequest::XMLHttpRequest(
-    ExecutionContext* context,
-    v8::Isolate* isolate,
-    bool is_isolated_world,
-    scoped_refptr<SecurityOrigin> isolated_world_security_origin)
+XMLHttpRequest::XMLHttpRequest(ExecutionContext* context,
+                               v8::Isolate* isolate,
+                               scoped_refptr<const DOMWrapperWorld> world)
     : ExecutionContextLifecycleObserver(context),
       progress_event_throttle_(
           MakeGarbageCollected<XMLHttpRequestProgressEventThrottle>(this)),
       isolate_(isolate),
-      is_isolated_world_(is_isolated_world),
-      isolated_world_security_origin_(
-          std::move(isolated_world_security_origin)) {}
+      world_(std::move(world)),
+      isolated_world_security_origin_(world_ && world_->IsIsolatedWorld()
+                                          ? world_->IsolatedWorldSecurityOrigin(
+                                                context->GetAgentClusterID())
+                                          : nullptr) {}
 
 XMLHttpRequest::~XMLHttpRequest() {
   binary_response_builder_ = nullptr;
@@ -352,7 +346,6 @@ void XMLHttpRequest::InitResponseDocument() {
   auto* document = To<LocalDOMWindow>(GetExecutionContext())->document();
   DocumentInit init = DocumentInit::Create()
                           .WithExecutionContext(GetExecutionContext())
-                          .WithOwnerDocument(document)
                           .WithURL(response_.ResponseUrl());
   if (is_html)
     response_document_ = MakeGarbageCollected<HTMLDocument>(init);
@@ -1053,16 +1046,17 @@ void XMLHttpRequest::CreateRequest(scoped_refptr<EncodedFormData> http_body,
   request.SetRequestorOrigin(GetExecutionContext()->GetSecurityOrigin());
   request.SetIsolatedWorldOrigin(isolated_world_security_origin_);
   request.SetHttpMethod(method_);
-  request.SetRequestContext(mojom::RequestContextType::XML_HTTP_REQUEST);
+  request.SetRequestContext(mojom::blink::RequestContextType::XML_HTTP_REQUEST);
+  request.SetFetchLikeAPI(true);
   request.SetMode(upload_events
                       ? network::mojom::RequestMode::kCorsWithForcedPreflight
                       : network::mojom::RequestMode::kCors);
   request.SetCredentialsMode(
       with_credentials_ ? network::mojom::CredentialsMode::kInclude
                         : network::mojom::CredentialsMode::kSameOrigin);
-  request.SetSkipServiceWorker(is_isolated_world_);
+  request.SetSkipServiceWorker(world_ && world_->IsIsolatedWorld());
   request.SetExternalRequestStateFromRequestorAddressSpace(
-      execution_context.GetSecurityContext().AddressSpace());
+      execution_context.AddressSpace());
   if (trust_token_params_)
     request.SetTrustTokenParams(*trust_token_params_);
 
@@ -1078,7 +1072,7 @@ void XMLHttpRequest::CreateRequest(scoped_refptr<EncodedFormData> http_body,
   if (request_headers_.size() > 0)
     request.AddHTTPHeaderFields(request_headers_);
 
-  ResourceLoaderOptions resource_loader_options;
+  ResourceLoaderOptions resource_loader_options(world_);
   resource_loader_options.initiator_info.name =
       fetch_initiator_type_names::kXmlhttprequest;
   if (blob_url_loader_factory_) {
@@ -1129,8 +1123,7 @@ void XMLHttpRequest::CreateRequest(scoped_refptr<EncodedFormData> http_body,
               WebFeature::kXMLHttpRequestSynchronousInSameOriginSubframe);
         }
       }
-      if (MainThreadDisallowSynchronousXHRScope::
-              ShouldDisallowSynchronousXHR() &&
+      if (PageDismissalScope::IsActive() &&
           !RuntimeEnabledFeatures::AllowSyncXHRInPageDismissalEnabled(
               &execution_context)) {
         HandleNetworkError();

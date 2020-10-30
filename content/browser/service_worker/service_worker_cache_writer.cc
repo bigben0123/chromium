@@ -9,9 +9,9 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
-#include "content/browser/service_worker/service_worker_disk_cache.h"
 #include "content/common/service_worker/service_worker_utils.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
+#include "net/base/completion_once_callback.h"
 #include "services/network/public/cpp/net_adapters.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 
@@ -164,7 +164,8 @@ int ServiceWorkerCacheWriter::DoLoop(int status) {
 ServiceWorkerCacheWriter::ServiceWorkerCacheWriter(
     mojo::Remote<storage::mojom::ServiceWorkerResourceReader> compare_reader,
     mojo::Remote<storage::mojom::ServiceWorkerResourceReader> copy_reader,
-    std::unique_ptr<ServiceWorkerResponseWriter> writer,
+    mojo::Remote<storage::mojom::ServiceWorkerResourceWriter> writer,
+    int64_t writer_resource_id,
     bool pause_when_not_identical)
     : state_(STATE_START),
       io_pending_(false),
@@ -172,28 +173,33 @@ ServiceWorkerCacheWriter::ServiceWorkerCacheWriter(
       pause_when_not_identical_(pause_when_not_identical),
       compare_reader_(std::move(compare_reader)),
       copy_reader_(std::move(copy_reader)),
-      writer_(std::move(writer)) {}
+      writer_(std::move(writer)),
+      writer_resource_id_(writer_resource_id) {}
 
 ServiceWorkerCacheWriter::~ServiceWorkerCacheWriter() {}
 
 std::unique_ptr<ServiceWorkerCacheWriter>
 ServiceWorkerCacheWriter::CreateForCopy(
     mojo::Remote<storage::mojom::ServiceWorkerResourceReader> copy_reader,
-    std::unique_ptr<ServiceWorkerResponseWriter> writer) {
+    mojo::Remote<storage::mojom::ServiceWorkerResourceWriter> writer,
+    int64_t writer_resource_id) {
   DCHECK(copy_reader);
   DCHECK(writer);
   mojo::Remote<storage::mojom::ServiceWorkerResourceReader> null_remote;
   return base::WrapUnique(new ServiceWorkerCacheWriter(
       std::move(null_remote) /* compare_reader */, std::move(copy_reader),
-      std::move(writer), false /* pause_when_not_identical*/));
+      std::move(writer), writer_resource_id,
+      false /* pause_when_not_identical*/));
 }
 
 std::unique_ptr<ServiceWorkerCacheWriter>
 ServiceWorkerCacheWriter::CreateForWriteBack(
-    std::unique_ptr<ServiceWorkerResponseWriter> writer) {
+    mojo::Remote<storage::mojom::ServiceWorkerResourceWriter> writer,
+    int64_t writer_resource_id) {
   DCHECK(writer);
   return base::WrapUnique(new ServiceWorkerCacheWriter(
       /*compare_reader=*/{}, /*copy_reader=*/{}, std::move(writer),
+      writer_resource_id,
       /* pause_when_not_identical=*/false));
 }
 
@@ -201,7 +207,8 @@ std::unique_ptr<ServiceWorkerCacheWriter>
 ServiceWorkerCacheWriter::CreateForComparison(
     mojo::Remote<storage::mojom::ServiceWorkerResourceReader> compare_reader,
     mojo::Remote<storage::mojom::ServiceWorkerResourceReader> copy_reader,
-    std::unique_ptr<ServiceWorkerResponseWriter> writer,
+    mojo::Remote<storage::mojom::ServiceWorkerResourceWriter> writer,
+    int64_t writer_resource_id,
     bool pause_when_not_identical) {
   // |compare_reader| reads data for the comparison. |copy_reader| reads
   // data for copy.
@@ -210,7 +217,7 @@ ServiceWorkerCacheWriter::CreateForComparison(
   DCHECK(writer);
   return base::WrapUnique(new ServiceWorkerCacheWriter(
       std::move(compare_reader), std::move(copy_reader), std::move(writer),
-      pause_when_not_identical));
+      writer_resource_id, pause_when_not_identical));
 }
 
 net::Error ServiceWorkerCacheWriter::MaybeWriteHeaders(
@@ -344,9 +351,9 @@ bool ServiceWorkerCacheWriter::IsCopying() const {
   return !compare_reader_ && copy_reader_;
 }
 
-int64_t ServiceWorkerCacheWriter::WriterResourceId() const {
-  DCHECK(writer_);
-  return writer_->response_id();
+int64_t ServiceWorkerCacheWriter::writer_resource_id() const {
+  DCHECK_NE(writer_resource_id_, blink::mojom::kInvalidServiceWorkerResourceId);
+  return writer_resource_id_;
 }
 
 int ServiceWorkerCacheWriter::DoStart(int result) {
@@ -496,10 +503,11 @@ int ServiceWorkerCacheWriter::DoWriteHeadersForCopy(int result) {
   state_ = STATE_WRITE_HEADERS_FOR_COPY_DONE;
   if (IsCopying()) {
     DCHECK(response_head_to_read_);
-    return WriteResponseHead(*response_head_to_read_);
+    bytes_to_copy_ = response_head_to_read_->content_length;
+    return WriteResponseHead(std::move(response_head_to_read_));
   } else {
     DCHECK(response_head_to_write_);
-    return WriteResponseHead(*response_head_to_write_);
+    return WriteResponseHead(std::move(response_head_to_write_));
   }
 }
 
@@ -517,8 +525,7 @@ int ServiceWorkerCacheWriter::DoReadDataForCopy(int result) {
 
   // If the cache writer is only for copy, get the total size to read from
   // header data instead of |bytes_compared_| as no comparison is done.
-  size_t total_size_to_read =
-      IsCopying() ? response_head_to_read_->content_length : bytes_compared_;
+  size_t total_size_to_read = IsCopying() ? bytes_to_copy_ : bytes_compared_;
   size_t to_read =
       std::min(kCopyBufferSize, total_size_to_read - bytes_copied_);
 
@@ -568,7 +575,7 @@ int ServiceWorkerCacheWriter::DoWriteHeadersForPassthrough(int result) {
   DCHECK(writer_);
   DCHECK(response_head_to_write_);
   state_ = STATE_WRITE_HEADERS_FOR_PASSTHROUGH_DONE;
-  return WriteResponseHead(*response_head_to_write_);
+  return WriteResponseHead(std::move(response_head_to_write_));
 }
 
 int ServiceWorkerCacheWriter::DoWriteHeadersForPassthroughDone(int result) {
@@ -617,7 +624,8 @@ int ServiceWorkerCacheWriter::ReadResponseHead(
   return adapter->result();
 }
 
-class ServiceWorkerCacheWriter::DataPipeReader {
+class ServiceWorkerCacheWriter::DataPipeReader
+    : public storage::mojom::ServiceWorkerDataPipeStateNotifier {
  public:
   DataPipeReader(storage::mojom::ServiceWorkerResourceReader* reader,
                  ServiceWorkerCacheWriter* owner,
@@ -639,8 +647,9 @@ class ServiceWorkerCacheWriter::DataPipeReader {
     if (!data_.is_valid()) {
       // This is the initial call of Read(). Call ReadData() to get a data pipe
       // to read the body.
+      DCHECK(!receiver_.is_bound());
       reader_->ReadData(
-          -1,
+          -1, receiver_.BindNewPipeAndPassRemote(),
           base::BindOnce(&ServiceWorkerCacheWriter::DataPipeReader::OnReadData,
                          weak_factory_.GetWeakPtr()));
       return;
@@ -678,6 +687,11 @@ class ServiceWorkerCacheWriter::DataPipeReader {
     ReadInternal(MOJO_RESULT_OK);
   }
 
+  // storage::mojom::ServiceWorkerDataPipeStateNotifier override:
+  void OnComplete(int32_t status) override {
+    // TODO(https://crbug.com/1055677): notify of errors.
+  }
+
   // Parameters set on Read().
   net::IOBuffer* buffer_ = nullptr;
   uint32_t num_bytes_to_read_ = 0;
@@ -693,6 +707,9 @@ class ServiceWorkerCacheWriter::DataPipeReader {
   mojo::ScopedDataPipeConsumerHandle data_;
   mojo::SimpleWatcher watcher_;
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
+
+  mojo::Receiver<storage::mojom::ServiceWorkerDataPipeStateNotifier> receiver_{
+      this};
 
   base::WeakPtrFactory<DataPipeReader> weak_factory_{this};
 };
@@ -713,15 +730,15 @@ int ServiceWorkerCacheWriter::ReadDataHelper(
 }
 
 int ServiceWorkerCacheWriter::WriteResponseHeadToResponseWriter(
-    const network::mojom::URLResponseHead& response_head,
-    int response_data_size) {
+    network::mojom::URLResponseHeadPtr response_head) {
+  DCHECK(response_head);
   did_replace_ = true;
   net::CompletionOnceCallback run_callback = base::BindOnce(
       &ServiceWorkerCacheWriter::AsyncDoLoop, weak_factory_.GetWeakPtr());
   scoped_refptr<AsyncOnlyCompletionCallbackAdaptor> adaptor(
       new AsyncOnlyCompletionCallbackAdaptor(std::move(run_callback)));
   writer_->WriteResponseHead(
-      response_head, response_data_size,
+      std::move(response_head),
       base::BindOnce(&AsyncOnlyCompletionCallbackAdaptor::WrappedCallback,
                      adaptor));
   adaptor->set_async(true);
@@ -729,17 +746,17 @@ int ServiceWorkerCacheWriter::WriteResponseHeadToResponseWriter(
 }
 
 int ServiceWorkerCacheWriter::WriteResponseHead(
-    const network::mojom::URLResponseHead& response_head) {
+    network::mojom::URLResponseHeadPtr response_head) {
+  DCHECK(response_head);
   if (write_observer_) {
-    int result = write_observer_->WillWriteResponseHead(response_head);
+    int result = write_observer_->WillWriteResponseHead(*response_head);
     if (result != net::OK) {
       DCHECK_NE(result, net::ERR_IO_PENDING);
       state_ = STATE_DONE;
       return result;
     }
   }
-  return WriteResponseHeadToResponseWriter(response_head,
-                                           response_head.content_length);
+  return WriteResponseHeadToResponseWriter(std::move(response_head));
 }
 
 int ServiceWorkerCacheWriter::WriteDataToResponseWriter(
@@ -749,8 +766,10 @@ int ServiceWorkerCacheWriter::WriteDataToResponseWriter(
       &ServiceWorkerCacheWriter::AsyncDoLoop, weak_factory_.GetWeakPtr());
   scoped_refptr<AsyncOnlyCompletionCallbackAdaptor> adaptor(
       new AsyncOnlyCompletionCallbackAdaptor(std::move(run_callback)));
+  mojo_base::BigBuffer big_buffer(
+      base::as_bytes(base::make_span(data->data(), length)));
   writer_->WriteData(
-      data.get(), length,
+      std::move(big_buffer),
       base::BindOnce(&AsyncOnlyCompletionCallbackAdaptor::WrappedCallback,
                      adaptor));
   adaptor->set_async(true);

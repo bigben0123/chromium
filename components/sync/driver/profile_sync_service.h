@@ -19,6 +19,7 @@
 #include "base/sequenced_task_runner.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "components/invalidation/public/identity_provider.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/sync/base/model_type.h"
@@ -55,10 +56,6 @@ namespace syncer {
 
 class BackendMigrator;
 class SyncAuthManager;
-class TypeDebugInfoObserver;
-struct CommitCounters;
-struct StatusCounters;
-struct UpdateCounters;
 
 // Look at the SyncService interface for information on how to use this class.
 // You should not need to know about ProfileSyncService directly.
@@ -95,8 +92,6 @@ class ProfileSyncService : public SyncService,
     network::NetworkConnectionTracker* network_connection_tracker = nullptr;
     version_info::Channel channel = version_info::Channel::UNKNOWN;
     std::string debug_identifier;
-    bool autofill_enable_account_wallet_storage = false;
-    bool enable_passwords_account_storage = false;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(InitParams);
@@ -125,7 +120,6 @@ class ProfileSyncService : public SyncService,
   std::unique_ptr<SyncSetupInProgressHandle> GetSetupInProgressHandle()
       override;
   bool IsSetupInProgress() const override;
-  ModelTypeSet GetRegisteredDataTypes() const override;
   ModelTypeSet GetPreferredDataTypes() const override;
   ModelTypeSet GetActiveDataTypes() const override;
   ModelTypeSet GetBackedOffDataTypes() const override;
@@ -138,8 +132,10 @@ class ProfileSyncService : public SyncService,
       const std::string& gaia_id,
       const std::vector<std::vector<uint8_t>>& keys,
       int last_key_version) override;
-  UserDemographicsResult GetUserNoisedBirthYearAndGender(
-      base::Time now) override;
+  void AddTrustedVaultRecoveryMethodFromWeb(
+      const std::string& gaia_id,
+      const std::vector<uint8_t>& public_key,
+      base::OnceClosure callback) override;
   void AddObserver(SyncServiceObserver* observer) override;
   void RemoveObserver(SyncServiceObserver* observer) override;
   bool HasObserver(const SyncServiceObserver* observer) const override;
@@ -148,13 +144,14 @@ class ProfileSyncService : public SyncService,
   base::Time GetLastSyncedTimeForDebugging() const override;
   SyncCycleSnapshot GetLastCycleSnapshotForDebugging() const override;
   std::unique_ptr<base::Value> GetTypeStatusMapForDebugging() override;
+  void GetEntityCountsForDebugging(
+      base::OnceCallback<void(const std::vector<TypeEntitiesCount>&)> callback)
+      const override;
   const GURL& GetSyncServiceUrlForDebugging() const override;
   std::string GetUnrecoverableErrorMessageForDebugging() const override;
   base::Location GetUnrecoverableErrorLocationForDebugging() const override;
   void AddProtocolEventObserver(ProtocolEventObserver* observer) override;
   void RemoveProtocolEventObserver(ProtocolEventObserver* observer) override;
-  void AddTypeDebugInfoObserver(TypeDebugInfoObserver* observer) override;
-  void RemoveTypeDebugInfoObserver(TypeDebugInfoObserver* observer) override;
   base::WeakPtr<JsController> GetJsController() override;
   void GetAllNodesForDebugging(
       base::OnceCallback<void(std::unique_ptr<base::ListValue>)> callback)
@@ -170,14 +167,6 @@ class ProfileSyncService : public SyncService,
       bool success) override;
   void OnSyncCycleCompleted(const SyncCycleSnapshot& snapshot) override;
   void OnProtocolEvent(const ProtocolEvent& event) override;
-  void OnDirectoryTypeCommitCounterUpdated(
-      ModelType type,
-      const CommitCounters& counters) override;
-  void OnDirectoryTypeUpdateCounterUpdated(
-      ModelType type,
-      const UpdateCounters& counters) override;
-  void OnDatatypeStatusCounterUpdated(ModelType type,
-                                      const StatusCounters& counters) override;
   void OnConnectionStatusChange(ConnectionStatus status) override;
   void OnMigrationNeededForTypes(ModelTypeSet types) override;
   void OnActionableError(const SyncProtocolError& error) override;
@@ -216,6 +205,16 @@ class ProfileSyncService : public SyncService,
   bool IsPassphrasePrompted() const;
   void SetPassphrasePrompted(bool prompted);
 
+#if defined(OS_ANDROID)
+  // Persists the fact that sync should no longer respect whether Android master
+  // sync is enabled. Only called on Android.
+  void SetDecoupledFromAndroidMasterSync();
+
+  // Gets the persisted information of whether sync should no longer respect
+  // if Android master sync is enabled. Only called on Android.
+  bool GetDecoupledFromAndroidMasterSync();
+#endif  // defined(OS_ANDROID)
+
   // Returns whether or not the underlying sync engine has made any
   // local changes to items that have not yet been synced with the
   // server.
@@ -237,10 +236,9 @@ class ProfileSyncService : public SyncService,
   void OverrideNetworkForTest(const CreateHttpPostProviderFactory&
                                   create_http_post_provider_factory_cb);
 
-  bool IsDataTypeControllerRunningForTest(ModelType type) const;
+  ModelTypeSet GetRegisteredDataTypesForTest() const;
 
-  // Sometimes we need to wait for tasks on the |backend_task_runner_| in tests.
-  void FlushBackendTaskRunnerForTest() const;
+  bool IsDataTypeControllerRunningForTest(ModelType type) const;
 
   // Some tests rely on injecting calls to the encryption observer.
   SyncEncryptionHandler::Observer* GetEncryptionObserverForTest();
@@ -278,7 +276,11 @@ class ProfileSyncService : public SyncService,
   // Callbacks for SyncUserSettingsImpl.
   void SyncAllowedByPlatformChanged(bool allowed);
 
-  bool IsEngineAllowedToStart() const;
+  bool IsEngineAllowedToRun() const;
+
+  // Same as GetTransportState() returning PAUSED. In this state, the engine
+  // shouldn't run.
+  bool IsInPausedState() const;
 
   // Reconfigures the data type manager with the latest enabled types.
   // Note: Does not initialize the engine if it is not already initialized.
@@ -290,9 +292,22 @@ class ProfileSyncService : public SyncService,
   // Helper to install and configure a data type manager.
   void ConfigureDataTypeManager(ConfigureReason reason);
 
+  bool UseTransportOnlyMode() const;
+
+  // Returns the set of data types that are supported in principle, possibly
+  // influenced by command-line options.
+  ModelTypeSet GetRegisteredDataTypes() const;
+
   // Returns the ModelTypes allowed in transport-only mode (i.e. those that are
   // not tied to sync-the-feature).
   ModelTypeSet GetModelTypesForTransportOnlyMode() const;
+
+  // If in transport-only mode, returns only preferred data types which are
+  // allowed in transport-only mode. Otherwise, returns all preferred data
+  // types.
+  ModelTypeSet GetDataTypesToConfigure() const;
+
+  void UpdateDataTypesForInvalidations();
 
   // Shuts down the engine sync components.
   // |reason| dictates if syncing is being disabled or not.
@@ -323,10 +338,6 @@ class ProfileSyncService : public SyncService,
 
   void ClearUnrecoverableError();
 
-  // Initializes |backend_task_runner_| which is backed by |sync_thread_| or the
-  // ThreadPool depending on the ProfileSyncServiceUsesThreadPool experiment.
-  void InitializeBackendTaskRunnerIfNeeded();
-
   // Kicks off asynchronous initialization of the SyncEngine.
   void StartUpSlowEngineComponents();
 
@@ -339,8 +350,9 @@ class ProfileSyncService : public SyncService,
   // Tell the sync server that this client has disabled sync.
   void RemoveClientFromServer() const;
 
-  // Estimates and records memory usage histograms per type.
-  void RecordMemoryUsageHistograms();
+  // Records per type histograms for estimated memory usage and number of
+  // entities.
+  void RecordMemoryUsageAndCountsHistograms();
 
   // True if setup has been completed at least once and is not in progress.
   bool CanConfigureDataTypes(bool bypass_setup_in_progress_check) const;
@@ -354,7 +366,8 @@ class ProfileSyncService : public SyncService,
   // Called by SyncServiceCrypto when its required user action changes.
   void OnRequiredUserActionChanged();
 
-  std::string GetExperimentalAuthenticationSecret() const;
+  // Helper function to prevent future bugs that avoid notyfing while clearing.
+  void ClearLocalTransportDataAndNotify();
 
   // This profile's SyncClient, which abstracts away non-Sync dependencies and
   // the Sync API component factory.
@@ -380,22 +393,11 @@ class ProfileSyncService : public SyncService,
   // An identifier representing this instance for debugging purposes.
   const std::string debug_identifier_;
 
-  const bool autofill_enable_account_wallet_storage_;
-  const bool enable_passwords_account_storage_;
-
   // This specifies where to find the sync server.
   const GURL sync_service_url_;
 
   // A utility object containing logic and state relating to encryption.
   SyncServiceCrypto crypto_;
-
-  // Owns the sync thread and takes care of its destruction.
-  // TODO(https://crbug.com/1014464): Remove once we have switched to
-  // Threadpool.
-  base::OnceClosure sync_thread_stopper_;
-
-  // TODO(crbug.com/923287): Move out of this class. Possibly to SyncEngineImpl.
-  scoped_refptr<base::SequencedTaskRunner> backend_task_runner_;
 
   // Our asynchronous engine to communicate with sync components living on
   // other threads.
@@ -442,8 +444,6 @@ class ProfileSyncService : public SyncService,
   base::ObserverList<SyncServiceObserver>::Unchecked observers_;
   base::ObserverList<ProtocolEventObserver>::Unchecked
       protocol_event_observers_;
-  base::ObserverList<TypeDebugInfoObserver>::Unchecked
-      type_debug_info_observers_;
 
   SyncJsController sync_js_controller_;
 
@@ -492,6 +492,11 @@ class ProfileSyncService : public SyncService,
   // histogram needs to recorded. Set to false iff histogram was already
   // recorded or trusted vault passphrase type wasn't used on startup.
   bool should_record_trusted_vault_error_shown_on_startup_;
+
+  // Whether we want to receive invalidations for the SESSIONS data type. This
+  // is typically false on Android (to save network traffic), but true on all
+  // other platforms.
+  bool sessions_invalidations_enabled_;
 
   // This weak factory invalidates its issued pointers when Sync is disabled.
   base::WeakPtrFactory<ProfileSyncService> sync_enabled_weak_factory_{this};

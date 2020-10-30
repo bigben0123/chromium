@@ -43,42 +43,29 @@
 #include "services/network/public/mojom/referrer_policy.mojom-shared.h"
 #include "third_party/blink/public/common/input/web_coalesced_input_event.h"
 #include "third_party/blink/public/common/input/web_gesture_event.h"
-#include "third_party/blink/public/common/page/web_drag_operation.h"
+#include "third_party/blink/public/common/page/drag_operation.h"
+#include "third_party/blink/public/common/widget/device_emulation_params.h"
+#include "third_party/blink/public/common/widget/screen_info.h"
 #include "third_party/blink/public/mojom/input/input_handler.mojom-shared.h"
 #include "third_party/blink/public/mojom/input/pointer_lock_result.mojom-forward.h"
 #include "third_party/blink/public/platform/cross_variant_mojo_util.h"
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_rect.h"
-#include "third_party/blink/public/platform/web_screen_info.h"
 #include "third_party/blink/public/platform/web_text_input_type.h"
 #include "third_party/blink/public/platform/web_touch_action.h"
-#include "third_party/blink/public/web/web_meaningful_layout.h"
-#include "third_party/blink/public/web/web_navigation_policy.h"
 
 class SkBitmap;
 
-namespace cc {
-class PaintImage;
-}
-
 namespace gfx {
 class Point;
-class PointF;
 }
 
 namespace ui {
 class Cursor;
-struct ImeTextSpan;
 }
 
 namespace blink {
 class WebDragData;
-class WebMouseEvent;
-class WebGestureEvent;
-struct WebFloatRect;
-class WebWidget;
-class WebLocalFrame;
-class WebString;
 
 class WebWidgetClient {
  public:
@@ -95,114 +82,26 @@ class WebWidgetClient {
   // will unconditionally ensure that the compositor is actually run.
   virtual void ScheduleAnimationForWebTests() {}
 
-  // Called immediately following the first compositor-driven (frame-generating)
-  // layout that happened after an interesting document lifecyle change (see
-  // WebMeaningfulLayout for details.)
-  virtual void DidMeaningfulLayout(WebMeaningfulLayout) {}
-
   // Called when the cursor for the widget changes.
   virtual void DidChangeCursor(const ui::Cursor&) {}
 
-  // Called to show the widget according to the given policy.
-  virtual void Show(WebNavigationPolicy) {}
+  // Allocates a LayerTreeFrameSink to submit CompositorFrames to. Only
+  // override this method if you wish to provide your own implementation
+  // of LayerTreeFrameSinks (usually for tests). If this method returns null
+  // a frame sink will be requested from the browser process (ie. default flow).
+  virtual std::unique_ptr<cc::LayerTreeFrameSink>
+  AllocateNewLayerTreeFrameSink() {
+    return nullptr;
+  }
 
-  // Returns information about the screen where this view's widgets are being
-  // displayed.
-  virtual WebScreenInfo GetScreenInfo() { return {}; }
-
-  // Called to get/set the position of the widget's window in screen
-  // coordinates. Note, the window includes any decorations such as borders,
-  // scrollbars, URL bar, tab strip, etc. if they exist.
-  virtual WebRect WindowRect() { return WebRect(); }
-  virtual void SetWindowRect(const WebRect&) {}
-
-  // Called to get the view rect in screen coordinates. This is the actual
-  // content view area, i.e. doesn't include any window decorations.
-  virtual WebRect ViewRect() { return WebRect(); }
-
-  // Requests to lock the mouse cursor for the |requester_frame| in the
-  // widget. If true is returned, the success result will be asynchronously
-  // returned via a single call to WebWidget::didAcquirePointerLock() or
-  // WebWidget::didNotAcquirePointerLock() and a single call to the callback.
-  // If false, the request has been denied synchronously.
-  using PointerLockCallback =
-      base::OnceCallback<void(mojom::PointerLockResult)>;
-  virtual bool RequestPointerLock(WebLocalFrame* requester_frame,
-                                  PointerLockCallback callback,
-                                  bool request_unadjusted_movement) {
+  // Called when a drag-and-drop operation should begin. Returns whether the
+  // call has been handled.
+  virtual bool InterceptStartDragging(const WebDragData&,
+                                      DragOperationsMask,
+                                      const SkBitmap& drag_image,
+                                      const gfx::Point& drag_image_offset) {
     return false;
   }
-
-  virtual bool RequestPointerLockChange(WebLocalFrame* requester_frame,
-                                        PointerLockCallback callback,
-                                        bool request_unadjusted_movement) {
-    return false;
-  }
-
-  // Cause the pointer lock to be released. This may be called at any time,
-  // including when a lock is pending but not yet acquired.
-  // WebWidget::didLosePointerLock() is called when unlock is complete.
-  virtual void RequestPointerUnlock() {}
-
-  // Returns true iff the pointer is locked to this widget.
-  virtual bool IsPointerLocked() { return false; }
-
-  // Converts the |rect| from Blink's Viewport coordinates to the
-  // coordinates in the native window used to display the content, in
-  // DIP.  They're identical in tradional world, but will differ when
-  // use-zoom-for-dsf feature is eanbled, and Viewport coordinates
-  // becomes DSF times larger than window coordinates.
-  // TODO(oshima): Update the comment when the migration is completed.
-  virtual void ConvertViewportToWindow(WebRect* rect) {}
-
-  // Converts the |rect| from Blink's Viewport coordinates to the
-  // coordinates in the native window used to display the content, in
-  // DIP.  They're identical in tradional world, but will differ when
-  // use-zoom-for-dsf feature is eanbled, and Viewport coordinates
-  // becomes DSF times larger than window coordinates.
-  // TODO(oshima): Update the comment when the migration is completed.
-  virtual void ConvertViewportToWindow(WebFloatRect* rect) {}
-
-  // Converts the |rect| from the coordinates in native window in
-  // DIP to Blink's Viewport coordinates. They're identical in
-  // tradional world, but will differ when use-zoom-for-dsf feature
-  // is eanbled.  TODO(oshima): Update the comment when the
-  // migration is completed.
-  virtual void ConvertWindowToViewport(WebFloatRect* rect) {}
-  virtual gfx::Point ConvertWindowPointToViewport(const gfx::Point& point) {
-    return point;
-  }
-  virtual gfx::PointF ConvertWindowPointToViewport(const gfx::PointF& point) {
-    return point;
-  }
-
-  // Called when a drag-and-drop operation should begin.
-  virtual void StartDragging(network::mojom::ReferrerPolicy,
-                             const WebDragData&,
-                             WebDragOperationsMask,
-                             const SkBitmap& drag_image,
-                             const gfx::Point& drag_image_offset) {}
-
-  // Sets the current page scale factor and minimum / maximum limits. Both
-  // limits are initially 1 (no page scale allowed).
-  virtual void SetPageScaleStateAndLimits(float page_scale_factor,
-                                          bool is_pinch_gesture_active,
-                                          float minimum,
-                                          float maximum) {}
-
-  // Requests an image decode and will have the |callback| run asynchronously
-  // when it completes. Forces a new main frame to occur that will trigger
-  // pushing the decode through the compositor.
-  virtual void RequestDecode(const cc::PaintImage& image,
-                             base::OnceCallback<void(bool)> callback) {}
-
-  using LayerTreeFrameSinkCallback = base::OnceCallback<void(
-      std::unique_ptr<cc::LayerTreeFrameSink>,
-      std::unique_ptr<cc::RenderFrameMetadataObserver>)>;
-
-  // Requests a LayerTreeFrameSink to submit CompositorFrames to.
-  virtual void RequestNewLayerTreeFrameSink(
-      LayerTreeFrameSinkCallback callback) {}
 
   virtual viz::FrameSinkId GetFrameSinkId() {
     NOTREACHED();
@@ -217,89 +116,16 @@ class WebWidgetClient {
   // perform actual painting work.
   virtual void WillBeginMainFrame() {}
 
-  // Notification that the BeginMainFrame completed, was committed into the
-  // compositor (thread) and submitted to the display compositor.
-  virtual void DidCommitAndDrawCompositorFrame() {}
-
-  // Notification that page scale animation was changed.
-  virtual void DidCompletePageScaleAnimation() {}
-
-  // Notification that the output of a BeginMainFrame was committed to the
-  // compositor (thread), though would not be submitted to the display
-  // compositor yet (see DidCommitAndDrawCompositorFrame()).
-  virtual void DidCommitCompositorFrame(base::TimeTicks commit_start_time) {}
-
   // Notifies that the layer tree host has completed a call to
   // RequestMainFrameUpdate in response to a BeginMainFrame.
   virtual void DidBeginMainFrame() {}
 
-  // Record the time it took for the first paint after the widget transitioned
-  // from background inactive to active.
-  virtual void RecordTimeToFirstActivePaint(base::TimeDelta duration) {}
-
-  // Returns a scale of the device emulator from the widget.
-  virtual float GetEmulatorScale() const { return 1.0f; }
-
-  // Returns whether we handled a GestureScrollEvent.
-  virtual void DidHandleGestureScrollEvent(
-      const WebGestureEvent& gesture_event,
-      const gfx::Vector2dF& unused_delta,
-      const cc::OverscrollBehavior& overscroll_behavior,
-      bool event_processed) {}
-
-  // Called before gesture events are processed and allows the
-  // client to handle the event itself. Return true if event was handled
-  // and further processing should stop.
-  virtual bool WillHandleGestureEvent(const WebGestureEvent& event) {
-    return false;
-  }
-
-  // Called before mouse events are processed and allows the
-  // client to handle the event itself. Return true if event was handled
-  // and further processing should stop.
-  virtual bool WillHandleMouseEvent(const WebMouseEvent& event) {
-    return false;
-  }
-
-  // Determines whether composition can happen inline.
-  virtual bool CanComposeInline() { return false; }
-
-  // Determines if IME events should be sent to Pepper instead of processed to
-  // the currently focused frame.
-  virtual bool ShouldDispatchImeEventsToPepper() { return false; }
-
-  // Returns the current pepper text input type.
-  virtual WebTextInputType GetPepperTextInputType() {
-    return WebTextInputType::kWebTextInputTypeNone;
-  }
-
-  // Returns the current pepper caret bounds in window coordinates.
-  virtual gfx::Rect GetPepperCaretBounds() { return gfx::Rect(); }
-
-  // The state of the focus has changed for the WebWidget. |enabled|
-  // is the new state.
-  virtual void FocusChanged(bool enabled) {}
-
-  // Set the composition in pepper.
-  virtual void ImeSetCompositionForPepper(
-      const WebString& text,
-      const std::vector<ui::ImeTextSpan>& ime_text_spans,
-      const gfx::Range& replacement_range,
-      int selection_start,
-      int selection_end) {}
-
-  // Commit the text to pepper.
-  virtual void ImeCommitTextForPepper(
-      const WebString& text,
-      const std::vector<ui::ImeTextSpan>& ime_text_spans,
-      const gfx::Range& replacement_range,
-      int relative_cursor_pos) {}
-
-  // Indicate composition is complete to pepper.
-  virtual void ImeFinishComposingTextForPepper(bool keep_selection) {}
-
   // Called to indicate a syntehtic event was queued.
   virtual void WillQueueSyntheticEvent(const WebCoalescedInputEvent& event) {}
+
+  // Whether compositing to LCD text should be auto determined. This can be
+  // overridden by tests to disable this.
+  virtual bool ShouldAutoDetermineCompositingToLCDTextSetting() { return true; }
 };
 
 }  // namespace blink

@@ -123,7 +123,7 @@ class StyleBuilderConverter {
       StyleResolverState&,
       const CSSValue&);
   static scoped_refptr<FontVariationSettings> ConvertFontVariationSettings(
-      StyleResolverState&,
+      const StyleResolverState&,
       const CSSValue&);
   static FontDescription::Size ConvertFontSize(StyleResolverState&,
                                                const CSSValue&);
@@ -156,8 +156,8 @@ class StyleBuilderConverter {
   static GridPosition ConvertGridPosition(StyleResolverState&, const CSSValue&);
   static GridTrackSize ConvertGridTrackSize(StyleResolverState&,
                                             const CSSValue&);
-  static Vector<GridTrackSize> ConvertGridTrackSizeList(StyleResolverState&,
-                                                        const CSSValue&);
+  static GridTrackList ConvertGridTrackSizeList(StyleResolverState&,
+                                                const CSSValue&);
   template <typename T>
   static T ConvertLineWidth(StyleResolverState&, const CSSValue&);
   static float ConvertBorderWidth(StyleResolverState&, const CSSValue&);
@@ -201,7 +201,6 @@ class StyleBuilderConverter {
   static StyleColor ConvertStyleColor(StyleResolverState&,
                                       const CSSValue&,
                                       bool for_visited_link = false);
-  static CSSValueID ConvertCSSValueID(StyleResolverState&, const CSSValue&);
   static StyleAutoColor ConvertStyleAutoColor(StyleResolverState&,
                                               const CSSValue&,
                                               bool for_visited_link = false);
@@ -227,7 +226,7 @@ class StyleBuilderConverter {
 
   static void ConvertGridTrackList(
       const CSSValue&,
-      Vector<GridTrackSize>&,
+      GridTrackList&,
       NamedGridLinesMap&,
       OrderedNamedGridLines&,
       Vector<GridTrackSize>& auto_repeat_track_sizes,
@@ -280,9 +279,11 @@ class StyleBuilderConverter {
 
   static LengthSize ConvertIntrinsicSize(StyleResolverState&, const CSSValue&);
 
-  static base::Optional<IntSize> ConvertAspectRatio(StyleResolverState&,
-                                                    const CSSValue&);
+  static StyleAspectRatio ConvertAspectRatio(StyleResolverState&,
+                                             const CSSValue&);
 
+  static bool ConvertInternalAlignSelfBlock(StyleResolverState& state,
+                                            const CSSValue& value);
   static bool ConvertInternalEmptyLineHeight(StyleResolverState& state,
                                              const CSSValue& value);
 
@@ -293,6 +294,9 @@ class StyleBuilderConverter {
 
   static ScrollbarGutter ConvertScrollbarGutter(StyleResolverState& state,
                                                 const CSSValue& value);
+
+  static void CountSystemColorComputeToSelfUsage(
+      const StyleResolverState& state);
 };
 
 template <typename T>

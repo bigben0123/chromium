@@ -5,6 +5,7 @@
 #include "ash/assistant/ui/main_stage/assistant_onboarding_view.h"
 
 #include <memory>
+#include <queue>
 #include <string>
 #include <utility>
 #include <vector>
@@ -12,6 +13,9 @@
 #include "ash/assistant/model/assistant_suggestions_model.h"
 #include "ash/assistant/model/assistant_ui_model.h"
 #include "ash/assistant/test/assistant_ash_test_base.h"
+#include "ash/assistant/ui/main_stage/assistant_onboarding_suggestion_view.h"
+#include "ash/assistant/ui/test_support/mock_assistant_view_delegate.h"
+#include "ash/assistant/util/test_support/macros.h"
 #include "ash/public/cpp/assistant/controller/assistant_suggestions_controller.h"
 #include "ash/public/cpp/assistant/controller/assistant_ui_controller.h"
 #include "ash/public/cpp/session/session_types.h"
@@ -25,9 +29,14 @@
 #include "base/unguessable_token.h"
 #include "chromeos/services/assistant/public/cpp/assistant_service.h"
 #include "chromeos/services/assistant/public/cpp/features.h"
+#include "chromeos/ui/vector_icons/vector_icons.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/gfx/image/image_unittest_util.h"
+#include "ui/gfx/paint_vector_icon.h"
+#include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/view_utils.h"
 
 namespace ash {
 
@@ -42,12 +51,27 @@ using chromeos::assistant::AssistantSuggestionType;
 
 // Helpers ---------------------------------------------------------------------
 
+AssistantSuggestion CreateSuggestionWithIconUrl(const std::string& icon_url) {
+  AssistantSuggestion suggestion;
+  suggestion.icon_url = GURL(icon_url);
+  return suggestion;
+}
+
 template <typename T>
-void FindChildByClassName(views::View* parent, T** result) {
+void FindDescendentByClassName(views::View* parent, T** result) {
   DCHECK_EQ(nullptr, *result);
-  for (auto* child : parent->children()) {
-    if (child->GetClassName() == T::kViewClassName)
-      *result = static_cast<T*>(child);
+  std::queue<views::View*> children({parent});
+  while (!children.empty()) {
+    auto* candidate = children.front();
+    children.pop();
+
+    if (views::IsViewClass<T>(candidate)) {
+      *result = static_cast<T*>(candidate);
+      return;
+    }
+
+    for (auto* child : candidate->children())
+      children.push(child);
   }
 }
 
@@ -135,10 +159,6 @@ class AssistantOnboardingViewTest : public AssistantAshTestBase {
     return static_cast<views::Label*>(onboarding_view()->children().at(1));
   }
 
-  views::View* suggestions_grid() {
-    return onboarding_view()->children().at(2);
-  }
-
  private:
   base::test::ScopedRestoreICUDefaultLocale locale_{"en_US"};
   base::test::ScopedFeatureList feature_list_;
@@ -149,90 +169,111 @@ class AssistantOnboardingViewTest : public AssistantAshTestBase {
 // Tests -----------------------------------------------------------------------
 
 TEST_F(AssistantOnboardingViewTest, ShouldHaveExpectedGreeting) {
-  // Cache the expected given name.
-  const std::string given_name = Shell::Get()
-                                     ->session_controller()
-                                     ->GetPrimaryUserSession()
-                                     ->user_info.given_name;
+  struct ExpectedGreeting {
+    std::string for_morning;
+    std::string for_afternoon;
+    std::string for_evening;
+    std::string for_night;
+  };
 
-  // Advance clock to midnight tomorrow.
-  AdvanceClock(base::Time::Now().LocalMidnight() +
-               base::TimeDelta::FromHours(24) - base::Time::Now());
+  struct TestCase {
+    std::string display_email;
+    std::string given_name;
+    ExpectedGreeting expected_greeting;
+  };
 
-  {
-    // Verify 4:59 AM.
-    AdvanceClock(base::TimeDelta::FromHours(4) +
-                 base::TimeDelta::FromMinutes(59));
-    ScopedShowUi scoped_show_ui;
-    EXPECT_EQ(greeting_label()->GetText(),
-              base::UTF8ToUTF16(
-                  base::StringPrintf("Good night %s,", given_name.c_str())));
-  }
+  const std::vector<TestCase> test_cases = {
+      TestCase{/*display_email=*/"empty@test",
+               /*given_name=*/std::string(),
+               ExpectedGreeting{
+                   /*for_morning=*/"Good morning,",
+                   /*for_afternoon=*/"Good afternoon,",
+                   /*for_evening=*/"Good evening,",
+                   /*for_night=*/"Good night,",
+               }},
+      TestCase{/*display_email=*/"david@test",
+               /*given_name=*/"David",
+               ExpectedGreeting{
+                   /*for_morning=*/"Good morning David,",
+                   /*for_afternoon=*/"Good afternoon David,",
+                   /*for_evening=*/"Good evening David,",
+                   /*for_night=*/"Good night David,",
+               }}};
 
-  {
-    // Verify 5:00 AM.
-    AdvanceClock(base::TimeDelta::FromMinutes(1));
-    ScopedShowUi scoped_show_ui;
-    EXPECT_EQ(greeting_label()->GetText(),
-              base::UTF8ToUTF16(
-                  base::StringPrintf("Good morning %s,", given_name.c_str())));
-  }
+  for (const auto& test_case : test_cases) {
+    CreateAndSwitchActiveUser(test_case.display_email, test_case.given_name);
 
-  {
-    // Verify 11:59 AM.
-    AdvanceClock(base::TimeDelta::FromHours(6) +
-                 base::TimeDelta::FromMinutes(59));
-    ScopedShowUi scoped_show_ui;
-    EXPECT_EQ(greeting_label()->GetText(),
-              base::UTF8ToUTF16(
-                  base::StringPrintf("Good morning %s,", given_name.c_str())));
-  }
+    // Advance clock to midnight tomorrow.
+    AdvanceClock(base::Time::Now().LocalMidnight() +
+                 base::TimeDelta::FromHours(24) - base::Time::Now());
 
-  {
-    // Verify 12:00 PM.
-    AdvanceClock(base::TimeDelta::FromMinutes(1));
-    ScopedShowUi scoped_show_ui;
-    EXPECT_EQ(greeting_label()->GetText(),
-              base::UTF8ToUTF16(base::StringPrintf("Good afternoon %s,",
-                                                   given_name.c_str())));
-  }
+    {
+      // Verify 4:59 AM.
+      AdvanceClock(base::TimeDelta::FromHours(4) +
+                   base::TimeDelta::FromMinutes(59));
+      ScopedShowUi scoped_show_ui;
+      EXPECT_EQ(greeting_label()->GetText(),
+                base::UTF8ToUTF16(test_case.expected_greeting.for_night));
+    }
 
-  {
-    // Verify 4:59 PM.
-    AdvanceClock(base::TimeDelta::FromHours(4) +
-                 base::TimeDelta::FromMinutes(59));
-    ScopedShowUi scoped_show_ui;
-    EXPECT_EQ(greeting_label()->GetText(),
-              base::UTF8ToUTF16(base::StringPrintf("Good afternoon %s,",
-                                                   given_name.c_str())));
-  }
+    {
+      // Verify 5:00 AM.
+      AdvanceClock(base::TimeDelta::FromMinutes(1));
+      ScopedShowUi scoped_show_ui;
+      EXPECT_EQ(greeting_label()->GetText(),
+                base::UTF8ToUTF16(test_case.expected_greeting.for_morning));
+    }
 
-  {
-    // Verify 5:00 PM.
-    AdvanceClock(base::TimeDelta::FromMinutes(1));
-    ScopedShowUi scoped_show_ui;
-    EXPECT_EQ(greeting_label()->GetText(),
-              base::UTF8ToUTF16(
-                  base::StringPrintf("Good evening %s,", given_name.c_str())));
-  }
+    {
+      // Verify 11:59 AM.
+      AdvanceClock(base::TimeDelta::FromHours(6) +
+                   base::TimeDelta::FromMinutes(59));
+      ScopedShowUi scoped_show_ui;
+      EXPECT_EQ(greeting_label()->GetText(),
+                base::UTF8ToUTF16(test_case.expected_greeting.for_morning));
+    }
 
-  {
-    // Verify 10:59 PM.
-    AdvanceClock(base::TimeDelta::FromHours(5) +
-                 base::TimeDelta::FromMinutes(59));
-    ScopedShowUi scoped_show_ui;
-    EXPECT_EQ(greeting_label()->GetText(),
-              base::UTF8ToUTF16(
-                  base::StringPrintf("Good evening %s,", given_name.c_str())));
-  }
+    {
+      // Verify 12:00 PM.
+      AdvanceClock(base::TimeDelta::FromMinutes(1));
+      ScopedShowUi scoped_show_ui;
+      EXPECT_EQ(greeting_label()->GetText(),
+                base::UTF8ToUTF16(test_case.expected_greeting.for_afternoon));
+    }
 
-  {
-    // Verify 11:00 PM.
-    AdvanceClock(base::TimeDelta::FromMinutes(1));
-    ScopedShowUi scoped_show_ui;
-    EXPECT_EQ(greeting_label()->GetText(),
-              base::UTF8ToUTF16(
-                  base::StringPrintf("Good night %s,", given_name.c_str())));
+    {
+      // Verify 4:59 PM.
+      AdvanceClock(base::TimeDelta::FromHours(4) +
+                   base::TimeDelta::FromMinutes(59));
+      ScopedShowUi scoped_show_ui;
+      EXPECT_EQ(greeting_label()->GetText(),
+                base::UTF8ToUTF16(test_case.expected_greeting.for_afternoon));
+    }
+
+    {
+      // Verify 5:00 PM.
+      AdvanceClock(base::TimeDelta::FromMinutes(1));
+      ScopedShowUi scoped_show_ui;
+      EXPECT_EQ(greeting_label()->GetText(),
+                base::UTF8ToUTF16(test_case.expected_greeting.for_evening));
+    }
+
+    {
+      // Verify 10:59 PM.
+      AdvanceClock(base::TimeDelta::FromHours(5) +
+                   base::TimeDelta::FromMinutes(59));
+      ScopedShowUi scoped_show_ui;
+      EXPECT_EQ(greeting_label()->GetText(),
+                base::UTF8ToUTF16(test_case.expected_greeting.for_evening));
+    }
+
+    {
+      // Verify 11:00 PM.
+      AdvanceClock(base::TimeDelta::FromMinutes(1));
+      ScopedShowUi scoped_show_ui;
+      EXPECT_EQ(greeting_label()->GetText(),
+                base::UTF8ToUTF16(test_case.expected_greeting.for_night));
+    }
   }
 }
 
@@ -244,10 +285,112 @@ TEST_F(AssistantOnboardingViewTest, ShouldHaveExpectedIntro) {
                 "day!\nHere are some things you can try to get started."));
 }
 
+TEST_F(AssistantOnboardingViewTest, ShouldHaveExpectedSuggestions) {
+  struct VectorIconWithColor {
+    VectorIconWithColor(const gfx::VectorIcon& icon, SkColor color)
+        : icon(icon), color(color) {}
+
+    const gfx::VectorIcon& icon;
+    SkColor color;
+  };
+
+  struct ExpectedSuggestion {
+    std::string message;
+    std::unique_ptr<VectorIconWithColor> icon_with_color;
+  };
+
+  // Iterate over each onboarding mode.
+  for (int mode = 0;
+       mode <= static_cast<int>(AssistantOnboardingMode::kMaxValue); ++mode) {
+    auto onboarding_mode = static_cast<AssistantOnboardingMode>(mode);
+    SetOnboardingMode(onboarding_mode);
+
+    // Determine expected suggestions based on onboarding mode.
+    std::vector<ExpectedSuggestion> expected_suggestions;
+    switch (onboarding_mode) {
+      case AssistantOnboardingMode::kEducation:
+        expected_suggestions.push_back(
+            {/*message=*/"Square root of 71",
+             /*icon_with_color=*/std::make_unique<VectorIconWithColor>(
+                 chromeos::kCalculateIcon, gfx::kGoogleBlue800)});
+        expected_suggestions.push_back(
+            {/*message=*/"How far is Venus",
+             /*icon_with_color=*/std::make_unique<VectorIconWithColor>(
+                 chromeos::kStraightenIcon, gfx::kGoogleRed800)});
+        expected_suggestions.push_back(
+            {/*message=*/"Set timer",
+             /*icon_with_color=*/std::make_unique<VectorIconWithColor>(
+                 chromeos::kTimerIcon, SkColorSetRGB(0xBF, 0x50, 0x00))});
+        expected_suggestions.push_back(
+            {/*message=*/"Tell me a joke",
+             /*icon_with_color=*/std::make_unique<VectorIconWithColor>(
+                 chromeos::kSentimentVerySatisfiedIcon, gfx::kGoogleGreen800)});
+        expected_suggestions.push_back(
+            {/*message=*/"\"Hello\" in Chinese",
+             /*icon_with_color=*/std::make_unique<VectorIconWithColor>(
+                 chromeos::kTranslateIcon, SkColorSetRGB(0x8A, 0x0E, 0x9E))});
+        expected_suggestions.push_back(
+            {/*message=*/"Take a screenshot",
+             /*icon_with_color=*/std::make_unique<VectorIconWithColor>(
+                 chromeos::kScreenshotIcon, gfx::kGoogleBlue800)});
+        break;
+      case AssistantOnboardingMode::kDefault:
+        expected_suggestions.push_back(
+            {/*message=*/"5K in miles",
+             /*icon_with_color=*/std::make_unique<VectorIconWithColor>(
+                 chromeos::kConversionPathIcon, gfx::kGoogleBlue800)});
+        expected_suggestions.push_back(
+            {/*message=*/"Population in Nigeria",
+             /*icon_with_color=*/std::make_unique<VectorIconWithColor>(
+                 chromeos::kPersonPinCircleIcon, gfx::kGoogleRed800)});
+        expected_suggestions.push_back(
+            {/*message=*/"Set timer",
+             /*icon_with_color=*/std::make_unique<VectorIconWithColor>(
+                 chromeos::kTimerIcon, SkColorSetRGB(0xBF, 0x50, 0x00))});
+        expected_suggestions.push_back(
+            {/*message=*/"Tell me a joke",
+             /*icon_with_color=*/std::make_unique<VectorIconWithColor>(
+                 chromeos::kSentimentVerySatisfiedIcon, gfx::kGoogleGreen800)});
+        expected_suggestions.push_back(
+            {/*message=*/"\"Hello\" in Chinese",
+             /*icon_with_color=*/std::make_unique<VectorIconWithColor>(
+                 chromeos::kTranslateIcon, SkColorSetRGB(0x8A, 0x0E, 0x9E))});
+        expected_suggestions.push_back(
+            {/*message=*/"Take a screenshot",
+             /*icon_with_color=*/std::make_unique<VectorIconWithColor>(
+                 chromeos::kScreenshotIcon, gfx::kGoogleBlue800)});
+        break;
+    }
+
+    ShowAssistantUi();
+
+    // Verify the expected number of suggestion views.
+    auto suggestion_views = GetOnboardingSuggestionViews();
+    ASSERT_EQ(suggestion_views.size(), expected_suggestions.size());
+
+    // Verify that each suggestion view has the expected message and icon.
+    for (size_t i = 0; i < expected_suggestions.size(); ++i) {
+      const auto* suggestion_view = suggestion_views.at(i);
+      const auto& expected_suggestion = expected_suggestions.at(i);
+
+      EXPECT_EQ(suggestion_view->GetText(),
+                base::UTF8ToUTF16(expected_suggestion.message));
+
+      ASSERT_PIXELS_EQ(
+          suggestion_view->GetIcon(),
+          gfx::CreateVectorIcon(expected_suggestion.icon_with_color->icon,
+                                /*size=*/24,
+                                expected_suggestion.icon_with_color->color));
+    }
+  }
+}
+
 TEST_F(AssistantOnboardingViewTest, ShouldHandleSuggestionPresses) {
-  // Show Assistant UI and verify onboarding suggestions exist.
   ShowAssistantUi();
-  ASSERT_FALSE(suggestions_grid()->children().empty());
+
+  // Verify onboarding suggestions exist.
+  auto suggestion_views = GetOnboardingSuggestionViews();
+  ASSERT_FALSE(suggestion_views.empty());
 
   // Expect a text interaction originating from the onboarding feature...
   MockAssistantInteractionSubscriber subscriber(assistant_service());
@@ -259,13 +402,13 @@ TEST_F(AssistantOnboardingViewTest, ShouldHandleSuggestionPresses) {
           }));
 
   // ...when an onboarding suggestion is pressed.
-  TapOnAndWait(suggestions_grid()->children().at(0));
+  TapOnAndWait(suggestion_views.at(0));
 }
 
 TEST_F(AssistantOnboardingViewTest, ShouldHandleSuggestionUpdates) {
   // Show Assistant UI and verify suggestions exist.
   ShowAssistantUi();
-  EXPECT_FALSE(suggestions_grid()->children().empty());
+  ASSERT_FALSE(GetOnboardingSuggestionViews().empty());
 
   // Manually create a suggestion.
   AssistantSuggestion suggestion;
@@ -279,11 +422,51 @@ TEST_F(AssistantOnboardingViewTest, ShouldHandleSuggestionUpdates) {
   SetOnboardingSuggestions(std::move(suggestions));
 
   // Verify view state is updated to reflect model state.
-  ASSERT_EQ(suggestions_grid()->children().size(), 1u);
-  views::Label* label = nullptr;
-  FindChildByClassName(suggestions_grid()->children().at(0), &label);
-  ASSERT_NE(nullptr, label);
-  EXPECT_EQ(label->GetText(), base::UTF8ToUTF16("Forced suggestion"));
+  auto suggestion_views = GetOnboardingSuggestionViews();
+  ASSERT_EQ(suggestion_views.size(), 1u);
+  EXPECT_EQ(suggestion_views.at(0)->GetText(),
+            base::UTF8ToUTF16("Forced suggestion"));
+}
+
+TEST_F(AssistantOnboardingViewTest, ShouldHandleLocalIcons) {
+  SetOnboardingSuggestions({CreateSuggestionWithIconUrl(
+      "googleassistant://resource?type=icon&name=assistant")});
+
+  ShowAssistantUi();
+  auto suggestion_views = GetOnboardingSuggestionViews();
+  ASSERT_EQ(suggestion_views.size(), 1u);
+
+  const auto& actual = suggestion_views.at(0)->GetIcon();
+  gfx::ImageSkia expected = gfx::CreateVectorIcon(
+      gfx::IconDescription(chromeos::kAssistantIcon, /*size=*/24));
+
+  ASSERT_PIXELS_EQ(actual, expected);
+}
+
+TEST_F(AssistantOnboardingViewTest, ShouldHandleRemoteIcons) {
+  const gfx::ImageSkia expected =
+      gfx::test::CreateImageSkia(/*width=*/10, /*height=*/10);
+
+  MockAssistantViewDelegate delegate;
+  EXPECT_CALL(delegate, GetPrimaryUserGivenName)
+      .WillOnce(testing::Return("Primary User Given Name"));
+
+  AssistantOnboardingView onboarding_view(&delegate);
+  EXPECT_CALL(delegate, DownloadImage)
+      .WillOnce(testing::Invoke(
+          [&](const GURL& url, ImageDownloader::DownloadCallback callback) {
+            std::move(callback).Run(expected);
+          }));
+
+  SetOnboardingSuggestions({CreateSuggestionWithIconUrl(
+      "https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png")});
+
+  AssistantOnboardingSuggestionView* suggestion_view = nullptr;
+  FindDescendentByClassName(&onboarding_view, &suggestion_view);
+  ASSERT_NE(nullptr, suggestion_view);
+
+  const auto& actual = suggestion_view->GetIcon();
+  EXPECT_TRUE(actual.BackedBySameObjectAs(expected));
 }
 
 }  // namespace ash

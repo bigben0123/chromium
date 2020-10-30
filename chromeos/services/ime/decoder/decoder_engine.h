@@ -13,9 +13,6 @@
 namespace chromeos {
 namespace ime {
 
-// Only used in tests to create a fake `ImeEngineMainEntry`.
-void FakeEngineMainEntryForTesting();
-
 // An enhanced implementation of the basic InputEngine which allows the input
 // engine to call a customized transliteration library (aka decoder) to provide
 // a premium typing experience.
@@ -32,6 +29,16 @@ class DecoderEngine : public InputEngine {
 
   void ProcessMessage(const std::vector<uint8_t>& message,
                       ProcessMessageCallback callback) override;
+  void OnInputMethodChanged(const std::string& engine_id) override {}
+  void OnFocus(mojom::InputFieldInfoPtr input_field_info) override {}
+  void OnBlur() override {}
+  void OnKeyEvent(mojom::PhysicalKeyEventPtr event,
+                  OnKeyEventCallback callback) override {}
+  void OnSurroundingTextChanged(
+      const std::string& text,
+      uint32_t offset,
+      mojom::SelectionRangePtr selection_range) override {}
+  void OnCompositionCanceled() override {}
 
  private:
   // Try to load the decoding functions from some decoder shared library.

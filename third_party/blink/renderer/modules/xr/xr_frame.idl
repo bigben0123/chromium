@@ -29,4 +29,10 @@
 
   [RuntimeEnabled=WebXRLightEstimation, RaisesException]
   XRLightEstimate? getLightEstimate(XRLightProbe lightProbe);
+
+  [RuntimeEnabled=WebXRDepth, RaisesException, MeasureAs=XRFrameGetDepthInformation]
+  XRDepthInformation getDepthInformation(XRView view);
+
+  [RuntimeEnabled=WebXRImageTracking, RaisesException]
+  FrozenArray<XRImageTrackingResult> getImageTrackingResults();
 };

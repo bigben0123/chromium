@@ -13,8 +13,7 @@ NGMathSpaceLayoutAlgorithm::NGMathSpaceLayoutAlgorithm(
     const NGLayoutAlgorithmParams& params)
     : NGLayoutAlgorithm(params) {
   DCHECK(params.fragment_geometry.scrollbar.IsEmpty());
-  container_builder_.SetIsNewFormattingContext(true);
-  container_builder_.SetInitialFragmentGeometry(params.fragment_geometry);
+  DCHECK(params.space.IsNewFormattingContext());
 }
 
 scoped_refptr<const NGLayoutResult> NGMathSpaceLayoutAlgorithm::Layout() {

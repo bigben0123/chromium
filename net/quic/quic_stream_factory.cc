@@ -34,6 +34,7 @@
 #include "net/cert/cert_verifier.h"
 #include "net/cert/ct_verifier.h"
 #include "net/dns/host_resolver.h"
+#include "net/dns/public/secure_dns_mode.h"
 #include "net/log/net_log.h"
 #include "net/log/net_log_capture_mode.h"
 #include "net/log/net_log_event_type.h"
@@ -59,6 +60,7 @@
 #include "net/third_party/quiche/src/quic/core/crypto/proof_verifier.h"
 #include "net/third_party/quiche/src/quic/core/crypto/quic_random.h"
 #include "net/third_party/quiche/src/quic/core/http/quic_client_promised_info.h"
+#include "net/third_party/quiche/src/quic/core/http/quic_client_push_promise_index.h"
 #include "net/third_party/quiche/src/quic/core/quic_clock.h"
 #include "net/third_party/quiche/src/quic/core/quic_connection.h"
 #include "net/third_party/quiche/src/quic/core/quic_utils.h"
@@ -109,14 +111,15 @@ enum class ConnectionStateAfterDNS {
 };
 
 base::Value NetLogQuicStreamFactoryJobParams(
-    const quic::QuicServerId* server_id) {
-  base::DictionaryValue dict;
-  dict.SetString(
-      "server_id",
-      "https://" +
-          HostPortPair(server_id->host(), server_id->port()).ToString() +
-          (server_id->privacy_mode_enabled() ? "/private" : ""));
-  return std::move(dict);
+    const QuicStreamFactory::QuicSessionAliasKey* key) {
+  base::Value dict(base::Value::Type::DICTIONARY);
+  dict.SetStringKey("host", key->server_id().host());
+  dict.SetIntKey("port", key->server_id().port());
+  dict.SetStringKey("privacy_mode", PrivacyModeToDebugString(
+                                        key->session_key().privacy_mode()));
+  dict.SetStringKey("network_isolation_key",
+                    key->session_key().network_isolation_key().ToDebugString());
+  return dict;
 }
 
 std::string QuicPlatformNotificationToString(
@@ -501,9 +504,8 @@ QuicStreamFactory::Job::Job(
       connection_retried_(false),
       session_(nullptr),
       network_(NetworkChangeNotifier::kInvalidNetworkHandle) {
-  net_log_.BeginEvent(NetLogEventType::QUIC_STREAM_FACTORY_JOB, [&] {
-    return NetLogQuicStreamFactoryJobParams(&key_.server_id());
-  });
+  net_log_.BeginEvent(NetLogEventType::QUIC_STREAM_FACTORY_JOB,
+                      [&] { return NetLogQuicStreamFactoryJobParams(&key_); });
   // Associate |net_log_| with |net_log|.
   net_log_.AddEventReferencingSource(
       NetLogEventType::QUIC_STREAM_FACTORY_JOB_BOUND_TO_HTTP_STREAM_JOB,
@@ -676,7 +678,7 @@ int QuicStreamFactory::Job::DoResolveHost() {
         HostResolver::ResolveHostParameters::CacheUsage::STALE_ALLOWED;
   }
   if (key_.session_key().disable_secure_dns())
-    parameters.secure_dns_mode_override = DnsConfig::SecureDnsMode::OFF;
+    parameters.secure_dns_mode_override = SecureDnsMode::kOff;
   resolve_host_request_ = host_resolver_->CreateRequest(
       key_.destination(), key_.session_key().network_isolation_key(), net_log_,
       parameters);
@@ -1067,6 +1069,7 @@ QuicStreamFactory::QuicStreamFactory(
     CTPolicyEnforcer* ct_policy_enforcer,
     TransportSecurityState* transport_security_state,
     CTVerifier* cert_transparency_verifier,
+    SCTAuditingDelegate* sct_auditing_delegate,
     SocketPerformanceWatcherFactory* socket_performance_watcher_factory,
     QuicCryptoClientStreamFactory* quic_crypto_client_stream_factory,
     QuicContext* quic_context)
@@ -1080,6 +1083,7 @@ QuicStreamFactory::QuicStreamFactory(
       ct_policy_enforcer_(ct_policy_enforcer),
       transport_security_state_(transport_security_state),
       cert_transparency_verifier_(cert_transparency_verifier),
+      sct_auditing_delegate_(sct_auditing_delegate),
       quic_crypto_client_stream_factory_(quic_crypto_client_stream_factory),
       random_generator_(quic_context->random_generator()),
       clock_(quic_context->clock()),
@@ -1113,7 +1117,7 @@ QuicStreamFactory::QuicStreamFactory(
   DCHECK(transport_security_state_);
   DCHECK(http_server_properties_);
   if (params_.disable_tls_zero_rtt)
-    SetQuicReloadableFlag(quic_enable_zero_rtt_for_tls, false);
+    SetQuicFlag(FLAGS_quic_disable_client_tls_zero_rtt, true);
   InitializeMigrationOptions();
 }
 
@@ -1153,10 +1157,7 @@ bool QuicStreamFactory::CanUseExistingSession(const QuicSessionKey& session_key,
   for (const auto& key_value : active_sessions_) {
     QuicChromiumClientSession* session = key_value.second;
     if (destination.Equals(all_sessions_[session].destination()) &&
-        session->CanPool(session_key.host(), session_key.privacy_mode(),
-                         session_key.socket_tag(),
-                         session_key.network_isolation_key(),
-                         session_key.disable_secure_dns())) {
+        session->CanPool(session_key.host(), session_key)) {
       return true;
     }
   }
@@ -1179,23 +1180,17 @@ int QuicStreamFactory::Create(const QuicSessionKey& session_key,
   DCHECK(HostPortPair(session_key.server_id().host(),
                       session_key.server_id().port())
              .Equals(HostPortPair::FromURL(url)));
-  // Enforce session affinity for promised streams.
-  quic::QuicClientPromisedInfo* promised =
-      push_promise_index_.GetPromised(url.spec());
-  if (promised) {
-    QuicChromiumClientSession* session =
-        static_cast<QuicChromiumClientSession*>(promised->session());
-    DCHECK(session);
-    if (session->server_id().privacy_mode_enabled() ==
-        session_key.server_id().privacy_mode_enabled()) {
-      request->SetSession(session->CreateHandle(destination));
-      ++num_push_streams_created_;
-      return OK;
-    }
-    // This should happen extremely rarely (if ever), but if somehow a
-    // request comes in with a mismatched privacy mode, consider the
-    // promise borked.
-    promised->Cancel();
+
+  // Search sessions for a matching promised stream.
+  for (auto session : active_sessions_) {
+    quic::QuicClientPromisedInfo* promised =
+        session.second->GetPromised(url, session_key);
+    if (!promised)
+      continue;
+    DCHECK_EQ(promised->session(), session.second);
+    request->SetSession(session.second->CreateHandle(destination));
+    ++num_push_streams_created_;
+    return OK;
   }
 
   // Use active session for |session_key| if such exists.
@@ -1228,13 +1223,7 @@ int QuicStreamFactory::Create(const QuicSessionKey& session_key,
     for (const auto& key_value : active_sessions_) {
       QuicChromiumClientSession* session = key_value.second;
       if (destination.Equals(all_sessions_[session].destination()) &&
-          session->CanPool(session_key.server_id().host(),
-                           session_key.server_id().privacy_mode_enabled()
-                               ? PRIVACY_MODE_ENABLED
-                               : PRIVACY_MODE_DISABLED,
-                           session_key.socket_tag(),
-                           session_key.network_isolation_key(),
-                           session_key.disable_secure_dns())) {
+          session->CanPool(session_key.server_id().host(), session_key)) {
         request->SetSession(session->CreateHandle(destination));
         return OK;
       }
@@ -1473,6 +1462,9 @@ std::unique_ptr<DatagramClientSocket> QuicStreamFactory::CreateSocket(
       DatagramSocket::DEFAULT_BIND, net_log, source);
   if (params_.enable_socket_recv_optimization)
     socket->EnableRecvOptimization();
+  if (params_.ios_network_service_type > 0) {
+    socket->SetIOSNetworkServiceType(params_.ios_network_service_type);
+  }
   return socket;
 }
 
@@ -1673,12 +1665,8 @@ bool QuicStreamFactory::HasMatchingIpSession(const QuicSessionAliasKey& key,
 
     const SessionSet& sessions = ip_aliases_[address];
     for (QuicChromiumClientSession* session : sessions) {
-      if (!session->CanPool(server_id.host(), key.session_key().privacy_mode(),
-                            key.session_key().socket_tag(),
-                            key.session_key().network_isolation_key(),
-                            key.session_key().disable_secure_dns())) {
+      if (!session->CanPool(server_id.host(), key.session_key()))
         continue;
-      }
       active_sessions_[key.session_key()] = session;
       session_aliases_[session].insert(key);
       return true;
@@ -1789,8 +1777,8 @@ int QuicStreamFactory::CreateSession(
   QuicChromiumPacketWriter* writer =
       new QuicChromiumPacketWriter(socket.get(), task_runner_);
   quic::QuicConnection* connection = new quic::QuicConnection(
-      connection_id, ToQuicSocketAddress(addr), helper_.get(),
-      alarm_factory_.get(), writer, true /* owns_writer */,
+      connection_id, quic::QuicSocketAddress(), ToQuicSocketAddress(addr),
+      helper_.get(), alarm_factory_.get(), writer, true /* owns_writer */,
       quic::Perspective::IS_CLIENT, {quic_version});
   connection->set_ping_timeout(ping_timeout_);
   connection->SetMaxPacketLength(params_.max_packet_length);
@@ -1839,7 +1827,8 @@ int QuicStreamFactory::CreateSession(
       params_.headers_include_h2_stream_dependency, cert_verify_flags, config,
       std::move(crypto_config_handle),
       network_connection_.connection_description(), dns_resolution_start_time,
-      dns_resolution_end_time, &push_promise_index_, push_delegate_,
+      dns_resolution_end_time,
+      std::make_unique<quic::QuicClientPushPromiseIndex>(), push_delegate_,
       tick_clock_, task_runner_, std::move(socket_performance_watcher),
       net_log.net_log());
 
@@ -2154,7 +2143,7 @@ QuicStreamFactory::CreateCryptoConfigHandle(
       std::make_unique<QuicCryptoClientConfigOwner>(
           std::make_unique<ProofVerifierChromium>(
               cert_verifier_, ct_policy_enforcer_, transport_security_state_,
-              cert_transparency_verifier_,
+              cert_transparency_verifier_, sct_auditing_delegate_,
               HostsFromOrigins(params_.origins_to_force_quic_on),
               actual_network_isolation_key),
           std::make_unique<QuicClientSessionCache>(), this);
@@ -2165,6 +2154,7 @@ QuicStreamFactory::CreateCryptoConfigHandle(
   crypto_config->AddCanonicalSuffix(".ggpht.com");
   crypto_config->AddCanonicalSuffix(".googlevideo.com");
   crypto_config->AddCanonicalSuffix(".googleusercontent.com");
+  crypto_config->AddCanonicalSuffix(".gvt1.com");
 
   if (!prefer_aes_gcm_recorded_) {
     bool prefer_aes_gcm =
@@ -2193,31 +2183,8 @@ void QuicStreamFactory::CollectDataOnPlatformNotification(
     NetworkChangeNotifier::NetworkHandle affected_network) const {
   UMA_HISTOGRAM_ENUMERATION("Net.QuicSession.PlatformNotification",
                             notification, NETWORK_NOTIFICATION_MAX);
-  if (notification == NETWORK_SOON_TO_DISCONNECT ||
-      notification == NETWORK_DISCONNECTED) {
-    // If the disconnected network is not the default network, ignore
-    // stats collections.
-    if (affected_network != default_network_)
-      return;
-  }
-
-  // Skip degrading session collection if there are less than two sessions.
-  if (all_sessions_.size() < 2)
-    return;
-
-  size_t num_degrading_sessions =
-      connectivity_monitor_.GetNumDegradingSessions();
-  const std::string raw_histogram_name =
-      "Net.QuicStreamFactory.NumDegradingSessions." +
-      QuicPlatformNotificationToString(notification);
-  base::UmaHistogramExactLinear(raw_histogram_name, num_degrading_sessions,
-                                101);
-
-  int percentage = num_degrading_sessions * 100 / all_sessions_.size();
-  const std::string percentage_histogram_name =
-      "Net.QuicStreamFactory.PercentageDegradingSessions." +
-      QuicPlatformNotificationToString(notification);
-  base::UmaHistogramExactLinear(percentage_histogram_name, percentage, 101);
+  connectivity_monitor_.RecordConnectivityStatsToHistograms(
+      QuicPlatformNotificationToString(notification), affected_network);
 }
 
 std::unique_ptr<QuicCryptoClientConfigHandle>

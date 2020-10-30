@@ -18,14 +18,16 @@ import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.settings.SettingsLauncher;
 import org.chromium.chrome.browser.settings.SettingsLauncherImpl;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
+import org.chromium.chrome.browser.sync.settings.ManageSyncSettings;
 import org.chromium.chrome.browser.sync.settings.SyncAndServicesSettings;
 import org.chromium.chrome.browser.sync.settings.SyncSettingsUtils;
 import org.chromium.chrome.browser.sync.settings.SyncSettingsUtils.SyncError;
-import org.chromium.chrome.browser.ui.messages.infobar.ConfirmInfoBar;
-import org.chromium.chrome.browser.ui.messages.infobar.InfoBar;
+import org.chromium.components.infobars.ConfirmInfoBar;
+import org.chromium.components.infobars.InfoBar;
 import org.chromium.components.infobars.InfoBarLayout;
 import org.chromium.content_public.browser.WebContents;
 
@@ -94,8 +96,13 @@ public class SyncErrorInfoBar
         recordHistogram(mType, SyncErrorInfoBarAction.OPEN_SETTINGS_CLICKED);
 
         SettingsLauncher settingsLauncher = new SettingsLauncherImpl();
-        settingsLauncher.launchSettingsActivity(getApplicationContext(),
-                SyncAndServicesSettings.class, SyncAndServicesSettings.createArguments(false));
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.MOBILE_IDENTITY_CONSISTENCY)) {
+            settingsLauncher.launchSettingsActivity(getApplicationContext(),
+                    ManageSyncSettings.class, ManageSyncSettings.createArguments(false));
+        } else {
+            settingsLauncher.launchSettingsActivity(getApplicationContext(),
+                    SyncAndServicesSettings.class, SyncAndServicesSettings.createArguments(false));
+        }
     }
 
     @CalledByNative
@@ -106,7 +113,7 @@ public class SyncErrorInfoBar
 
     private SyncErrorInfoBar(@SyncErrorInfoBarType int type, String title, String detailsMessage,
             String primaryButtonText) {
-        super(R.drawable.ic_sync_error_40dp, R.color.default_red, null, title, null,
+        super(R.drawable.ic_sync_error_legacy_40dp, R.color.default_red, null, title, null,
                 primaryButtonText, null);
         mType = type;
         mDetailsMessage = detailsMessage;

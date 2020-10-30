@@ -15,6 +15,7 @@
 #include "net/base/isolation_info.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
+#include "net/url_request/referrer_policy.h"
 #include "net/url_request/url_request.h"
 #include "services/network/cookie_manager.h"
 #include "services/network/network_context.h"
@@ -56,7 +57,7 @@ void NetworkServiceNetworkDelegate::MaybeTruncateReferrer(
     const GURL& effective_url) {
   if (!enable_referrers_) {
     request->SetReferrer(std::string());
-    request->set_referrer_policy(net::URLRequest::NO_REFERRER);
+    request->set_referrer_policy(net::ReferrerPolicy::NO_REFERRER);
     return;
   }
 
@@ -193,9 +194,7 @@ bool NetworkServiceNetworkDelegate::OnCanGetCookies(
           ->cookie_settings()
           .IsCookieAccessAllowed(request.url(),
                                  request.site_for_cookies().RepresentativeUrl(),
-                                 request.isolation_info()
-                                     .network_isolation_key()
-                                     .GetTopFrameOrigin());
+                                 request.isolation_info().top_frame_origin());
 
   if (!allowed)
     return false;

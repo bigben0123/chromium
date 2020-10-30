@@ -78,6 +78,7 @@
 #include "third_party/blink/renderer/core/page/scrolling/top_document_root_scroller_controller.h"
 #include "third_party/blink/renderer/core/page/spatial_navigation_controller.h"
 #include "third_party/blink/renderer/core/page/validation_message_client_impl.h"
+#include "third_party/blink/renderer/core/paint/compositing/paint_layer_compositor.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
@@ -88,6 +89,7 @@
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
+#include "third_party/blink/renderer/platform/scheduler/public/agent_group_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
 #include "third_party/skia/include/core/SkColor.h"
 
@@ -159,15 +161,23 @@ float DeviceScaleFactorDeprecated(LocalFrame* frame) {
 
 Page* Page::CreateNonOrdinary(PageClients& page_clients) {
   Page* page = MakeGarbageCollected<Page>(page_clients);
-  page->SetPageScheduler(ThreadScheduler::Current()->CreatePageScheduler(page));
+  std::unique_ptr<scheduler::WebAgentGroupScheduler> agent_group_scheduler =
+      ThreadScheduler::Current()->CreateAgentGroupScheduler();
+  page->SetPageScheduler(
+      agent_group_scheduler->AsAgentGroupScheduler().CreatePageScheduler(page));
+  page->SetAgentGroupSchedulerForNonOrdinary(std::move(agent_group_scheduler));
   return page;
 }
 
-Page* Page::CreateOrdinary(PageClients& page_clients, Page* opener) {
+Page* Page::CreateOrdinary(
+    PageClients& page_clients,
+    Page* opener,
+    scheduler::WebAgentGroupScheduler& agent_group_scheduler) {
   Page* page = MakeGarbageCollected<Page>(page_clients);
   page->is_ordinary_ = true;
   page->agent_metrics_collector_ = &GlobalAgentMetricsCollector();
-  page->SetPageScheduler(ThreadScheduler::Current()->CreatePageScheduler(page));
+  page->SetPageScheduler(
+      agent_group_scheduler.AsAgentGroupScheduler().CreatePageScheduler(page));
 
   if (opener) {
     // Before: ... -> opener -> next -> ...
@@ -217,7 +227,7 @@ Page::Page(PageClients& page_clients)
       opened_by_dom_(false),
       tab_key_cycles_through_elements_(true),
       device_scale_factor_(1),
-      visibility_state_(mojom::blink::PageVisibilityState::kVisible),
+      lifecycle_state_(mojom::blink::PageLifecycleState::New()),
       is_ordinary_(false),
       is_cursor_visible_(true),
       subframe_count_(0),
@@ -523,31 +533,43 @@ void Page::VisitedStateChanged(LinkHash link_hash) {
 void Page::SetVisibilityState(
     mojom::blink::PageVisibilityState visibility_state,
     bool is_initial_state) {
-  if (visibility_state_ == visibility_state)
+  if (lifecycle_state_->visibility == visibility_state)
     return;
-  visibility_state_ = visibility_state;
+  lifecycle_state_->visibility = visibility_state;
 
   if (is_initial_state)
     return;
 
-  page_visibility_observer_list_.ForEachObserver(
+  page_visibility_observer_set_.ForEachObserver(
       [](PageVisibilityObserver* observer) {
         observer->PageVisibilityChanged();
       });
 
   if (main_frame_) {
-    if (visibility_state_ == mojom::blink::PageVisibilityState::kVisible)
+    if (lifecycle_state_->visibility ==
+        mojom::blink::PageVisibilityState::kVisible)
       RestoreSVGImageAnimations();
     main_frame_->DidChangeVisibilityState();
   }
 }
 
 mojom::blink::PageVisibilityState Page::GetVisibilityState() const {
-  return visibility_state_;
+  return lifecycle_state_->visibility;
 }
 
 bool Page::IsPageVisible() const {
-  return visibility_state_ == mojom::blink::PageVisibilityState::kVisible;
+  return lifecycle_state_->visibility ==
+         mojom::blink::PageVisibilityState::kVisible;
+}
+
+bool Page::DispatchedPagehideAndStillHidden() {
+  return lifecycle_state_->pagehide_dispatch !=
+         mojom::blink::PagehideDispatch::kNotDispatched;
+}
+
+bool Page::DispatchedPagehidePersistedAndStillHidden() {
+  return lifecycle_state_->pagehide_dispatch ==
+         mojom::blink::PagehideDispatch::kDispatchedPersisted;
 }
 
 void Page::OnSetPageFrozen(bool frozen) {
@@ -703,13 +725,9 @@ void Page::SettingsChanged(SettingsDelegate::ChangeType change_type) {
         break;
       for (Frame* frame = MainFrame(); frame;
            frame = frame->Tree().TraverseNext()) {
-        LocalFrame* local_frame = nullptr;
-        if ((local_frame = DynamicTo<LocalFrame>(frame)) &&
-            !local_frame->Loader()
-                 .StateMachine()
-                 ->CreatingInitialEmptyDocument()) {
+        if (auto* window = DynamicTo<LocalDOMWindow>(frame->DomWindow())) {
           // Forcibly instantiate WindowProxy.
-          local_frame->GetScriptController().WindowProxy(
+          window->GetScriptController().WindowProxy(
               DOMWrapperWorld::MainWorld());
         }
       }
@@ -783,9 +801,8 @@ void Page::SettingsChanged(SettingsDelegate::ChangeType change_type) {
         // any outstanding security origin cross agent cluster access since
         // newly allocated agent clusters will be the universal agent.
         if (auto* local_frame = DynamicTo<LocalFrame>(frame)) {
-          local_frame->GetDocument()
-              ->GetMutableSecurityOrigin()
-              ->GrantCrossAgentClusterAccess();
+          auto* window = local_frame->DomWindow();
+          window->GetMutableSecurityOrigin()->GrantCrossAgentClusterAccess();
         }
       }
       break;
@@ -817,7 +834,7 @@ void Page::InvalidatePaint() {
     if (!local_frame)
       continue;
     if (LayoutView* view = local_frame->ContentLayoutObject())
-      view->InvalidatePaintForViewAndCompositedLayers();
+      view->InvalidatePaintForViewAndDescendants();
   }
 }
 
@@ -896,7 +913,7 @@ void Page::Trace(Visitor* visitor) const {
   visitor->Trace(focus_controller_);
   visitor->Trace(context_menu_controller_);
   visitor->Trace(page_scale_constraints_set_);
-  visitor->Trace(page_visibility_observer_list_);
+  visitor->Trace(page_visibility_observer_set_);
   visitor->Trace(pointer_lock_controller_);
   visitor->Trace(scrolling_coordinator_);
   visitor->Trace(browser_controls_);
@@ -963,13 +980,14 @@ void Page::WillBeDestroyed() {
   if (agent_metrics_collector_)
     agent_metrics_collector_->ReportMetrics();
 
-  page_visibility_observer_list_.ForEachObserver(
+  page_visibility_observer_set_.ForEachObserver(
       [](PageVisibilityObserver* observer) {
-        observer->ObserverListWillBeCleared();
+        observer->ObserverSetWillBeCleared();
       });
-  page_visibility_observer_list_.Clear();
+  page_visibility_observer_set_.Clear();
 
-  page_scheduler_.reset();
+  page_scheduler_ = nullptr;
+  agent_group_scheduler_for_non_ordinary_ = nullptr;
 }
 
 void Page::RegisterPluginsChangedObserver(PluginsChangedObserver* observer) {
@@ -984,6 +1002,12 @@ ScrollbarTheme& Page::GetScrollbarTheme() const {
 
 PageScheduler* Page::GetPageScheduler() const {
   return page_scheduler_.get();
+}
+
+void Page::SetAgentGroupSchedulerForNonOrdinary(
+    std::unique_ptr<blink::scheduler::WebAgentGroupScheduler>
+        agent_group_scheduler) {
+  agent_group_scheduler_for_non_ordinary_ = std::move(agent_group_scheduler);
 }
 
 void Page::SetPageScheduler(std::unique_ptr<PageScheduler> page_scheduler) {

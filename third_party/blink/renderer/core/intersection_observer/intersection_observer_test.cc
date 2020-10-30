@@ -162,7 +162,7 @@ TEST_F(IntersectionObserverTest, NotificationSentWhenRootRemoved) {
 
 TEST_F(IntersectionObserverTest, DocumentRootClips) {
   ScopedIntersectionObserverDocumentScrollingElementRootForTest scope(true);
-  WebView().MainFrameWidget()->Resize(WebSize(800, 600));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   SimRequest main_resource("https://example.com/", "text/html");
   SimRequest iframe_resource("https://example.com/iframe.html", "text/html");
   LoadURL("https://example.com/");
@@ -207,7 +207,7 @@ TEST_F(IntersectionObserverTest, DocumentRootClips) {
 
 TEST_F(IntersectionObserverTest, ReportsFractionOfTargetOrRoot) {
   // Place a 100x100 target element in the middle of a 200x200 main frame.
-  WebView().MainFrameWidget()->Resize(WebSize(200, 200));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(200, 200));
   SimRequest main_resource("https://example.com/", "text/html");
   LoadURL("https://example.com/");
   main_resource.Complete(R"HTML(
@@ -270,7 +270,7 @@ TEST_F(IntersectionObserverTest, ReportsFractionOfTargetOrRoot) {
 }
 
 TEST_F(IntersectionObserverTest, ResumePostsTask) {
-  WebView().MainFrameWidget()->Resize(WebSize(800, 600));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   SimRequest main_resource("https://example.com/", "text/html");
   LoadURL("https://example.com/");
   main_resource.Complete(R"HTML(
@@ -330,7 +330,7 @@ TEST_F(IntersectionObserverTest, ResumePostsTask) {
 }
 
 TEST_F(IntersectionObserverTest, HitTestAfterMutation) {
-  WebView().MainFrameWidget()->Resize(WebSize(800, 600));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   SimRequest main_resource("https://example.com/", "text/html");
   LoadURL("https://example.com/");
   main_resource.Complete(R"HTML(
@@ -377,7 +377,7 @@ TEST_F(IntersectionObserverTest, HitTestAfterMutation) {
 }
 
 TEST_F(IntersectionObserverTest, DisconnectClearsNotifications) {
-  WebView().MainFrameWidget()->Resize(WebSize(800, 600));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   SimRequest main_resource("https://example.com/", "text/html");
   LoadURL("https://example.com/");
   main_resource.Complete(R"HTML(
@@ -420,7 +420,7 @@ TEST_F(IntersectionObserverTest, DisconnectClearsNotifications) {
 
 TEST_F(IntersectionObserverTest, RootIntersectionWithForceZeroLayoutHeight) {
   WebView().GetSettings()->SetForceZeroLayoutHeight(true);
-  WebView().MainFrameWidget()->Resize(WebSize(800, 600));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   SimRequest main_resource("https://example.com/", "text/html");
   LoadURL("https://example.com/");
   main_resource.Complete(R"HTML(
@@ -633,7 +633,7 @@ TEST_F(IntersectionObserverTest, TrackedRootBookkeeping) {
 
 TEST_F(IntersectionObserverTest, RootMarginDevicePixelRatio) {
   WebView().SetZoomFactorForDeviceScaleFactor(3.5f);
-  WebView().MainFrameWidget()->Resize(WebSize(2800, 2100));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(2800, 2100));
   SimRequest main_resource("https://example.com/", "text/html");
   LoadURL("https://example.com/");
   main_resource.Complete(R"HTML(
@@ -672,7 +672,7 @@ TEST_F(IntersectionObserverTest, RootMarginDevicePixelRatio) {
 }
 
 TEST_F(IntersectionObserverTest, CachedRectsTest) {
-  WebView().MainFrameWidget()->Resize(WebSize(800, 600));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   SimRequest main_resource("https://example.com/", "text/html");
   LoadURL("https://example.com/");
   main_resource.Complete(R"HTML(
@@ -727,7 +727,8 @@ TEST_F(IntersectionObserverTest, CachedRectsTest) {
   EXPECT_FALSE(observation2->CanUseCachedRectsForTesting());
 
   // Scrolling the root should not invalidate.
-  PaintLayerScrollableArea* root_scroller = root->GetScrollableArea();
+  PaintLayerScrollableArea* root_scroller =
+      root->GetLayoutBoxForScrolling()->GetScrollableArea();
   root_scroller->SetScrollOffset(ScrollOffset(0, 100),
                                  mojom::blink::ScrollType::kProgrammatic);
   EXPECT_TRUE(observation1->CanUseCachedRectsForTesting());
@@ -783,7 +784,7 @@ TEST_F(IntersectionObserverV2Test, TrackVisibilityInit) {
 }
 
 TEST_F(IntersectionObserverV2Test, BasicOcclusion) {
-  WebView().MainFrameWidget()->Resize(WebSize(800, 600));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   SimRequest main_resource("https://example.com/", "text/html");
   LoadURL("https://example.com/");
   main_resource.Complete(R"HTML(
@@ -842,7 +843,7 @@ TEST_F(IntersectionObserverV2Test, BasicOcclusion) {
 }
 
 TEST_F(IntersectionObserverV2Test, BasicOpacity) {
-  WebView().MainFrameWidget()->Resize(WebSize(800, 600));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   SimRequest main_resource("https://example.com/", "text/html");
   LoadURL("https://example.com/");
   main_resource.Complete(R"HTML(
@@ -891,7 +892,7 @@ TEST_F(IntersectionObserverV2Test, BasicOpacity) {
 }
 
 TEST_F(IntersectionObserverV2Test, BasicTransform) {
-  WebView().MainFrameWidget()->Resize(WebSize(800, 600));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   SimRequest main_resource("https://example.com/", "text/html");
   LoadURL("https://example.com/");
   main_resource.Complete(R"HTML(
@@ -951,7 +952,7 @@ TEST_F(IntersectionObserverV2Test, BasicTransform) {
 }
 
 TEST_F(IntersectionObserverTest, ApplyMarginToTarget) {
-  WebView().MainFrameWidget()->Resize(WebSize(200, 200));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(200, 200));
   SimRequest main_resource("https://example.com/", "text/html");
   LoadURL("https://example.com/");
   main_resource.Complete(R"HTML(
@@ -1014,7 +1015,7 @@ TEST_F(IntersectionObserverTest, ApplyMarginToTarget) {
 }
 
 TEST_F(IntersectionObserverTest, TargetMarginPercentResolvesAgainstRoot) {
-  WebView().MainFrameWidget()->Resize(WebSize(200, 500));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(200, 500));
   SimRequest main_resource("https://example.com/", "text/html");
   LoadURL("https://example.com/");
   main_resource.Complete(R"HTML(

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/debug/dump_without_crashing.h"
 #include "base/feature_list.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
@@ -19,6 +20,7 @@
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/network_session_configurator/common/network_features.h"
 #include "components/network_session_configurator/common/network_switches.h"
@@ -33,7 +35,7 @@
 #include "net/third_party/quiche/src/quic/core/quic_tag.h"
 #include "net/third_party/quiche/src/spdy/core/spdy_protocol.h"
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_MAC)
 #include "base/mac/mac_util.h"
 #endif
 
@@ -162,6 +164,12 @@ void ConfigureHttp2Params(const base::CommandLine& command_line,
     params->greased_http2_frame =
         base::Optional<net::SpdySessionPool::GreasedHttp2Frame>(
             {type, flags, payload});
+  }
+
+  if (command_line.HasSwitch(switches::kHttp2EndStreamWithDataFrame) ||
+      GetVariationParam(http2_trial_params,
+                        "http2_end_stream_with_data_frame") == "true") {
+    params->http2_end_stream_with_data_frame = true;
   }
 
   params->enable_websocket_over_http2 =
@@ -351,6 +359,12 @@ bool ShouldQuicDisableTlsZeroRtt(const VariationParameters& quic_trial_params) {
       GetVariationParam(quic_trial_params, "disable_tls_zero_rtt"), "true");
 }
 
+bool ShouldQuicDisableGQuicZeroRtt(
+    const VariationParameters& quic_trial_params) {
+  return base::LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params, "disable_gquic_zero_rtt"), "true");
+}
+
 int GetQuicRetransmittableOnWireTimeoutMilliseconds(
     const VariationParameters& quic_trial_params) {
   int value;
@@ -446,8 +460,108 @@ size_t GetQuicMaxPacketLength(const VariationParameters& quic_trial_params) {
 
 quic::ParsedQuicVersionVector GetQuicVersions(
     const VariationParameters& quic_trial_params) {
-  return quic::ParseQuicVersionVectorString(
-      GetVariationParam(quic_trial_params, "quic_version"));
+  std::string trial_versions_str =
+      GetVariationParam(quic_trial_params, "quic_version");
+  quic::ParsedQuicVersionVector trial_versions =
+      quic::ParseQuicVersionVectorString(trial_versions_str);
+  const bool obsolete_versions_allowed = base::LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params, "obsolete_versions_allowed"),
+      "true");
+  if (!obsolete_versions_allowed) {
+    quic::ParsedQuicVersionVector filtered_versions;
+    quic::ParsedQuicVersionVector obsolete_versions =
+        net::ObsoleteQuicVersions();
+    bool found_obsolete_version = false;
+    for (const quic::ParsedQuicVersion& version : trial_versions) {
+      if (std::find(obsolete_versions.begin(), obsolete_versions.end(),
+                    version) == obsolete_versions.end()) {
+        filtered_versions.push_back(version);
+      } else {
+        found_obsolete_version = true;
+      }
+    }
+    if (found_obsolete_version) {
+      UMA_HISTOGRAM_BOOLEAN("Net.QuicSession.FinchObsoleteVersion", true);
+      // OQV prefix stands for Obsolete QUIC Version.
+      // OQV_quic_versions.
+      static base::debug::CrashKeyString* quic_versions_key =
+          base::debug::AllocateCrashKeyString(
+              "OQV_quic_versions", base::debug::CrashKeySize::Size32);
+      base::debug::ScopedCrashKeyString quic_versions_scoped_key(
+          quic_versions_key, trial_versions_str);
+      // OQV_time.
+      static base::debug::CrashKeyString* time_key =
+          base::debug::AllocateCrashKeyString(
+              "OQV_time", base::debug::CrashKeySize::Size32);
+      uint64_t seconds_since_epoch =
+          static_cast<uint64_t>(base::Time::Now().ToDoubleT());
+      seconds_since_epoch = (seconds_since_epoch / 3600) *
+                            3600;  // Only provide granularity of 1h.
+      std::string time_string = base::NumberToString(seconds_since_epoch);
+      base::debug::ScopedCrashKeyString time_scoped_key(time_key, time_string);
+      // OQV_finch_seed.
+      static base::debug::CrashKeyString* finch_seed_key =
+          base::debug::AllocateCrashKeyString(
+              "OQV_finch_seed", base::debug::CrashKeySize::Size32);
+      std::string finch_seed = variations::GetSeedVersion();
+      if (finch_seed.empty()) {
+        finch_seed = "OQV_empty";
+      }
+      base::debug::ScopedCrashKeyString finch_scoped_key(finch_seed_key,
+                                                         finch_seed);
+      // OQV_seed_expiry.
+      static base::debug::CrashKeyString* seed_expiry_key =
+          base::debug::AllocateCrashKeyString(
+              "OQV_seed_expiry", base::debug::CrashKeySize::Size32);
+      base::HistogramBase* histogram_seed_expiry =
+          base::LinearHistogram::FactoryGet(
+              "Variations.CreateTrials.SeedExpiry", 1, 3, 4,
+              base::HistogramBase::kUmaTargetedHistogramFlag);
+      std::unique_ptr<base::HistogramSamples> samples_seed_expiry =
+          histogram_seed_expiry->SnapshotSamples();
+      std::string seed_expiry_string =
+          "c" + base::NumberToString(samples_seed_expiry->TotalCount()) + "s" +
+          base::NumberToString(samples_seed_expiry->sum());
+      base::debug::ScopedCrashKeyString seed_expiry_scoped_key(
+          seed_expiry_key, seed_expiry_string);
+      // OQV_seed_freshness.
+      static base::debug::CrashKeyString* seed_freshness_key =
+          base::debug::AllocateCrashKeyString(
+              "OQV_seed_freshness", base::debug::CrashKeySize::Size32);
+      base::HistogramBase* histogram_seed_freshness =
+          base::Histogram::FactoryGet(
+              "Variations.SeedFreshness", 1,
+              base::TimeDelta::FromDays(30).InMinutes(), 50,
+              base::HistogramBase::kUmaTargetedHistogramFlag);
+      std::unique_ptr<base::HistogramSamples> samples_seed_freshness =
+          histogram_seed_freshness->SnapshotSamples();
+      std::string seed_freshness_string =
+          "c" + base::NumberToString(samples_seed_freshness->TotalCount()) +
+          "s" + base::NumberToString(samples_seed_freshness->sum());
+      base::debug::ScopedCrashKeyString seed_freshness_scoped_key(
+          seed_freshness_key, seed_freshness_string);
+      // OQV_finch_safe.
+      static base::debug::CrashKeyString* finch_safe_key =
+          base::debug::AllocateCrashKeyString(
+              "OQV_finch_safe", base::debug::CrashKeySize::Size32);
+      base::HistogramBase* histogram_finch_safe =
+          base::BooleanHistogram::FactoryGet(
+              "Variations.SafeMode.FellBackToSafeMode2",
+              base::HistogramBase::kUmaTargetedHistogramFlag);
+      std::unique_ptr<base::HistogramSamples> samples_finch_safe =
+          histogram_finch_safe->SnapshotSamples();
+      std::string finch_safe_string =
+          "c" + base::NumberToString(samples_finch_safe->TotalCount()) + "s" +
+          base::NumberToString(samples_finch_safe->sum());
+      base::debug::ScopedCrashKeyString finch_safe_scoped_key(
+          finch_safe_key, finch_safe_string);
+      // Now save all this state into a fake crash. See b/167728915 and
+      // crbug.com/1139877 for analysis details.
+      base::debug::DumpWithoutCrashing();
+    }
+    trial_versions = filtered_versions;
+  }
+  return trial_versions;
 }
 
 bool ShouldEnableServerPushCancelation(
@@ -536,6 +650,9 @@ void ConfigureQuicParams(base::StringPiece quic_trial_group,
 
     quic_params->disable_tls_zero_rtt =
         ShouldQuicDisableTlsZeroRtt(quic_trial_params);
+
+    quic_params->disable_gquic_zero_rtt =
+        ShouldQuicDisableGQuicZeroRtt(quic_trial_params);
 
     int retransmittable_on_wire_timeout_milliseconds =
         GetQuicRetransmittableOnWireTimeoutMilliseconds(quic_trial_params);
@@ -706,10 +823,10 @@ net::URLRequestContextBuilder::HttpCacheParams::Type ChooseCacheType() {
   // muddles the experiment data, but as this was written to be considered for
   // backport, having it behave differently than in stable would be a bigger
   // problem.
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_MAC)
   if (base::mac::IsAtLeastOS10_14())
     return net::URLRequestContextBuilder::HttpCacheParams::DISK_SIMPLE;
-#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
+#endif  // defined(OS_MAC)
 
   if (base::StartsWith(experiment_name, "ExperimentYes",
                        base::CompareCase::INSENSITIVE_ASCII)) {

@@ -13,7 +13,6 @@ const filesMessageTemplate = `
     }
 
     :host {
-      border-top: 1px solid var(--google-grey-refresh-300);
       border-bottom: 1px solid var(--google-grey-refresh-300);
       color: var(--cr-primary-text-color);
       display: flex;
@@ -75,22 +74,16 @@ const filesMessageTemplate = `
  */
 class FilesMessage extends HTMLElement {
   constructor() {
-    super();
-    this.createElement_();
+    /**
+     * Create element content.
+     */
+    super().attachShadow({mode: 'open'}).innerHTML = filesMessageTemplate;
 
     /**
      * FilesMessage visual signals user callback.
      * @private @type {!function(*)}
      */
     this.signal_ = console.log;
-  }
-
-  /**
-   * Creates FilesMessage element.
-   * @private
-   */
-  createElement_() {
-    this.attachShadow({mode: 'open'}).innerHTML = filesMessageTemplate;
   }
 
   /**

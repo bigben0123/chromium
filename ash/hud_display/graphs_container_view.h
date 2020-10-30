@@ -6,13 +6,18 @@
 #define ASH_HUD_DISPLAY_GRAPHS_CONTAINER_VIEW_H_
 
 #include "ash/hud_display/data_source.h"
-#include "ash/hud_display/graph.h"
+#include "ash/hud_display/graph_page_view_base.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
-#include "base/timer/timer.h"
+#include "base/sequenced_task_runner.h"
+#include "base/time/time.h"
 #include "ui/views/view.h"
 
 namespace ash {
 namespace hud_display {
+
+enum class DisplayMode;
 
 // GraphsContainerView class draws a bunch of graphs.
 class GraphsContainerView : public views::View {
@@ -20,45 +25,32 @@ class GraphsContainerView : public views::View {
   METADATA_HEADER(GraphsContainerView);
 
   GraphsContainerView();
-  ~GraphsContainerView() override;
-
   GraphsContainerView(const GraphsContainerView&) = delete;
   GraphsContainerView& operator=(const GraphsContainerView&) = delete;
+  ~GraphsContainerView() override;
 
-  // view::
-  void OnPaint(gfx::Canvas* canvas) override;
 
-  // Synchrnously reads system counters and updates data.
-  void UpdateData();
+  // Updates graphs display to match given mode.
+  void SetMode(DisplayMode mode);
+
+  // Schedules new data update on the thread pool.
+  void RequestDataUpdate();
+
+  // Update graphs data from the given snapshot.
+  void UpdateData(std::unique_ptr<DataSource::Snapshot> snapshot);
 
  private:
-  // HUD is updatd with new data every tick.
-  base::RepeatingTimer refresh_timer_;
+  // This helps detect missing data intervals.
+  const base::TimeTicks start_time_;
+  size_t data_update_count_{0};
 
-  // --- Stacked:
-  // Share of the total RAM occupied by Chrome browser private RSS.
-  Graph graph_chrome_rss_private_;
-  // Share of the total RAM reported as Free memory be kernel.
-  Graph graph_mem_free_;
-  // Total RAM - other graphs in this stack.
-  Graph graph_mem_used_unknown_;
-  // Share of the total RAM occupied by Chrome type=renderer processes private
-  // RSS.
-  Graph graph_renderers_rss_private_;
-  // Share of the total RAM occupied by ARC++ processes private RSS.
-  Graph graph_arc_rss_private_;
-  // Share of the total RAM occupied by Chrome type=gpu process private RSS.
-  Graph graph_gpu_rss_private_;
-  // Share of the total RAM used by kernel GPU driver.
-  Graph graph_gpu_kernel_;
-
-  // Not stacked:
-  // Share of the total RAM occupied by Chrome browser process shared RSS.
-  Graph graph_chrome_rss_shared_;
-
-  DataSource data_source_;
+  // Source of graphs data.
+  scoped_refptr<base::SequencedTaskRunner> file_task_runner_;
+  std::unique_ptr<DataSource, base::OnTaskRunnerDeleter> data_source_;
 
   SEQUENCE_CHECKER(ui_sequence_checker_);
+
+  base::WeakPtrFactory<GraphsContainerView> weak_factory_{this};
 };
 
 }  // namespace hud_display

@@ -7,6 +7,7 @@ Checks a policy_templates.json file for conformity to its syntax specification.
 '''
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -35,7 +36,7 @@ TYPE_TO_SCHEMA = {
 
 # List of boolean policies that have been introduced with negative polarity in
 # the past and should not trigger the negative polarity check.
-LEGACY_INVERTED_POLARITY_WHITELIST = [
+LEGACY_INVERTED_POLARITY_ALLOWLIST = [
     'DeveloperToolsDisabled',
     'DeviceAutoUpdateDisabled',
     'Disable3DAPIs',
@@ -55,7 +56,7 @@ LEGACY_INVERTED_POLARITY_WHITELIST = [
 
 # List of policies where the 'string' part of the schema is actually a JSON
 # string which has its own schema.
-LEGACY_EMBEDDED_JSON_WHITELIST = [
+LEGACY_EMBEDDED_JSON_ALLOWLIST = [
     'ArcPolicy',
     'AutoSelectCertificateForUrls',
     'DefaultPrinterSelection',
@@ -63,6 +64,7 @@ LEGACY_EMBEDDED_JSON_WHITELIST = [
     'DeviceLoginScreenAutoSelectCertificateForUrls',
     'DeviceOpenNetworkConfiguration',
     'NativePrinters',
+    'Printers',
     'OpenNetworkConfiguration',
     'RemoteAccessHostDebugOverridePolicies',
     # NOTE: Do not add any new policies to this list! Do not store policies with
@@ -72,7 +74,7 @@ LEGACY_EMBEDDED_JSON_WHITELIST = [
 # List of policies where not all properties are required to be presented in the
 # example value. This could be useful e.g. in case of mutually exclusive fields.
 # See crbug.com/1068257 for the details.
-OPTIONAL_PROPERTIES_POLICIES_WHITELIST = []
+OPTIONAL_PROPERTIES_POLICIES_ALLOWLIST = []
 
 # 100 MiB upper limit on the total device policy external data max size limits
 # due to the security reasons.
@@ -138,7 +140,7 @@ KEYS_DEFINING_SCHEMAS_PER_TYPE = {
 }
 
 # The list of platforms policy could support.
-ALL_SUPPORTED_PLATFOMRS = [
+ALL_SUPPORTED_PLATFORMS = [
     'chrome_frame', 'chrome_os', 'android', 'webview_android', 'ios',
     'chrome.win', 'chrome.win7', 'chrome.linux', 'chrome.mac', 'chrome.*'
 ]
@@ -167,11 +169,51 @@ def ExpandChromeStar(platforms):
   return platforms
 
 
+def _GetSupportedVersionPlatformAndRange(supported_on):
+  (supported_on_platform, supported_on_versions) = supported_on.split(':')
+
+  (supported_on_from, supported_on_to) = supported_on_versions.split('-')
+
+  return supported_on_platform, (int(supported_on_from) if supported_on_from
+                                 else None), (int(supported_on_to)
+                                              if supported_on_to else None)
+
+
+def _PolicyStillSupported(supported_on, current_version):
+  for s in supported_on:
+    _, _, supported_on_to = _GetSupportedVersionPlatformAndRange(s)
+
+    # If supported_on_to isn't given, this policy is still supported.
+    if supported_on_to is None:
+      return True
+
+    # If supported_on_to is equal or greater than the current version, it's
+    # still supported.
+    if current_version <= int(supported_on_to):
+      return True
+
+  return False
+
+
 def MergeDict(*dicts):
   result = {}
   for dictionary in dicts:
     result.update(dictionary)
   return result
+
+
+class DuplicateKeyVisitor(ast.NodeVisitor):
+  def visit_Dict(self, node):
+    seen_keys = set()
+    for i, node_key in enumerate(node.keys):
+      key = ast.literal_eval(node_key)
+      if key in seen_keys:
+        raise ValueError("Duplicate key '%s' in line %d found." %
+                         (key, node.values[i].lineno))
+      seen_keys.add(key)
+
+    # Recursively check for all nested objects.
+    self.generic_visit(node)
 
 
 class PolicyTemplateChecker(object):
@@ -232,7 +274,8 @@ class PolicyTemplateChecker(object):
       Error: Value of |key| must be a |value_type|.
       Offending snippet: |container[key]|
 
-    Returns: |container[key]| if the key is present, None otherwise.
+    Returns: |container[key]| if the key is present and there are no errors,
+             None otherwise.
     '''
     if identifier is None:
       try:
@@ -260,10 +303,12 @@ class PolicyTemplateChecker(object):
           'Value of "%s" must be one of [ %s ].' % (key, ', '.join(
               [type.__name__ for type in value_types])), container_name,
           identifier, value)
+      return None
     if str in value_types and regexp_check and not regexp_check.match(value):
       self._Error(
           'Value of "%s" must match "%s".' % (key, regexp_check.pattern),
           container_name, identifier, value)
+      return None
     return value
 
   def _AddPolicyID(self, id, policy_ids, policy, deleted_policy_ids):
@@ -323,24 +368,24 @@ class PolicyTemplateChecker(object):
 
     # Checks that boolean policies are not negated (which makes them harder to
     # reason about).
-    if (policy_type == 'main' and 'disable' in policy.get('name').lower() and
-        policy.get('name') not in LEGACY_INVERTED_POLARITY_WHITELIST):
+    if (policy_type == 'main' and 'disable' in policy.get('name').lower()
+        and policy.get('name') not in LEGACY_INVERTED_POLARITY_ALLOWLIST):
       self._Error(('Boolean policy %s uses negative polarity, please make ' +
                    'new boolean policies follow the XYZEnabled pattern. ' +
                    'See also http://crbug.com/85687') % policy.get('name'))
 
     # Checks that the policy doesn't have a validation_schema - the whole
-    # schema should be defined in 'schema'- unless whitelisted as legacy.
-    if ('validation_schema' in policy and
-        policy.get('name') not in LEGACY_EMBEDDED_JSON_WHITELIST):
+    # schema should be defined in 'schema'- unless listed as legacy.
+    if ('validation_schema' in policy
+        and policy.get('name') not in LEGACY_EMBEDDED_JSON_ALLOWLIST):
       self._Error(('"validation_schema" is defined for new policy %s - ' +
                    'entire schema data should be contained in "schema"') %
                   policy.get('name'))
 
     # Try to make sure that any policy with a complex schema is storing it as
-    # a 'dict', not embedding it inside JSON strings - unless whitelisted.
-    if (self._AppearsToContainEmbeddedJson(policy.get('example_value')) and
-        policy.get('name') not in LEGACY_EMBEDDED_JSON_WHITELIST):
+    # a 'dict', not embedding it inside JSON strings - unless listed as legacy.
+    if (self._AppearsToContainEmbeddedJson(policy.get('example_value'))
+        and policy.get('name') not in LEGACY_EMBEDDED_JSON_ALLOWLIST):
       self._Error(('Example value for new policy %s looks like JSON. Do ' +
                    'not store complex data as stringified JSON - instead, ' +
                    'store it in a dict and define it in "schema".') %
@@ -435,7 +480,50 @@ class PolicyTemplateChecker(object):
                       "Field '%s' not present in device policy proto." %
                       (policy, field))
 
-  def _CheckPolicy(self, policy, is_in_group, policy_ids, deleted_policy_ids):
+  def _NeedsDefault(self, policy):
+    return policy.get('type') in ('int', 'main', 'string-enum', 'int-enum')
+
+  def _CheckDefault(self, policy):
+    if not self._NeedsDefault(policy):
+      return
+
+    # Only validate the default when present.
+    # TODO(crbug.com/1139046): Always validate the default for types that
+    # should have it.
+    if 'default' not in policy:
+      return
+
+    policy_type = policy.get('type')
+    default = policy.get('default')
+    if policy_type == 'int':
+      # A default value of None is acceptable when the default case is
+      # equivalent to the policy being unset and there is no numeric equivalent.
+      if default is None:
+        return
+
+      default = self._CheckContains(policy, 'default', int)
+      if default is None or default < 0:
+        self._Error(
+            ('Default for policy %s of type int should be an int >= 0 or None, '
+             'got %s') % (policy.get('name'), default))
+      return
+
+    if policy_type == 'main':
+      # TODO(crbug.com/1139306): Query the acceptable values from items
+      # once that is used for policy type main.
+      acceptable_values = (True, False, None)
+    elif policy_type in ('string-enum', 'int-enum'):
+      acceptable_values = [None] + [x['value'] for x in policy['items']]
+    else:
+      raise NotImplementedError('Unimplemented policy type: %s' % policy_type)
+
+    if default not in acceptable_values:
+      self._Error(
+          ('Default for policy %s of type %s should be one of %s, got %s') %
+          (policy.get('name'), policy_type, acceptable_values, default))
+
+  def _CheckPolicy(self, policy, is_in_group, policy_ids, deleted_policy_ids,
+                   current_version):
     if not isinstance(policy, dict):
       self._Error('Each policy must be a dictionary.', 'policy', None, policy)
       return
@@ -465,13 +553,13 @@ class PolicyTemplateChecker(object):
           'url_schema',
           'max_size',
           'tags',
+          'default',
           'default_for_enterprise_users',
           'default_for_managed_devices_doc_only',
           'arc_support',
           'supported_chrome_os_management',
       ):
-        self._Warning('In policy %s: Warning: Unknown key: %s' %
-                      (policy.get('name'), key))
+        self._Error('In policy %s: Unknown key: %s' % (policy.get('name'), key))
 
     # Each policy must have a name.
     self._CheckContains(policy, 'name', str, regexp_check=NO_WHITESPACE)
@@ -556,7 +644,7 @@ class PolicyTemplateChecker(object):
       supported_on = self._CheckContains(policy,
                                          'supported_on',
                                          list,
-                                         optional=False)
+                                         optional=True)
       supported_platforms = []
       if supported_on:
         for s in supported_on:
@@ -564,7 +652,7 @@ class PolicyTemplateChecker(object):
               supported_on_platform,
               supported_on_from,
               supported_on_to,
-          ) = self._GetSupportedVersionPlatformAndRange(s)
+          ) = _GetSupportedVersionPlatformAndRange(s)
 
           supported_platforms.append(supported_on_platform)
           if not isinstance(supported_on_platform,
@@ -584,6 +672,13 @@ class PolicyTemplateChecker(object):
                 'supported version must have a version larger than the '
                 'starting supported version.', 'policy', policy, supported_on)
 
+        if (not _PolicyStillSupported(supported_on, current_version)
+            and not policy.get('deprecated', False)):
+          self._Error(
+              'Policy %s is marked as no longer supported (%s), but isn\'t '
+              'marked as deprecated. Unsupported policies must be marked as '
+              '"deprecated": True' % (policy.get('name'), supported_on))
+
       supported_platforms = ExpandChromeStar(supported_platforms)
       future_on = ExpandChromeStar(
           self._CheckContains(policy, 'future_on', list, optional=True))
@@ -592,8 +687,14 @@ class PolicyTemplateChecker(object):
                           policy.get('name'))
       self._CheckPlatform(future_on, 'future_on', policy.get('name'))
 
-      #TODO(crbug.com/1091432): Make supported_on optional and check if it's
-      # empty. Also check if both supported_on and future_on are empty.
+      if not supported_platforms and not future_on:
+        self._Error(
+            'The policy needs to be supported now or in the future on at '
+            'least one platform.', 'policy', policy.get('name'))
+
+      if supported_on == []:
+        self._Warning("Policy %s: supported_on' is empty." %
+                      (policy.get('name')))
 
       if future_on == []:
         self._Warning("Policy %s: 'future_on' is empty." % (policy.get('name')))
@@ -624,9 +725,9 @@ class PolicyTemplateChecker(object):
                 'policy', policy.get('name', policy))
 
       # All user policies must have a per_profile feature flag.
-      if (not policy.get('device_only', False) and
-          not policy.get('deprecated', False) and
-          not filter(re.compile('^chrome_frame:.*').match, supported_on)):
+      if (not policy.get('device_only', False)
+          and not policy.get('deprecated', False)
+          and not 'chrome_frame' in supported_platforms):
         self._CheckContains(
             features,
             'per_profile',
@@ -693,9 +794,21 @@ class PolicyTemplateChecker(object):
                                           optional=True,
                                           container_name='features')
 
+      # 'private' feature must be an optional boolean flag.
+      is_unlisted = self._CheckContains(features,
+                                        'unlisted',
+                                        bool,
+                                        optional=True,
+                                        container_name='features')
+
       if cloud_only and platform_only:
-        self._Error("cloud_only and platfrom_only must not be true at the same "
-                    "time.")
+        self._Error(
+            'cloud_only and platfrom_only must not be true at the same '
+            'time.', 'policy', policy.get('name'))
+
+      if is_unlisted and not cloud_only:
+        self._Error('unlisted can only be used by cloud_only policy.', 'policy',
+                    policy.get('name'))
 
 
       # Chrome OS policies may have a non-empty supported_chrome_os_management
@@ -745,7 +858,7 @@ class PolicyTemplateChecker(object):
       schema = policy.get('schema')
       example = policy.get('example_value')
       enforce_use_entire_schema = policy.get(
-          'name') not in OPTIONAL_PROPERTIES_POLICIES_WHITELIST
+          'name') not in OPTIONAL_PROPERTIES_POLICIES_ALLOWLIST
       if not self.has_schema_error:
         if not self.schema_validator.ValidateValue(schema, example,
                                                    enforce_use_entire_schema):
@@ -769,6 +882,8 @@ class PolicyTemplateChecker(object):
               secondary_schema, real_example, enforce_use_entire_schema=True):
             self._Error(('Example for policy %s does not comply to the ' +
                          'policy\'s validation_schema') % policy.get('name'))
+
+      self._CheckDefault(policy)
 
       # Statistics.
       self.num_policies += 1
@@ -822,10 +937,10 @@ class PolicyTemplateChecker(object):
 
     duplicated = set()
     for platform in platforms:
-      if platform not in ALL_SUPPORTED_PLATFOMRS:
+      if platform not in ALL_SUPPORTED_PLATFORMS:
         self._Error(
             'Platform %s is not supported in %s. Valid platforms are %s.' %
-            (platform, field_name, ', '.join(ALL_SUPPORTED_PLATFOMRS)),
+            (platform, field_name, ', '.join(ALL_SUPPORTED_PLATFORMS)),
             'policy', policy_name)
       if platform in duplicated:
         self._Error(
@@ -855,15 +970,6 @@ class PolicyTemplateChecker(object):
     for vkey in value:
       if vkey not in ('desc', 'text'):
         self._Warning('In message %s: Warning: Unknown key: %s' % (key, vkey))
-
-  def _GetSupportedVersionPlatformAndRange(self, supported_on):
-    (supported_on_platform, supported_on_versions) = supported_on.split(':')
-
-    (supported_on_from, supported_on_to) = supported_on_versions.split('-')
-
-    return supported_on_platform, (
-        int(supported_on_from) if supported_on_from else None), (
-            int(supported_on_to) if supported_on_to else None)
 
   def _GetReleasedPlatforms(self, policy, current_version):
     '''
@@ -896,7 +1002,7 @@ class PolicyTemplateChecker(object):
 
     for supported_on in policy.get('supported_on', []):
       supported_platform, supported_from, _ = \
-              self._GetSupportedVersionPlatformAndRange(supported_on)
+              _GetSupportedVersionPlatformAndRange(supported_on)
       if supported_from < current_version - 1:
         released_platforms[supported_platform] = supported_from
       else:
@@ -1248,10 +1354,24 @@ class PolicyTemplateChecker(object):
             'branch point. Please merge it into Beta or change the version to '
             '%d.' % (policy_name, platform, new_version, current_version))
       elif new_version < current_version - 1:
+        self.non_compatibility_error_count += 1
         self._Error(
             'Version %d has been released to Stable already. Please use '
             'version %d instead for platform %s.' %
             (new_version, current_version, platform), 'policy', policy_name)
+
+  def _CheckDeprecatedFutureField(self, original_policy, new_policy,
+                                  policy_name):
+    '''The 'future' flag has been deprecated, it shouldn't be used for any new
+       policy.'''
+    if ('future' in new_policy
+        and (original_policy is None or 'future' not in original_policy)):
+      self.non_compatibility_error_count += 1
+      self._Error(
+          "The 'future' flag has been deprecated, please use the 'future_on' "
+          "list instead. Search the flag documentation at the top of the "
+          "policy_templates.json file for more information.", 'policy',
+          policy_name)
 
   # Checks if the new policy definitions are compatible with the policy
   # definitions coming from the original_file_contents.
@@ -1300,6 +1420,11 @@ class PolicyTemplateChecker(object):
         if policy['type'] != 'group'
     }
 
+    original_policy_name_set = {
+        policy['name']
+        for policy in original_policy_definitions if policy['type'] != 'group'
+    }
+
     for original_policy in original_policy_definitions:
       # Check change compatibility for all non-group policy definitions.
       if original_policy['type'] == 'group':
@@ -1333,6 +1458,29 @@ class PolicyTemplateChecker(object):
                       original_rolling_out_platforms),
             MergeDict(new_released_platforms, new_rolling_out_platform),
             current_version, original_policy['name'])
+
+      if new_policy:
+        self._CheckDeprecatedFutureField(original_policy, new_policy,
+                                         original_policy['name'])
+
+    # Check brand new policies:
+    for new_policy_name in set(
+        policy_definitions_dict.keys()) - original_policy_name_set:
+      new_policy = policy_definitions_dict[new_policy_name]
+      new_released_platforms, new_rolling_out_platform = \
+              self._GetReleasedPlatforms(new_policy, current_version)
+      if new_released_platforms or new_rolling_out_platform:
+        self._CheckNewReleasedPlatforms({},
+                                        MergeDict(new_released_platforms,
+                                                  new_rolling_out_platform),
+                                        current_version, new_policy_name)
+      self._CheckDeprecatedFutureField(None, new_policy, new_policy_name)
+
+      # TODO(crbug.com/1139046): This default check should apply to all
+      # policies instead of just new ones.
+      if self._NeedsDefault(new_policy) and new_policy.get('default',
+                                                           None) == None:
+        self._Error(('Missing default field for policy %s') % (new_policy_name))
 
   def _LeadingWhitespace(self, line):
     match = LEADING_WHITESPACE.match(line)
@@ -1425,7 +1573,7 @@ class PolicyTemplateChecker(object):
       with open(filename, 'w') as f:
         f.writelines(fixed_lines)
 
-  def _ValidatePolicyAtomicGroups(self, atomic_groups, max_id):
+  def _ValidatePolicyAtomicGroups(self, atomic_groups, max_id, deleted_ids):
     ids = [x['id'] for x in atomic_groups]
     actual_highest_id = max(ids)
     if actual_highest_id != max_id:
@@ -1441,14 +1589,21 @@ class PolicyTemplateChecker(object):
         self._Error('Duplicate atomic group id %s' % (ids[i]))
         return
       ids_set.add(ids[i])
-      if i + 1 != ids[i]:
-        self._Error('Missing atomic group id %s' % (i + 1))
-        return
+      if i > 0 and ids[i - 1] + 1 != ids[i]:
+        for delete_id in range(ids[i - 1] + 1, ids[i]):
+          if delete_id not in deleted_ids:
+            self._Error('Missing atomic group id %s' % (delete_id))
+            return
 
   def Main(self, filename, options, original_file_contents, current_version):
     try:
       with open(filename, "rb") as f:
-        data = eval(f.read().decode("UTF-8"))
+        raw_data = f.read().decode("UTF-8")
+        data = eval(raw_data)
+        DuplicateKeyVisitor().visit(ast.parse(raw_data))
+    except ValueError as e:
+      self._Error(str(e))
+      return 1
     except:
       import traceback
       traceback.print_exc(file=sys.stdout)
@@ -1490,6 +1645,13 @@ class PolicyTemplateChecker(object):
         parent_element=None,
         container_name='The root element',
         offending=None)
+    deleted_atomic_policy_group_ids = self._CheckContains(
+        data,
+        'deleted_atomic_policy_group_ids',
+        list,
+        parent_element=None,
+        container_name='The root element',
+        offending=None)
     highest_id = self._CheckContains(
         data,
         'highest_id_currently_used',
@@ -1527,7 +1689,8 @@ class PolicyTemplateChecker(object):
         offending=None)
 
     self._ValidatePolicyAtomicGroups(policy_atomic_group_definitions,
-                                     highest_atomic_group_id)
+                                     highest_atomic_group_id,
+                                     deleted_atomic_policy_group_ids)
     self._CheckDevicePolicyProtoMappingUniqueness(
         device_policy_proto_map, legacy_device_policy_proto_map)
     self._CheckDevicePolicyProtoMappingExistence(
@@ -1536,7 +1699,8 @@ class PolicyTemplateChecker(object):
     if policy_definitions is not None:
       policy_ids = set()
       for policy in policy_definitions:
-        self._CheckPolicy(policy, False, policy_ids, deleted_policy_ids)
+        self._CheckPolicy(policy, False, policy_ids, deleted_policy_ids,
+                          current_version)
         self._CheckDevicePolicyProtoMappingDeviceOnly(
             policy, device_policy_proto_map, legacy_device_policy_proto_map)
       self._CheckPolicyIDs(policy_ids, deleted_policy_ids)
@@ -1586,15 +1750,15 @@ class PolicyTemplateChecker(object):
     # if the new policy definitions are compatible with the original policy
     # definitions (if the original file contents have not raised any syntax
     # errors).
-    current_error_count = self.error_count
-    if (not current_error_count and original_file_contents is not None and
-        current_version is not None):
+    self.non_compatibility_error_count = self.error_count
+    if (not self.non_compatibility_error_count
+        and original_file_contents is not None and current_version is not None):
       self._CheckPolicyDefinitionsChangeCompatibility(
           policy_definitions, original_file_contents, current_version)
 
-    if current_error_count != self.error_count:
+    if self.non_compatibility_error_count != self.error_count:
       print(
-          'There were compatibility validation errors in the change. You may '
+          '\nThere were compatibility validation errors in the change. You may '
           'bypass this validation by adding "BYPASS_POLICY_COMPATIBILITY_CHECK='
           '<justification>" to your changelist description. If you believe '
           'that this validation is a bug, please file a crbug against '

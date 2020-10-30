@@ -51,7 +51,11 @@ namespace {
 
 std::string CleanUpPath(const std::string& path) {
   // Remove the query string for named resource lookups.
-  return path.substr(0, path.find_first_of('?'));
+  std::string clean_path = path.substr(0, path.find_first_of('?'));
+  // Remove a URL fragment (for example #foo) if it exists.
+  clean_path = clean_path.substr(0, path.find_first_of('#'));
+
+  return clean_path;
 }
 
 const int kNonExistentResource = -1;
@@ -160,6 +164,10 @@ void WebUIDataSourceImpl::AddInteger(base::StringPiece name, int32_t value) {
   localized_strings_.SetInteger(name, value);
 }
 
+void WebUIDataSourceImpl::AddDouble(base::StringPiece name, double value) {
+  localized_strings_.SetDouble(name, value);
+}
+
 void WebUIDataSourceImpl::UseStringsJs() {
   use_strings_js_ = true;
 }
@@ -198,6 +206,16 @@ void WebUIDataSourceImpl::OverrideContentSecurityPolicy(
     network::mojom::CSPDirectiveName directive,
     const std::string& value) {
   csp_overrides_.insert_or_assign(directive, value);
+}
+
+void WebUIDataSourceImpl::DisableTrustedTypesCSP() {
+  // TODO(crbug.com/1098685): Trusted Type remaining WebUI
+  // This removes require-trusted-types-for and trusted-types directives
+  // from the CSP header.
+  OverrideContentSecurityPolicy(
+      network::mojom::CSPDirectiveName::RequireTrustedTypesFor, std::string());
+  OverrideContentSecurityPolicy(network::mojom::CSPDirectiveName::TrustedTypes,
+                                std::string());
 }
 
 void WebUIDataSourceImpl::AddFrameAncestor(const GURL& frame_ancestor) {
@@ -258,6 +276,9 @@ std::string WebUIDataSourceImpl::GetMimeType(const std::string& path) const {
 
   if (base::EndsWith(file_path, ".mp4", base::CompareCase::INSENSITIVE_ASCII))
     return "video/mp4";
+
+  if (base::EndsWith(file_path, ".wasm", base::CompareCase::INSENSITIVE_ASCII))
+    return "application/wasm";
 
   return "text/html";
 }

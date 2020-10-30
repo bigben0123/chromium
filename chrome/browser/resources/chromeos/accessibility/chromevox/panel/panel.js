@@ -8,20 +8,26 @@
 
 goog.provide('Panel');
 
+goog.require('AbstractEarcons');
 goog.require('AnnotationsUI');
 goog.require('BackgroundKeyboardHandler');
 goog.require('BrailleCommandData');
+goog.require('ChromeVoxKbHandler');
 goog.require('ChromeVoxState');
+goog.require('CommandStore');
+goog.require('EventGenerator');
 goog.require('EventSourceType');
 goog.require('GestureCommandData');
 goog.require('ISearchUI');
+goog.require('KeyCode');
+goog.require('LocaleOutputHelper');
 goog.require('Msgs');
 goog.require('PanelCommand');
 goog.require('PanelMenu');
 goog.require('PanelMenuItem');
+goog.require('QueueMode');
 goog.require('Tutorial');
-goog.require('ChromeVoxKbHandler');
-goog.require('CommandStore');
+goog.require('UserAnnotationHandler');
 
 /**
  * Class to manage the panel.
@@ -59,6 +65,7 @@ Panel = class {
     // part of |Background| construction).
     new ChromeVoxState();
     UserAnnotationHandler.init();
+    LocaleOutputHelper.init();
 
     /** @type {Element} @private */
     Panel.speechContainer_ = $('speech-container');
@@ -85,6 +92,18 @@ Panel = class {
     Panel.brailleTableElement_ = $('braille-table');
     Panel.brailleTableElement2_ = $('braille-table2');
 
+    /** @private {Element} */
+    Panel.braillePanLeft_ = $('braille-pan-left');
+    Panel.braillePanLeft_.addEventListener('click', () => {
+      chrome.extension.getBackgroundPage()['ChromeVox'].braille.panLeft();
+    }, false);
+
+    /** @private {Element} */
+    Panel.braillePanRight_ = $('braille-pan-right');
+    Panel.braillePanRight_.addEventListener('click', () => {
+      chrome.extension.getBackgroundPage()['ChromeVox'].braille.panRight();
+    }, false);
+
     /** @type {Panel.Mode} @private */
     Panel.mode_ = Panel.Mode.COLLAPSED;
 
@@ -108,13 +127,27 @@ Panel = class {
      */
     Panel.tutorial_ = new Tutorial();
 
+    /**
+     * @type {Object}
+     * @private
+     */
+    Panel.iTutorial = {
+      // Closure needs this to know about the showNextLesson function.
+      // Otherwise, Closure fires an error whenever calling showNextLesson().
+      showNextLesson: () => {
+        throw new Error(
+            'iTutorial should be assigned to the <i-tutorial> ' +
+            'element before calling showNextLesson()');
+      }
+    };
+
     Panel.setPendingCallback(null);
     Panel.updateFromPrefs();
 
     Msgs.addTranslatedMessagesToDom(document);
 
     window.addEventListener('storage', function(event) {
-      if (event.key == 'brailleCaptions') {
+      if (event.key === 'brailleCaptions') {
         Panel.updateFromPrefs();
       }
     }, false);
@@ -139,7 +172,7 @@ Panel = class {
     document.addEventListener('keydown', Panel.onKeyDown, false);
     document.addEventListener('mouseup', Panel.onMouseUp, false);
     window.addEventListener('blur', function(evt) {
-      if (evt.target != window || document.activeElement == document.body) {
+      if (evt.target !== window || document.activeElement === document.body) {
         return;
       }
 
@@ -150,28 +183,21 @@ Panel = class {
     Panel.ownerWindow = window;
 
     /** @private {boolean} */
-    Panel.menuSearchEnabled_ = true;
-
-    chrome.commandLinePrivate.hasSwitch(
-        'disable-experimental-accessibility-chromevox-search-menus',
-        (enabled) => {
-          Panel.menuSearchEnabled_ = !enabled;
-        });
-
-    /** @private {boolean} */
     Panel.iTutorialEnabled_ = false;
-
     chrome.commandLinePrivate.hasSwitch(
         'enable-experimental-accessibility-chromevox-tutorial', (enabled) => {
           Panel.iTutorialEnabled_ = enabled;
         });
+
+    /** @private {boolean} */
+    Panel.iTutorialReadyForTesting_ = false;
   }
 
   /**
    * Update the display based on prefs.
    */
   static updateFromPrefs() {
-    if (Panel.mode_ == Panel.Mode.SEARCH) {
+    if (Panel.mode_ === Panel.Mode.SEARCH) {
       Panel.speechContainer_.hidden = true;
       Panel.brailleContainer_.hidden = true;
       Panel.annotationsContainer_.hidden = true;
@@ -179,7 +205,7 @@ Panel = class {
       return;
     }
 
-    if (Panel.mode_ == Panel.Mode.ANNOTATION) {
+    if (Panel.mode_ === Panel.Mode.ANNOTATION) {
       Panel.speechContainer_.hidden = true;
       Panel.brailleContainer_.hidden = true;
       Panel.searchContainer_.hidden = true;
@@ -226,14 +252,14 @@ Panel = class {
         Panel.speechElement_.innerHTML = '';
         break;
       case PanelCommandType.ADD_NORMAL_SPEECH:
-        if (Panel.speechElement_.innerHTML != '') {
+        if (Panel.speechElement_.innerHTML !== '') {
           Panel.speechElement_.innerHTML += '&nbsp;&nbsp;';
         }
         Panel.speechElement_.innerHTML +=
             '<span class="usertext">' + escapeForHtml(command.data) + '</span>';
         break;
       case PanelCommandType.ADD_ANNOTATION_SPEECH:
-        if (Panel.speechElement_.innerHTML != '') {
+        if (Panel.speechElement_.innerHTML !== '') {
           Panel.speechElement_.innerHTML += '&nbsp;&nbsp;';
         }
         Panel.speechElement_.innerHTML += escapeForHtml(command.data);
@@ -261,6 +287,9 @@ Panel = class {
           Panel.openAnnotationsUI(command.data);
         }
         break;
+      case PanelCommandType.CLOSE_CHROMEVOX:
+        Panel.onClose();
+        break;
     }
   }
 
@@ -270,7 +299,7 @@ Panel = class {
    * @param {Panel.Mode} mode The new mode.
    */
   static setMode(mode) {
-    if (Panel.mode_ == mode) {
+    if (Panel.mode_ === mode) {
       return;
     }
 
@@ -285,24 +314,25 @@ Panel = class {
         Panel.ModeInfo[Panel.mode_].location;
 
     $('main').hidden =
-        (Panel.mode_ == Panel.Mode.FULLSCREEN_TUTORIAL ||
-         Panel.mode_ == Panel.Mode.FULLSCREEN_I_TUTORIAL);
-    $('menus_background').hidden = (Panel.mode_ != Panel.Mode.FULLSCREEN_MENUS);
-    $('tutorial').hidden = (Panel.mode_ != Panel.Mode.FULLSCREEN_TUTORIAL);
+        (Panel.mode_ === Panel.Mode.FULLSCREEN_TUTORIAL ||
+         Panel.mode_ === Panel.Mode.FULLSCREEN_I_TUTORIAL);
+    $('menus_background').hidden =
+        (Panel.mode_ !== Panel.Mode.FULLSCREEN_MENUS);
+    $('tutorial').hidden = (Panel.mode_ !== Panel.Mode.FULLSCREEN_TUTORIAL);
     // Interactive tutorial elements may not have been loaded yet.
     const iTutorialContainer = $('i-tutorial-container');
     if (iTutorialContainer) {
       iTutorialContainer.hidden =
-          (Panel.mode_ != Panel.Mode.FULLSCREEN_I_TUTORIAL);
+          (Panel.mode_ !== Panel.Mode.FULLSCREEN_I_TUTORIAL);
     }
 
     Panel.updateFromPrefs();
 
     // Change the orientation of the triangle next to the menus button to
     // indicate whether the menu is open or closed.
-    if (mode == Panel.Mode.FULLSCREEN_MENUS) {
+    if (mode === Panel.Mode.FULLSCREEN_MENUS) {
       $('triangle').style.transform = 'rotate(180deg)';
-    } else if (mode == Panel.Mode.COLLAPSED) {
+    } else if (mode === Panel.Mode.COLLAPSED) {
       $('triangle').style.transform = '';
     }
   }
@@ -314,7 +344,7 @@ Panel = class {
    */
   static onOpenMenus(opt_event, opt_activateMenuTitle) {
     // If the menu was already open, close it now and exit early.
-    if (Panel.mode_ != Panel.Mode.COLLAPSED) {
+    if (Panel.mode_ !== Panel.Mode.COLLAPSED) {
       Panel.setMode(Panel.Mode.COLLAPSED);
       return;
     }
@@ -335,9 +365,7 @@ Panel = class {
       Panel.pendingCallback_ = null;
 
       // Build the top-level menus.
-      const searchMenu = (Panel.menuSearchEnabled_) ?
-          Panel.addSearchMenu('panel_search_menu') :
-          null;
+      const searchMenu = Panel.addSearchMenu('panel_search_menu');
       const jumpMenu = Panel.addMenu('panel_menu_jump');
       const speechMenu = Panel.addMenu('panel_menu_speech');
       const tabsMenu = Panel.addMenu('panel_menu_tabs');
@@ -349,8 +377,8 @@ Panel = class {
       chromevoxMenu.addMenuItem(
           Msgs.getMsg('open_keyboard_shortcuts_menu'), 'Ctrl+Alt+/', '', '',
           function() {
-            BackgroundKeyboardHandler.sendKeyPress(
-                191, {'ctrl': true, 'alt': true});
+            EventGenerator.sendKeyPress(
+                KeyCode.OEM_2 /* forward slash */, {'ctrl': true, 'alt': true});
           });
 
       // Create a mapping between categories from CommandStore, and our
@@ -369,6 +397,10 @@ Panel = class {
         'braille': null,
         'developer': null
       };
+
+      // TODO(accessibility): Commands should be based off of CommandStore and
+      // not the keymap. There are commands that don't have a key binding (e.g.
+      // commands for touch).
 
       // Get the key map from the background page.
       const bkgnd = chrome.extension.getBackgroundPage();
@@ -414,10 +446,10 @@ Panel = class {
           let keyText;
           let brailleText;
           let gestureText;
-          if (eventSource == EventSourceType.TOUCH_GESTURE) {
+          if (eventSource === EventSourceType.TOUCH_GESTURE) {
             for (let i = 0, gesture; gesture = gestures[i]; i++) {
               const data = GestureCommandData.GESTURE_COMMAND_MAP[gesture];
-              if (data && data.command == command) {
+              if (data && data.command === command) {
                 gestureText = Msgs.getMsg(data.msgId);
                 break;
               }
@@ -444,7 +476,7 @@ Panel = class {
             const tabs = windows[i].tabs;
             for (let j = 0; j < tabs.length; j++) {
               let title = tabs[j].title;
-              if (tabs[j].active && windows[i].id == lastFocusedWindow.id) {
+              if (tabs[j].active && windows[i].id === lastFocusedWindow.id) {
                 title += ' ' + Msgs.getMsg('active_tab');
               }
               tabsMenu.addMenuItem(
@@ -498,7 +530,7 @@ Panel = class {
         // Create node menus asynchronously (because it may require
         // searching a long document) unless that's the specific menu the
         // user requested.
-        const async = (menuTitle != opt_activateMenuTitle);
+        const async = (menuTitle !== opt_activateMenuTitle);
         Panel.addNodeMenu(menuTitle, node, predicate, async);
       }
 
@@ -531,12 +563,12 @@ Panel = class {
       // Search menu can be null, since it is hidden behind a flag.
       let selectedMenu = Panel.searchMenu || Panel.menus_[0];
       for (let i = 0; i < Panel.menus_.length; i++) {
-        if (Panel.menus_[i].menuMsg == opt_activateMenuTitle) {
+        if (Panel.menus_[i].menuMsg === opt_activateMenuTitle) {
           selectedMenu = Panel.menus_[i];
         }
       }
 
-      const activateFirstItem = (selectedMenu != Panel.searchMenu);
+      const activateFirstItem = (selectedMenu !== Panel.searchMenu);
       Panel.activateMenu(selectedMenu, activateFirstItem);
     };
 
@@ -605,7 +637,7 @@ Panel = class {
 
     const addBorders = function(event) {
       const cell = event.target;
-      if (cell.tagName == 'TD') {
+      if (cell.tagName === 'TD') {
         cell.className = 'highlighted-cell';
         const companionIDs = cell.getAttribute('data-companionIDs');
         companionIDs.split(' ').map(function(companionID) {
@@ -617,7 +649,7 @@ Panel = class {
 
     const removeBorders = function(event) {
       const cell = event.target;
-      if (cell.tagName == 'TD') {
+      if (cell.tagName === 'TD') {
         cell.className = 'unhighlighted-cell';
         const companionIDs = cell.getAttribute('data-companionIDs');
         companionIDs.split(' ').map(function(companionID) {
@@ -627,8 +659,24 @@ Panel = class {
       }
     };
 
+    const routeCursor = function(event) {
+      const cell = event.target;
+      if (cell.tagName === 'TD') {
+        const displayPosition = parseInt(cell.id.split('-')[0], 10);
+        if (Number.isNaN(displayPosition)) {
+          throw new Error(
+              'The display position is calculated assuming that the cell ID ' +
+              'is formatted like int-string. For example, 0-brailleCell is a ' +
+              'valid cell ID.');
+        }
+        chrome.extension.getBackgroundPage()['ChromeVox'].braille.route(
+            displayPosition);
+      }
+    };
+
     Panel.brailleContainer_.addEventListener('mouseover', addBorders);
     Panel.brailleContainer_.addEventListener('mouseout', removeBorders);
+    Panel.brailleContainer_.addEventListener('click', routeCursor);
 
     // Clear the tables.
     let rowCount = Panel.brailleTableElement_.rows.length;
@@ -646,10 +694,10 @@ Panel = class {
     // Number of cells already written in this row.
     let cellCount = cols;
     for (let i = 0; i < groups.length; i++) {
-      if (cellCount == cols) {
+      if (cellCount === cols) {
         cellCount = 0;
         // Check if we reached the limit on the number of rows we can have.
-        if (rowCount == rows) {
+        if (rowCount === rows) {
           break;
         }
         rowCount++;
@@ -681,7 +729,7 @@ Panel = class {
           // Update to see what we still have to fill.
           brailleText = brailleText.substring(cols - cellCount);
           // Make new row.
-          if (rowCount == rows) {
+          if (rowCount === rows) {
             break;
           }
           rowCount++;
@@ -780,7 +828,7 @@ Panel = class {
    * first item.
    */
   static activateMenu(menu, activateFirstItem) {
-    if (menu == Panel.activeMenu_) {
+    if (menu === Panel.activeMenu_) {
       return;
     }
 
@@ -818,7 +866,7 @@ Panel = class {
   static advanceActiveMenuBy(delta) {
     let activeIndex = -1;
     for (let i = 0; i < Panel.menus_.length; i++) {
-      if (Panel.activeMenu_ == Panel.menus_[i]) {
+      if (Panel.activeMenu_ === Panel.menus_[i]) {
         activeIndex = i;
         break;
       }
@@ -886,7 +934,7 @@ Panel = class {
     while (target && !target.classList.contains('menu-item')) {
       // Allow the user to click and release on the menu button and leave
       // the menu button.
-      if (target.id == 'menus_button') {
+      if (target.id === 'menus_button') {
         return;
       }
 
@@ -918,14 +966,14 @@ Panel = class {
    * @param {Event} event The key event.
    */
   static onKeyDown(event) {
-    if (event.key == 'Escape' &&
-        Panel.mode_ == Panel.Mode.FULLSCREEN_TUTORIAL) {
+    if (event.key === 'Escape' &&
+        Panel.mode_ === Panel.Mode.FULLSCREEN_TUTORIAL) {
       Panel.setMode(Panel.Mode.COLLAPSED);
       return;
     }
 
     // Events don't propagate correctly because blur places focus on body.
-    if (Panel.mode_ == Panel.Mode.FULLSCREEN_TUTORIAL &&
+    if (Panel.mode_ === Panel.Mode.FULLSCREEN_TUTORIAL &&
         !Panel.tutorial_.onKeyDown(event)) {
       return;
     }
@@ -942,13 +990,13 @@ Panel = class {
     // If left/right arrow are pressed, we should adjust the search bar's
     // cursor. We only want to advance the active menu if we are at the
     // beginning/end of the search bar's contents.
-    if (Panel.searchMenu && event.target == Panel.searchMenu.searchBar) {
+    if (Panel.searchMenu && event.target === Panel.searchMenu.searchBar) {
       switch (event.key) {
         case 'ArrowLeft':
         case 'ArrowRight':
           if (event.target.value) {
             const cursorIndex = event.target.selectionStart +
-                (event.key == 'ArrowRight' ? 1 : -1);
+                (event.key === 'ArrowRight' ? 1 : -1);
             const queryLength = event.target.value.length;
             if (cursorIndex >= 0 && cursorIndex <= queryLength) {
               return;
@@ -1044,7 +1092,7 @@ Panel = class {
       const pendingCallback = Panel.pendingCallback_;
       Panel.pendingCallback_ = null;
       const onFocus = function(evt) {
-        if (evt.target.docUrl == location.href) {
+        if (evt.target.docUrl === location.href) {
           return;
         }
 
@@ -1069,7 +1117,7 @@ Panel = class {
       desktop.addEventListener(
           chrome.automation.EventType.FOCUS, onFocus, true);
 
-      // Make sure all menus are cleared to avoid bogous output when we re-open.
+      // Make sure all menus are cleared to avoid bogus output when we re-open.
       Panel.clearMenus();
 
       // Ensure annotations input is cleared.
@@ -1087,47 +1135,23 @@ Panel = class {
    * @param {string=} opt_page Show a specific page.
    */
   static onTutorial(opt_page) {
-    // Change the url fragment to 'fullscreen', which signals the native
-    // host code to make the window fullscreen, revealing the menus.
     if (Panel.iTutorialEnabled_) {
-      if ($('i-tutorial') === null) {
-        // Load resources if this is the first time opening the tutorial.
-        const tutorialScript = document.createElement('script');
-        tutorialScript.src = '../i_tutorial/i_tutorial.js';
-        tutorialScript.setAttribute('type', 'module');
-        const lessonScript = document.createElement('script');
-        lessonScript.src = '../i_tutorial/tutorial_lesson.js';
-        lessonScript.setAttribute('type', 'module');
-        document.body.appendChild(tutorialScript);
-        document.body.appendChild(lessonScript);
-
-        // Create tutorial container and element.
-        const tutorialContainer = document.createElement('div');
-        tutorialContainer.setAttribute('id', 'i-tutorial-container');
-        tutorialContainer.hidden = true;
-        const tutorialElement = document.createElement('i-tutorial');
-        tutorialElement.setAttribute('id', 'i-tutorial');
-        tutorialContainer.appendChild(tutorialElement);
-        document.body.appendChild(tutorialContainer);
-
-        // Add listeners. These are custom events fired from custom components.
-        $('i-tutorial')
-            .addEventListener('tutorial-close', Panel.onCloseTutorial);
-        $('i-tutorial').addEventListener('request-speech', (evt) => {
-          const text = evt.detail.text;
-          const background = chrome.extension.getBackgroundPage();
-          const cvox = background['ChromeVox'];
-          cvox.tts.speak(
-              text, background.QueueMode.FLUSH, {'doNotInterrupt': true});
-        });
+      if (!$('i-tutorial')) {
+        const curriculum = Panel.sessionState ===
+                chrome.loginState.SessionState.IN_OOBE_SCREEN ?
+            'quick_orientation' :
+            null;
+        Panel.createITutorial(curriculum);
       }
 
       Panel.setMode(Panel.Mode.FULLSCREEN_I_TUTORIAL);
+      if (Panel.iTutorial.show) {
+        Panel.iTutorial.show();
+      }
       return;
     }
 
     Panel.setMode(Panel.Mode.FULLSCREEN_TUTORIAL);
-
     switch (opt_page) {
       case 'updateNotes':
         Panel.tutorial_.updateNotes();
@@ -1135,6 +1159,90 @@ Panel = class {
       default:
         Panel.tutorial_.lastViewedPage();
     }
+  }
+
+  /**
+   * Creates an <i-tutorial> element and adds it to the dom.
+   * @param {(string|null)} curriculum
+   */
+  static createITutorial(curriculum) {
+    const tutorialScript = document.createElement('script');
+    tutorialScript.src = '../i_tutorial/components/i_tutorial.js';
+    tutorialScript.setAttribute('type', 'module');
+    const lessonScript = document.createElement('script');
+    lessonScript.src = '../i_tutorial/components/tutorial_lesson.js';
+    lessonScript.setAttribute('type', 'module');
+    document.body.appendChild(tutorialScript);
+    document.body.appendChild(lessonScript);
+
+    // Create tutorial container and element.
+    const tutorialContainer = document.createElement('div');
+    tutorialContainer.setAttribute('id', 'i-tutorial-container');
+    tutorialContainer.hidden = true;
+    const tutorialElement = document.createElement('i-tutorial');
+    tutorialElement.setAttribute('id', 'i-tutorial');
+    if (curriculum) {
+      tutorialElement.curriculum = curriculum;
+    }
+    tutorialContainer.appendChild(tutorialElement);
+    document.body.appendChild(tutorialContainer);
+    Panel.iTutorial = tutorialElement;
+
+    // Add listeners. These are custom events fired from custom components.
+    $('i-tutorial').addEventListener('closetutorial', (evt) => {
+      // Ensure UserActionMonitor is destroyed before closing tutorial.
+      const background =
+          chrome.extension.getBackgroundPage()['ChromeVoxState']['instance'];
+      background.destroyUserActionMonitor();
+      Panel.onCloseTutorial();
+    });
+    $('i-tutorial').addEventListener('requestspeech', (evt) => {
+      const background = chrome.extension.getBackgroundPage();
+      /**
+       * @type {{
+       * text: string,
+       * queueMode: QueueMode,
+       * properties: ({doNotInterrupt: boolean}|undefined)}}
+       */
+      const detail = evt.detail;
+      const text = detail.text;
+      const queueMode = detail.queueMode;
+      const properties = detail.properties || {};
+      if (!text || queueMode === undefined) {
+        throw new Error(
+            `Must specify text and queueMode when requesting speech from the
+                tutorial`);
+      }
+      const cvox = background['ChromeVox'];
+      cvox.tts.speak(text, queueMode, properties);
+    });
+    $('i-tutorial').addEventListener('startinteractivemode', (evt) => {
+      const actions = evt.detail.actions;
+      const background =
+          chrome.extension.getBackgroundPage()['ChromeVoxState']['instance'];
+      background.createUserActionMonitor(actions, () => {
+        background.destroyUserActionMonitor();
+        Panel.iTutorial.showNextLesson();
+      });
+    });
+    $('i-tutorial').addEventListener('stopinteractivemode', (evt) => {
+      const background =
+          chrome.extension.getBackgroundPage()['ChromeVoxState']['instance'];
+      background.destroyUserActionMonitor();
+    });
+    $('i-tutorial').addEventListener('requestfullydescribe', (evt) => {
+      const commandHandler =
+          chrome.extension.getBackgroundPage()['CommandHandler'];
+      commandHandler.onCommand('fullyDescribe');
+    });
+    $('i-tutorial').addEventListener('requestearcon', (evt) => {
+      const earconId = evt.detail.earconId;
+      chrome.extension
+          .getBackgroundPage()['ChromeVox']['earcons']['playEarcon'](earconId);
+    });
+    $('i-tutorial').addEventListener('readyfortesting', () => {
+      Panel.iTutorialReadyForTesting_ = true;
+    });
   }
 
   /**
@@ -1277,7 +1385,7 @@ window.addEventListener('hashchange', function() {
   const bkgnd = chrome.extension.getBackgroundPage();
 
   // Save the sticky state when a user first focuses the panel.
-  if (location.hash == '#fullscreen' || location.hash == '#focus') {
+  if (location.hash === '#fullscreen' || location.hash === '#focus') {
     Panel.originalStickyState_ = bkgnd['ChromeVox']['isStickyPrefOn'];
   }
 

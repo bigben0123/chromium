@@ -33,6 +33,12 @@ ExtensionDownloaderDelegate::FailureData::FailureData(
     : manifest_invalid_error(manifest_invalid_error) {}
 
 ExtensionDownloaderDelegate::FailureData::FailureData(
+    ManifestInvalidError manifest_invalid_error,
+    const std::string& app_status_error)
+    : manifest_invalid_error(manifest_invalid_error),
+      app_status_error(app_status_error) {}
+
+ExtensionDownloaderDelegate::FailureData::FailureData(
     const std::string& additional_info)
     : additional_info(additional_info) {}
 
@@ -47,10 +53,6 @@ void ExtensionDownloaderDelegate::OnExtensionDownloadStageChanged(
 void ExtensionDownloaderDelegate::OnExtensionDownloadCacheStatusRetrieved(
     const ExtensionId& id,
     CacheStatus cache_status) {}
-
-void ExtensionDownloaderDelegate::OnExtensionManifestUpdateCheckStatusReceived(
-    const ExtensionId& id,
-    const std::string& status) {}
 
 void ExtensionDownloaderDelegate::OnExtensionDownloadFailed(
     const ExtensionId& id,

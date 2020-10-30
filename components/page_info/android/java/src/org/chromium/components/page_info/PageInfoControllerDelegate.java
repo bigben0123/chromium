@@ -5,15 +5,19 @@
 package org.chromium.components.page_info;
 
 import android.content.Intent;
+import android.graphics.drawable.Drawable;
 
 import androidx.annotation.IntDef;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import org.chromium.base.Callback;
 import org.chromium.base.Consumer;
 import org.chromium.base.supplier.Supplier;
+import org.chromium.components.browser_ui.site_settings.SiteSettingsClient;
 import org.chromium.components.content_settings.CookieControlsBridge;
 import org.chromium.components.content_settings.CookieControlsObserver;
+import org.chromium.components.embedder_support.browser_context.BrowserContextHandle;
 import org.chromium.components.omnibox.AutocompleteSchemeClassifier;
 import org.chromium.components.page_info.PageInfoView.PageInfoViewParams;
 import org.chromium.ui.modaldialog.ModalDialogManager;
@@ -161,7 +165,7 @@ public abstract class PageInfoControllerDelegate {
     /**
      * Initialize viewParams with Offline Page UI info, if any.
      * @param viewParams The PageInfoViewParams to set state on.
-     * @param consumer Used to set "open Online" button callback for offline page.
+     * @param runAfterDismiss Used to set "open Online" button callback for offline page.
      */
     public void initOfflinePageUiParams(
             PageInfoViewParams viewParams, Consumer<Runnable> runAfterDismiss) {
@@ -198,6 +202,11 @@ public abstract class PageInfoControllerDelegate {
     public abstract void showSiteSettings(String url);
 
     /**
+     * Show cookie settings.
+     */
+    public abstract void showCookieSettings();
+
+    /**
      * Creates Cookie Controls Bridge.
      * @param observer The CookieControlsObserver to create the bridge with.
      * @return the object that facilitates interfacing with native code.
@@ -205,4 +214,22 @@ public abstract class PageInfoControllerDelegate {
     @NonNull
     public abstract CookieControlsBridge createCookieControlsBridge(
             CookieControlsObserver observer);
+
+    /**
+     * @return Returns the browser context associated with this dialog.
+     */
+    @NonNull
+    public abstract BrowserContextHandle getBrowserContext();
+
+    /**
+     * @return Returns the SiteSettingsClient for this page info.
+     */
+    @NonNull
+    public abstract SiteSettingsClient getSiteSettingsClient();
+
+    /**
+     * Fetches a favicon for the current page and passes it to callback.
+     * The UI will use a fallback icon if null is supplied.
+     */
+    public abstract void getFavicon(String url, Callback<Drawable> callback);
 }

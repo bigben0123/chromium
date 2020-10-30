@@ -249,8 +249,11 @@ void Notification::OnShow() {
 void Notification::OnClick(OnClickCallback completed_closure) {
   ExecutionContext* context = GetExecutionContext();
   auto* window = DynamicTo<LocalDOMWindow>(context);
-  if (window && window->GetFrame())
-    LocalFrame::NotifyUserActivation(window->GetFrame());
+  if (window && window->GetFrame()) {
+    LocalFrame::NotifyUserActivation(
+        window->GetFrame(),
+        mojom::blink::UserActivationNotificationType::kInteraction);
+  }
   ScopedWindowFocusAllowedIndicator window_focus_allowed(GetExecutionContext());
   DispatchEvent(*Event::Create(event_type_names::kClick));
 
@@ -313,8 +316,8 @@ String Notification::badge() const {
   return data_->badge.GetString();
 }
 
-NavigatorVibration::VibrationPattern Notification::vibrate() const {
-  NavigatorVibration::VibrationPattern pattern;
+VibrationController::VibrationPattern Notification::vibrate() const {
+  VibrationController::VibrationPattern pattern;
   if (data_->vibration_pattern.has_value()) {
     pattern.AppendRange(data_->vibration_pattern->begin(),
                         data_->vibration_pattern->end());

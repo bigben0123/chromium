@@ -39,6 +39,11 @@ Polymer({
       type: Number,
       value: 0,
     },
+
+    hostname_: {
+      type: String,
+      value: '',
+    },
   },
 
   /** @type {?chromeos.networkConfig.mojom.CrosNetworkConfigRemote} */
@@ -64,6 +69,24 @@ Polymer({
     this.$$('#import-onc').value = '';
 
     this.requestGlobalPolicy_();
+    this.getHostname_();
+    this.selectTabFromHash_();
+    window.addEventListener('hashchange', () => {
+      this.selectTabFromHash_();
+    });
+  },
+
+  /** @private */
+  selectTabFromHash_() {
+    const selectedTab = window.location.hash.substring(1);
+    if (!selectedTab)
+      return;
+    const tabpanels = this.$$('iron-pages').querySelectorAll('.tabpanel');
+    for (let idx = 0; idx < tabpanels.length; ++idx) {
+      if (tabpanels[idx].id == selectedTab) {
+        this.selectedTab_ = idx;
+      }
+    }
   },
 
   /** @private */
@@ -129,6 +152,19 @@ Polymer({
   },
 
   /**
+   * @param {!Event} event
+   * @private
+   */
+  onHostnameChanged_(event) {
+    this.browserProxy_.setHostname(this.hostname_);
+  },
+
+  /** @private */
+  getHostname_() {
+    this.browserProxy_.getHostname().then(result => this.hostname_ = result);
+  },
+
+  /**
    * Handles clicks on network items in the <network-select> element by
    * attempting a connection to the selected network or requesting a password
    * if the network requires a password.
@@ -161,6 +197,16 @@ Polymer({
           response.result.toString() + ' Message: ' + response.message);
       this.browserProxy_.showNetworkConfig(networkState.guid);
     });
+  },
+
+  /**
+   * Handles requests to open the feedback report dialog. The provided string
+   * in the event will be sent as a part of the feedback report.
+   * @param {!Event<string>} event
+   * @private
+   */
+  onOpenFeedbackDialog_(event) {
+    chrome.send('OpenFeedbackDialog', [event.detail]);
   },
 
   /**

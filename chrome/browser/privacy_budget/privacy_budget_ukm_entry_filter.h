@@ -16,7 +16,7 @@
 // Doesn't affect any other kind of UKM event other than Identifiability events.
 class PrivacyBudgetUkmEntryFilter : public ukm::UkmEntryFilter {
  public:
-  // |settings| must outlive PrivacyBudgetUkmEntryFilter.
+  // |state| must outlive PrivacyBudgetUkmEntryFilter.
   explicit PrivacyBudgetUkmEntryFilter(IdentifiabilityStudyState* state);
 
   PrivacyBudgetUkmEntryFilter(const PrivacyBudgetUkmEntryFilter&) = delete;
@@ -27,6 +27,7 @@ class PrivacyBudgetUkmEntryFilter : public ukm::UkmEntryFilter {
   bool FilterEntry(
       ukm::mojom::UkmEntry* entry,
       base::flat_set<uint64_t>* removed_metric_hashes) const override;
+  void OnStoreRecordingsInReport() const override;
 
  private:
   IdentifiabilityStudyState* const identifiability_study_state_;

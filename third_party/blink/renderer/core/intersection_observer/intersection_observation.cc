@@ -103,6 +103,16 @@ bool IntersectionObservation::ShouldCompute(unsigned flags) {
   DCHECK(Observer());
   if (!target_ || !observer_->RootIsValid() | !observer_->GetExecutionContext())
     return false;
+
+  // If we're processing post-layout deliveries only and we don't have a
+  // post-layout delivery observer, then return early.
+  if (flags & kPostLayoutDeliveryOnly) {
+    if (Observer()->GetDeliveryBehavior() !=
+        IntersectionObserver::kDeliverDuringPostLayoutSteps) {
+      return false;
+    }
+  }
+
   if (flags &
       (observer_->RootIsImplicit() ? kImplicitRootObserversNeedUpdate
                                    : kExplicitRootObserversNeedUpdate)) {
@@ -120,12 +130,12 @@ bool IntersectionObservation::ShouldCompute(unsigned flags) {
     return false;
   }
   if (target_->isConnected() && Observer()->trackVisibility()) {
-    FrameOcclusionState occlusion_state =
+    mojom::blink::FrameOcclusionState occlusion_state =
         target_->GetDocument().GetFrame()->GetOcclusionState();
     // If we're tracking visibility, and we don't have occlusion information
     // from our parent frame, then postpone computing intersections until a
     // later lifecycle when the occlusion information is known.
-    if (occlusion_state == FrameOcclusionState::kUnknown)
+    if (occlusion_state == mojom::blink::FrameOcclusionState::kUnknown)
       return false;
   }
   last_run_time_ = timestamp;

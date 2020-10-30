@@ -5,8 +5,11 @@
 module page_load_metrics.mojom;
 
 import "ui/gfx/geometry/mojom/geometry.mojom";
+import "mojo/public/mojom/base/shared_memory.mojom";
 import "mojo/public/mojom/base/time.mojom";
 import "third_party/blink/public/mojom/web_feature/web_feature.mojom";
+import
+  "third_party/blink/public/mojom/mobile_metrics/mobile_friendliness.mojom";
 import "third_party/blink/public/mojom/use_counter/css_property_id.mojom";
 import "url/mojom/origin.mojom";
 
@@ -20,14 +23,14 @@ struct DocumentTiming {
 };
 
 struct LargestContentfulPaintTiming {
-  // Time when the page's largest image is painted. Removed images are excluded.
+  // Time when the page's largest image is painted.
   mojo_base.mojom.TimeDelta? largest_image_paint;
 
   // Size of the largest image of the largest image paint, by
   // Size = Height * Width. Removed images are excluded.
   uint64 largest_image_paint_size;
 
-  // Time when the page's largest text is painted. Removed text is excluded.
+  // Time when the page's largest text is painted.
   mojo_base.mojom.TimeDelta? largest_text_paint;
 
   // Size of the largest text of the largest text paint, by
@@ -49,10 +52,10 @@ struct PaintTiming {
   // (Experimental) Time when the page's primary content is painted.
   mojo_base.mojom.TimeDelta? first_meaningful_paint;
 
-  // Largest contentful paint, which excludes removed content.
+  // Largest contentful paint, which includes removed content.
   LargestContentfulPaintTiming largest_contentful_paint;
 
-  // (Experimental) largest contentful paint including removed content.
+  // (Experimental) largest contentful paint excluding removed content.
   LargestContentfulPaintTiming experimental_largest_contentful_paint;
 
   // (Experimental) Time when the frame is first eligible to be painted, i.e.
@@ -166,15 +169,12 @@ struct PageLoadTiming {
 // FrameIntersectionUpdate contains a frame's intersections with other elements
 // in a page load.
 struct FrameIntersectionUpdate {
-  // The frame's current intersection rect with the main frame document in the
-  // coordinate system of the main frame's viewport. The intersection rect is
+  // The frame's current intersection rect with the main frame in the main
+  // frame's coordinate system.. The intersection rect is
   // an empty rect when there is no intersection with the main frame and
   // returns the document size of the root document for the main frame. This
   // is only set the first time an intersection changes and is null otherwise.
-  // TODO(https://crbug/1084786): This is not reported in the correct
-  // coordinate system and returns inaccurate rects when style transforms are
-  // applied.
-  gfx.mojom.Rect? main_frame_document_intersection_rect;
+  gfx.mojom.Rect? main_frame_intersection_rect;
 };
 
 struct FrameMetadata {
@@ -322,21 +322,6 @@ struct InputTiming {
   uint64 num_input_events = 0;
 };
 
-struct PercentOptional {
-  int8 percent;
-};
-
-// The throughput data for this page.
-struct ThroughputUkmData {
-  // The source id for the ukm.
-  int64 source_id;
-  // The throughput of the page of different threads: main, compositor, and the
-  // aggregated throughput of main && compositor thread.
-  int8 aggregated_throughput_percent;
-  int8 impl_throughput_percent;
-  PercentOptional? main_throughput_percent;
-};
-
 // Sent from renderer to browser process when the PageLoadTiming for the
 // associated frame changed.
 interface PageLoadMetrics {
@@ -351,14 +336,14 @@ interface PageLoadMetrics {
                FrameRenderDataUpdate render_data,
                CpuTiming cpu_load_timing,
                DeferredResourceCounts new_deferred_resource_data,
-               InputTiming input_timing_delta);
+               InputTiming input_timing_delta,
+               blink.mojom.MobileFriendliness mobile_friendliness);
 
-  // The renderer submit throughput data to the browser process. The browser
-  // process aggregates these data, and reports the aggregated value to UKM when
-  // the page shuts down or navigates away.
-  // TODO(xidachen): The interface exists for every frame, but this method is
-  // only called for LocalRoots. Should limit the visibility to LocalRoots only.
-  SubmitThroughputData(ThroughputUkmData throughput_data);
+  // Set up a shared memory used to transfer smoothness data from the renderer
+  // to the browser. The structure is defined in
+  // //cc/metrics/ukm_smoothness_data.h
+  SetUpSharedMemoryForSmoothness(
+      mojo_base.mojom.ReadOnlySharedMemoryRegion shared_memory);
 };
 
 // TimeDelta below relative to the navigation start of the navigation restoring

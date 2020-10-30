@@ -21,10 +21,12 @@ class AbortSignal;
 class ExceptionState;
 class MessagePort;
 class ReadableStreamDefaultController;
+class ReadableWritablePair;
 class ScriptPromise;
 class ScriptState;
 class StrategySizeAlgorithm;
 class StreamAlgorithm;
+class StreamPipeOptions;
 class StreamPromiseResolver;
 class StreamStartAlgorithm;
 class UnderlyingSourceBase;
@@ -40,9 +42,7 @@ class CORE_EXPORT ReadableStream : public ScriptWrappable {
   class PipeOptions : public GarbageCollected<PipeOptions> {
    public:
     PipeOptions();
-    PipeOptions(ScriptState* script_state,
-                ScriptValue options,
-                ExceptionState& exception_state);
+    explicit PipeOptions(const StreamPipeOptions* options);
 
     bool PreventClose() const { return prevent_close_; }
     bool PreventAbort() const { return prevent_abort_; }
@@ -116,22 +116,24 @@ class CORE_EXPORT ReadableStream : public ScriptWrappable {
                                          ScriptValue options,
                                          ExceptionState&);
 
-  ScriptValue pipeThrough(ScriptState*,
-                          ScriptValue transform_stream,
-                          ExceptionState&);
+  ReadableStream* pipeThrough(ScriptState*,
+                              ReadableWritablePair* transform,
+                              ExceptionState&);
 
   // https://streams.spec.whatwg.org/#rs-pipe-through
-  ScriptValue pipeThrough(ScriptState*,
-                          ScriptValue transform_stream,
-                          ScriptValue options,
-                          ExceptionState&);
+  ReadableStream* pipeThrough(ScriptState*,
+                              ReadableWritablePair* transform,
+                              const StreamPipeOptions* options,
+                              ExceptionState&);
 
-  ScriptPromise pipeTo(ScriptState*, ScriptValue destination, ExceptionState&);
+  ScriptPromise pipeTo(ScriptState*,
+                       WritableStream* destination,
+                       ExceptionState&);
 
   // https://streams.spec.whatwg.org/#rs-pipe-to
   ScriptPromise pipeTo(ScriptState*,
-                       ScriptValue destination_value,
-                       ScriptValue options,
+                       WritableStream* destination,
+                       const StreamPipeOptions* options,
                        ExceptionState&);
 
   // https://streams.spec.whatwg.org/#rs-tee
@@ -153,7 +155,7 @@ class CORE_EXPORT ReadableStream : public ScriptWrappable {
 
   bool IsErrored() const { return IsErrored(this); }
 
-  void LockAndDisturb(ScriptState*, ExceptionState&);
+  void LockAndDisturb(ScriptState*);
 
   void Serialize(ScriptState*, MessagePort* port, ExceptionState&);
 
@@ -164,9 +166,9 @@ class CORE_EXPORT ReadableStream : public ScriptWrappable {
   // Returns a reader that doesn't have the |for_author_code_| flag set. This is
   // used in contexts where reads should not be interceptable by user code. This
   // corresponds to calling AcquireReadableStreamDefaultReader(stream, false) in
-  // specification language.
-  ReadableStreamDefaultReader* GetReaderNotForAuthorCode(ScriptState*,
-                                                         ExceptionState&);
+  // specification language. The caller must ensure that the stream is not
+  // locked.
+  ReadableStreamDefaultReader* GetReaderNotForAuthorCode(ScriptState*);
 
   //
   // Readable stream abstract operations

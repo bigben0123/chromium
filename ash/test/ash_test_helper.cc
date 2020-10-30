@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "ash/accelerometer/accelerometer_reader.h"
 #include "ash/app_list/test/app_list_test_helper.h"
 #include "ash/assistant/assistant_controller_impl.h"
 #include "ash/assistant/test/test_assistant_service.h"
@@ -19,11 +20,11 @@
 #include "ash/public/cpp/test/test_new_window_delegate.h"
 #include "ash/session/test_session_controller_client.h"
 #include "ash/shell.h"
-#include "ash/shell/toplevel_window.h"
 #include "ash/shell_init_params.h"
 #include "ash/system/model/system_tray_model.h"
 #include "ash/system/screen_layout_observer.h"
 #include "ash/test/ash_test_views_delegate.h"
+#include "ash/test/toplevel_window.h"
 #include "ash/test_shell_delegate.h"
 #include "ash/wallpaper/wallpaper_controller_impl.h"
 #include "ash/wm/overview/overview_controller.h"
@@ -301,6 +302,10 @@ void AshTestHelper::SetUp(InitParams init_params) {
   gesture_config->set_max_touch_down_duration_for_click_in_ms(800);
   gesture_config->set_long_press_time_in_ms(1000);
   gesture_config->set_max_touch_move_in_pixels_for_click(5);
+
+  // Fake the |ec_lid_angle_driver_status_| in the unittests.
+  AccelerometerReader::GetInstance()->SetECLidAngleDriverStatusForTesting(
+      ECLidAngleDriverStatus::NOT_SUPPORTED);
 }
 
 display::Display AshTestHelper::GetSecondaryDisplay() const {

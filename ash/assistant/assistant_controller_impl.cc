@@ -52,7 +52,8 @@ AssistantControllerImpl::~AssistantControllerImpl() {
 // static
 void AssistantControllerImpl::RegisterProfilePrefs(
     PrefRegistrySimple* registry) {
-  registry->RegisterIntegerPref(prefs::kAssistantNumWarmerWelcomeTriggered, 0);
+  AssistantInteractionControllerImpl::RegisterProfilePrefs(registry);
+  AssistantUiControllerImpl::RegisterProfilePrefs(registry);
 }
 
 void AssistantControllerImpl::BindReceiver(
@@ -92,17 +93,8 @@ void AssistantControllerImpl::SendAssistantFeedback(
 }
 
 void AssistantControllerImpl::StartSpeakerIdEnrollmentFlow() {
-  if (assistant_state_controller_.consent_status().value_or(
-          chromeos::assistant::prefs::ConsentStatus::kUnknown) ==
-      chromeos::assistant::prefs::ConsentStatus::kActivityControlAccepted) {
-    // If activity control has been accepted, launch the enrollment flow.
-    setup_controller()->StartOnboarding(false /* relaunch */,
-                                        FlowType::kSpeakerIdEnrollment);
-  } else {
-    // If activity control has not been accepted, launch the opt-in flow.
-    setup_controller()->StartOnboarding(false /* relaunch */,
-                                        FlowType::kConsentFlow);
-  }
+  setup_controller()->StartOnboarding(false /* relaunch */,
+                                      FlowType::kSpeakerIdEnrollment);
 }
 
 void AssistantControllerImpl::DownloadImage(
@@ -204,6 +196,10 @@ void AssistantControllerImpl::OnDeepLinkReceived(
     case DeepLinkType::kFeedback:
       NewWindowDelegate::GetInstance()->OpenFeedbackPage(
           /*from_assistant=*/true);
+
+      // Close the assistant UI so that the feedback page is visible.
+      assistant_ui_controller_.CloseUi(
+          chromeos::assistant::AssistantExitPoint::kUnspecified);
       break;
     case DeepLinkType::kScreenshot:
       // We close the UI before taking the screenshot as it's probably not the
@@ -271,7 +267,7 @@ void AssistantControllerImpl::OnAccessibilityStatusChanged() {
   // The Assistant service needs to be informed of changes to accessibility
   // state so that it can turn on/off A11Y features appropriately.
   assistant_->OnAccessibilityStatusChanged(
-      Shell::Get()->accessibility_controller()->spoken_feedback_enabled());
+      Shell::Get()->accessibility_controller()->spoken_feedback().enabled());
 }
 
 bool AssistantControllerImpl::IsAssistantReady() const {
@@ -324,12 +320,6 @@ void AssistantControllerImpl::OnLockedFullScreenStateChanged(bool enabled) {
   if (enabled)
     assistant_ui_controller_.CloseUi(
         chromeos::assistant::AssistantExitPoint::kUnspecified);
-}
-
-void AssistantControllerImpl::BindNotificationController(
-    mojo::PendingReceiver<mojom::AssistantNotificationController> receiver) {
-  Shell::Get()->assistant_controller()->notification_controller()->BindReceiver(
-      std::move(receiver));
 }
 
 void AssistantControllerImpl::BindVolumeControl(

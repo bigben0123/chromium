@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_VIZ_SERVICE_DISPLAY_EMBEDDER_SKIA_OUTPUT_SURFACE_DEPENDENCY_H_
 #define COMPONENTS_VIZ_SERVICE_DISPLAY_EMBEDDER_SKIA_OUTPUT_SURFACE_DEPENDENCY_H_
 
+#include <memory>
 #include <vector>
 
 #include "base/callback.h"
@@ -12,6 +13,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
+#include "components/viz/service/display/display_compositor_memory_and_task_controller.h"
 #include "components/viz/service/viz_service_export.h"
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/service/sequence_id.h"

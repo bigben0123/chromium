@@ -9,13 +9,13 @@ import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.ViewGroup;
 
-import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.feed.FeedSurfaceCoordinator;
+import org.chromium.chrome.browser.feed.FeedV1ActionOptions;
 import org.chromium.chrome.browser.feed.StreamLifecycleManager;
-import org.chromium.chrome.browser.feed.action.FeedActionHandler;
+import org.chromium.chrome.browser.feed.shared.FeedFeatures;
 import org.chromium.chrome.browser.feed.shared.FeedSurfaceDelegate;
 import org.chromium.chrome.browser.feed.shared.stream.Stream;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.ntp.snippets.SectionHeaderView;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.start_surface.R;
@@ -86,14 +86,14 @@ class ExploreSurfaceCoordinator implements FeedSurfaceDelegate {
             boolean isInNightMode, boolean isPlaceholderShown,
             BottomSheetController bottomSheetController) {
         if (mExploreSurfaceNavigationDelegate == null) {
-            mExploreSurfaceNavigationDelegate = new ExploreSurfaceNavigationDelegate(mActivity);
+            mExploreSurfaceNavigationDelegate = new ExploreSurfaceNavigationDelegate();
         }
         Profile profile = Profile.getLastUsedRegularProfile();
 
         SectionHeaderView sectionHeaderView = null;
         if (hasHeader) {
             LayoutInflater inflater = LayoutInflater.from(mActivity);
-            if (ChromeFeatureList.isEnabled(ChromeFeatureList.REPORT_FEED_USER_ACTIONS)) {
+            if (FeedFeatures.isReportingUserActions()) {
                 sectionHeaderView = (SectionHeaderView) inflater.inflate(
                         R.layout.new_tab_page_snippets_expandable_header_with_menu, null, false);
             } else {
@@ -102,7 +102,7 @@ class ExploreSurfaceCoordinator implements FeedSurfaceDelegate {
             }
         }
 
-        FeedActionHandler.Options feedActionOptions = new FeedActionHandler.Options();
+        FeedV1ActionOptions feedActionOptions = new FeedV1ActionOptions();
         feedActionOptions.inhibitDownload = true;
         feedActionOptions.inhibitOpenInIncognito = true;
         feedActionOptions.inhibitOpenInNewTab = true;

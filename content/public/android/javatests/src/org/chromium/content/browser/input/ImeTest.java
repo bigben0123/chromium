@@ -22,6 +22,7 @@ import androidx.test.filters.MediumTest;
 import androidx.test.filters.SmallTest;
 
 import org.hamcrest.Matchers;
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -29,14 +30,15 @@ import org.junit.Test;
 import org.junit.rules.ExpectedException;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.CriteriaNotSatisfiedException;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.test.ContentJUnit4ClassRunner;
 import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
-import org.chromium.content_public.browser.test.util.CriteriaNotSatisfiedException;
 import org.chromium.content_public.browser.test.util.DOMUtils;
 import org.chromium.content_public.browser.test.util.JavaScriptUtils;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
@@ -51,7 +53,12 @@ import java.util.concurrent.TimeoutException;
  */
 @RunWith(ContentJUnit4ClassRunner.class)
 @CommandLineFlags.Add({"expose-internals-for-testing"})
+@Batch(ImeTest.IME_BATCH)
 public class ImeTest {
+    /* package */ static final String IME_BATCH = "ImeTestBatch";
+
+    // TODO(https://crbug.com/989569): Find a way to re-use the content shell
+    // across tests?
     @Rule
     public ImeActivityTestRule mRule = new ImeActivityTestRule();
     @Rule
@@ -60,6 +67,11 @@ public class ImeTest {
     @Before
     public void setUp() throws Exception {
         mRule.setUpForUrl(ImeActivityTestRule.INPUT_FORM_HTML);
+    }
+
+    @After
+    public void tearDown() throws Exception {
+        mRule.getActivity().finish();
     }
 
     @Test
@@ -472,7 +484,7 @@ public class ImeTest {
         Assert.assertEquals(EditorInfo.IME_ACTION_NONE, getImeAction(editorInfoList.get(4)));
         // search1.
         Assert.assertEquals(EditorInfo.IME_ACTION_SEARCH, getImeAction(editorInfoList.get(5)));
-        // input_text1.
+        // input_text3.
         Assert.assertEquals(EditorInfo.IME_ACTION_GO, getImeAction(editorInfoList.get(6)));
 
         mRule.resetAllStates();
@@ -1708,5 +1720,38 @@ public class ImeTest {
         Assert.assertEquals(0,
                 mRule.getConnectionFactory().getOutAttrs().inputType
                         & EditorInfo.TYPE_TEXT_FLAG_AUTO_CORRECT);
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"TextInput"})
+    public void testLastText() throws Exception {
+        // Hide the keyboard first.
+        DOMUtils.focusNode(mRule.getWebContents(), "input_radio");
+        mRule.assertWaitForKeyboardStatus(false);
+        mRule.verifyNoUpdateSelection();
+
+        // Focus on input_text1 which has 'sometext' in it.
+        DOMUtils.focusNode(mRule.getWebContents(), "input_text1");
+
+        mRule.assertWaitForKeyboardStatus(true);
+
+        // By the time the keyboard is shown, we should have the correct last text to pass to
+        // EditorInfo in onCreateInputConnection(...).
+        Assert.assertArrayEquals(new String[] {"sometext"}, mRule.getLastTextHistory());
+
+        // Hide the keyboard again.
+        DOMUtils.focusNode(mRule.getWebContents(), "input_radio");
+        mRule.assertWaitForKeyboardStatus(false);
+
+        // Focus on input_text2 which has 'othertext' in it.
+        DOMUtils.focusNode(mRule.getWebContents(), "input_text2");
+
+        mRule.assertWaitForKeyboardStatus(true);
+
+        // By the time the keyboard is shown, we should have the correct last text to pass to
+        // EditorInfo in onCreateInputConnection(...).
+        Assert.assertArrayEquals(
+                new String[] {"sometext", "othertext"}, mRule.getLastTextHistory());
     }
 }

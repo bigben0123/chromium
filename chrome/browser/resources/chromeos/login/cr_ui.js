@@ -175,14 +175,6 @@ cr.define('cr.ui', function() {
   };
 
   /**
-   * Updates the device requisition string shown in the requisition prompt.
-   * @param {string} requisition The device requisition.
-   */
-  Oobe.updateDeviceRequisition = function(requisition) {
-    Oobe.getInstance().updateDeviceRequisition(requisition);
-  };
-
-  /**
    * Clears password field in user-pod.
    */
   Oobe.clearUserPodPassword = function() {
@@ -299,7 +291,7 @@ cr.define('cr.ui', function() {
    * Hotrod requisition for telemetry.
    */
   Oobe.remoraRequisitionForTesting = function() {
-    chrome.send('setDeviceRequisition', ['remora']);
+    chrome.send('WelcomeScreen.setDeviceRequisition', ['remora']);
   };
 
   /**
@@ -321,7 +313,7 @@ cr.define('cr.ui', function() {
    * attribute screen if it's present.
    */
   Oobe.isEnrollmentSuccessfulForTest = function() {
-    const step = $('enterprise-enrollment').currentStep_;
+    const step = $('enterprise-enrollment').uiStep;
     if (step === ENROLLMENT_STEP.ATTRIBUTE_PROMPT) {
       chrome.send('oauthEnrollAttributes', ['', '']);
       return true;

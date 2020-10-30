@@ -18,7 +18,7 @@
 #include "content/public/browser/web_contents.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
 
-#if BUILDFLAG(FULL_SAFE_BROWSING)
+#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
 #include "chrome/browser/safe_browsing/client_side_detection_host.h"
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
 #include "chrome/browser/safe_browsing/client_side_detection_service_factory.h"
@@ -28,7 +28,7 @@
 
 namespace safe_browsing {
 
-#if !BUILDFLAG(FULL_SAFE_BROWSING)
+#if !BUILDFLAG(SAFE_BROWSING_AVAILABLE)
 // Provide a dummy implementation so that
 // std::unique_ptr<ClientSideDetectionHost>
 // has a concrete destructor to call. This is necessary because it is used
@@ -39,7 +39,7 @@ class ClientSideDetectionHost { };
 
 SafeBrowsingTabObserver::SafeBrowsingTabObserver(
     content::WebContents* web_contents) : web_contents_(web_contents) {
-#if BUILDFLAG(FULL_SAFE_BROWSING)
+#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   PrefService* prefs = profile->GetPrefs();
@@ -47,8 +47,9 @@ SafeBrowsingTabObserver::SafeBrowsingTabObserver(
     pref_change_registrar_.Init(prefs);
     pref_change_registrar_.Add(
         prefs::kSafeBrowsingEnabled,
-        base::Bind(&SafeBrowsingTabObserver::UpdateSafebrowsingDetectionHost,
-                   base::Unretained(this)));
+        base::BindRepeating(
+            &SafeBrowsingTabObserver::UpdateSafebrowsingDetectionHost,
+            base::Unretained(this)));
 
     ClientSideDetectionService* csd_service =
         ClientSideDetectionServiceFactory::GetForProfile(profile);
@@ -70,7 +71,7 @@ SafeBrowsingTabObserver::~SafeBrowsingTabObserver() {
 // Internal helpers
 
 void SafeBrowsingTabObserver::UpdateSafebrowsingDetectionHost() {
-#if BUILDFLAG(FULL_SAFE_BROWSING)
+#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
   Profile* profile =
       Profile::FromBrowserContext(web_contents_->GetBrowserContext());
   PrefService* prefs = profile->GetPrefs();

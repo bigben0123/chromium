@@ -21,8 +21,8 @@
 #include "content/browser/devtools/protocol/target_handler.h"
 #include "content/browser/devtools/render_frame_devtools_agent_host.h"
 #include "content/browser/devtools/service_worker_devtools_agent_host.h"
-#include "content/browser/frame_host/frame_tree_node.h"
-#include "content/browser/frame_host/navigation_request.h"
+#include "content/browser/renderer_host/frame_tree_node.h"
+#include "content/browser/renderer_host/navigation_request.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/web_package/signed_exchange_envelope.h"
 #include "content/common/navigation_params.mojom.h"
@@ -191,10 +191,19 @@ void OnNavigationRequestFailed(
                 *status.blocked_by_response_reason))
             .Build();
 
-    blockedByResponseDetails->SetFrame(
+    blockedByResponseDetails->SetBlockedFrame(
         protocol::Audits::AffectedFrame::Create()
             .SetFrameId(ftn->devtools_frame_token().ToString())
             .Build());
+    if (ftn->parent()) {
+      blockedByResponseDetails->SetParentFrame(
+          protocol::Audits::AffectedFrame::Create()
+              .SetFrameId(ftn->parent()
+                              ->frame_tree_node()
+                              ->devtools_frame_token()
+                              .ToString())
+              .Build());
+    }
     issueDetails.SetBlockedByResponseIssueDetails(
         std::move(blockedByResponseDetails));
 
@@ -205,8 +214,8 @@ void OnNavigationRequestFailed(
             .SetDetails(issueDetails.Build())
             .Build();
 
-    DispatchToAgents(ftn, &protocol::AuditsHandler::OnIssueAdded,
-                     inspector_issue.get());
+    ReportBrowserInitiatedIssue(ftn->current_frame_host(),
+                                inspector_issue.get());
   }
 
   DispatchToAgents(ftn, &protocol::NetworkHandler::LoadingComplete, id,
@@ -485,19 +494,10 @@ bool WillCreateURLLoaderFactory(
   return true;
 }
 
-bool WillCreateURLLoaderFactoryForServiceWorker(
-    RenderProcessHost* rph,
-    int routing_id,
+bool WillCreateURLLoaderFactoryForWorker(
+    DevToolsAgentHostImpl* host,
+    const base::UnguessableToken& worker_token,
     network::mojom::URLLoaderFactoryOverridePtr* factory_override) {
-  DCHECK(factory_override);
-
-  ServiceWorkerDevToolsAgentHost* worker_agent_host =
-      ServiceWorkerDevToolsManager::GetInstance()
-          ->GetDevToolsAgentHostForWorker(rph->GetID(), routing_id);
-  if (!worker_agent_host) {
-    NOTREACHED();
-    return false;
-  }
   network::mojom::URLLoaderFactoryOverride devtools_override;
   // If caller passed some existing overrides, use those.
   // Otherwise, use our local var, then if handlers actually
@@ -505,12 +505,10 @@ bool WillCreateURLLoaderFactoryForServiceWorker(
   network::mojom::URLLoaderFactoryOverride* handler_override =
       *factory_override ? factory_override->get() : &devtools_override;
 
-  const base::UnguessableToken& worker_token =
-      worker_agent_host->devtools_worker_token();
-
+  RenderProcessHost* rph = host->GetProcessHost();
   bool had_interceptors =
       MaybeCreateProxyForInterception<protocol::FetchHandler>(
-          worker_agent_host, rph, worker_token, false, false, handler_override);
+          host, rph, worker_token, false, false, handler_override);
 
   // TODO(caseq): assure deterministic order of browser agents (or sessions).
   for (auto* browser_agent_host : BrowserDevToolsAgentHost::Instances()) {
@@ -530,6 +528,36 @@ bool WillCreateURLLoaderFactoryForServiceWorker(
         std::move(devtools_override.overridden_factory_receiver), false);
   }
   return true;
+}
+
+bool WillCreateURLLoaderFactoryForServiceWorker(
+    RenderProcessHost* rph,
+    int routing_id,
+    network::mojom::URLLoaderFactoryOverridePtr* factory_override) {
+  DCHECK(factory_override);
+
+  ServiceWorkerDevToolsAgentHost* worker_agent_host =
+      ServiceWorkerDevToolsManager::GetInstance()
+          ->GetDevToolsAgentHostForWorker(rph->GetID(), routing_id);
+  if (!worker_agent_host) {
+    NOTREACHED();
+    return false;
+  }
+  return WillCreateURLLoaderFactoryForWorker(
+      worker_agent_host, worker_agent_host->devtools_worker_token(),
+      factory_override);
+}
+
+bool WillCreateURLLoaderFactoryForSharedWorker(
+    SharedWorkerHost* host,
+    network::mojom::URLLoaderFactoryOverridePtr* factory_override) {
+  auto* worker_agent_host = SharedWorkerDevToolsAgentHost::GetFor(host);
+  if (!worker_agent_host)
+    return false;
+
+  return WillCreateURLLoaderFactoryForWorker(
+      worker_agent_host, worker_agent_host->devtools_worker_token(),
+      factory_override);
 }
 
 bool WillCreateURLLoaderFactory(
@@ -552,12 +580,23 @@ bool WillCreateURLLoaderFactory(
 
 void OnNavigationRequestWillBeSent(
     const NavigationRequest& navigation_request) {
-  auto* agent_host = static_cast<RenderFrameDevToolsAgentHost*>(
-      RenderFrameDevToolsAgentHost::GetFor(
-          navigation_request.frame_tree_node()));
-  if (!agent_host)
-    return;
-  agent_host->OnNavigationRequestWillBeSent(navigation_request);
+  // Note this intentionally deviates from the usual instrumentation signal
+  // logic and dispatches to all agents upwards from the frame, to make sure
+  // the security checks are properly applied even if no DevTools session is
+  // established for the navigated frame itself. This is because the page
+  // agent may navigate all of its subframes currently.
+  for (RenderFrameHostImpl* rfh =
+           navigation_request.frame_tree_node()->current_frame_host();
+       rfh; rfh = rfh->GetParent()) {
+    // Only check frames that qualify as DevTools targets, i.e. (local)? roots.
+    if (!RenderFrameDevToolsAgentHost::ShouldCreateDevToolsForHost(rfh))
+      continue;
+    auto* agent_host = static_cast<RenderFrameDevToolsAgentHost*>(
+        RenderFrameDevToolsAgentHost::GetFor(rfh));
+    if (!agent_host)
+      continue;
+    agent_host->OnNavigationRequestWillBeSent(navigation_request);
+  }
 
   // Make sure both back-ends yield the same timestamp.
   auto timestamp = base::TimeTicks::Now();
@@ -654,7 +693,7 @@ void OnResponseReceivedExtraInfo(
     int process_id,
     int routing_id,
     const std::string& devtools_request_id,
-    const net::CookieAndLineStatusList& response_cookie_list,
+    const net::CookieAndLineAccessResultList& response_cookie_list,
     const std::vector<network::mojom::HttpRawHeaderPairPtr>& response_headers,
     const base::Optional<std::string>& response_headers_text) {
   FrameTreeNode* ftn = GetFtnForNetworkRequest(process_id, routing_id);
@@ -740,6 +779,19 @@ std::unique_ptr<protocol::Array<protocol::String>> BuildExclusionReasons(
         protocol::Audits::SameSiteCookieExclusionReasonEnum::
             ExcludeSameSiteNoneInsecure);
   }
+  if (status.HasExclusionReason(
+          net::CookieInclusionStatus::EXCLUDE_SAMESITE_LAX)) {
+    exclusion_reasons->push_back(
+        protocol::Audits::SameSiteCookieExclusionReasonEnum::
+            ExcludeSameSiteLax);
+  }
+  if (status.HasExclusionReason(
+          net::CookieInclusionStatus::EXCLUDE_SAMESITE_STRICT)) {
+    exclusion_reasons->push_back(
+        protocol::Audits::SameSiteCookieExclusionReasonEnum::
+            ExcludeSameSiteStrict);
+  }
+
   return exclusion_reasons;
 }
 
@@ -819,7 +871,7 @@ protocol::String BuildCookieOperation(
 
 void ReportSameSiteCookieIssue(
     RenderFrameHostImpl* render_frame_host_impl,
-    const net::CookieWithStatus& excluded_cookie,
+    const net::CookieWithAccessResult& excluded_cookie,
     const GURL& url,
     const net::SiteForCookies& site_for_cookies,
     blink::mojom::SameSiteCookieOperation operation,
@@ -844,8 +896,9 @@ void ReportSameSiteCookieIssue(
       protocol::Audits::SameSiteCookieIssueDetails::Create()
           .SetCookie(std::move(affected_cookie))
           .SetCookieExclusionReasons(
-              BuildExclusionReasons(excluded_cookie.status))
-          .SetCookieWarningReasons(BuildWarningReasons(excluded_cookie.status))
+              BuildExclusionReasons(excluded_cookie.access_result.status))
+          .SetCookieWarningReasons(
+              BuildWarningReasons(excluded_cookie.access_result.status))
           .SetOperation(BuildCookieOperation(operation))
           .SetCookieUrl(url.spec())
           .SetRequest(std::move(affected_request))
@@ -876,9 +929,11 @@ namespace {
 void AddIssueToIssueStorage(
     RenderFrameHost* frame,
     std::unique_ptr<protocol::Audits::InspectorIssue> issue) {
-  WebContents* web_contents = WebContents::FromRenderFrameHost(frame);
+  // We only utilize a central storage on the main frame. Each issue is
+  // still associated with the originating |RenderFrameHost| though.
   DevToolsIssueStorage* issue_storage =
-      DevToolsIssueStorage::GetOrCreateForWebContents(web_contents);
+      DevToolsIssueStorage::GetOrCreateForCurrentDocument(
+          frame->GetMainFrame());
 
   issue_storage->AddInspectorIssue(frame->GetFrameTreeNodeId(),
                                    std::move(issue));

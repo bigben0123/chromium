@@ -20,7 +20,14 @@ public class JourneyLogger {
 
     private boolean mHasRecorded;
 
+    /**
+     * Creates the journey logger.
+     * @param isIncognito Whether the user profile is incognito.
+     * @param webContents The web contents where PaymentRequest API is invoked. Should not be null.
+     */
     public JourneyLogger(boolean isIncognito, WebContents webContents) {
+        assert webContents != null;
+        assert !webContents.isDestroyed();
         // Note that this pointer could leak the native object. The called must call destroy() to
         // ensure that the native object is destroyed.
         mJourneyLoggerAndroid = JourneyLoggerJni.get().initJourneyLoggerAndroid(
@@ -51,39 +58,6 @@ public class JourneyLogger {
     }
 
     /**
-     * Increments the number of selection changes for the specified section.
-     *
-     * @param section The section for which to log.
-     */
-    public void incrementSelectionChanges(int section) {
-        assert section < Section.MAX;
-        JourneyLoggerJni.get().incrementSelectionChanges(
-                mJourneyLoggerAndroid, JourneyLogger.this, section);
-    }
-
-    /**
-     * Increments the number of selection edits for the specified section.
-     *
-     * @param section The section for which to log.
-     */
-    public void incrementSelectionEdits(int section) {
-        assert section < Section.MAX;
-        JourneyLoggerJni.get().incrementSelectionEdits(
-                mJourneyLoggerAndroid, JourneyLogger.this, section);
-    }
-
-    /**
-     * Increments the number of selection adds for the specified section.
-     *
-     * @param section The section for which to log.
-     */
-    public void incrementSelectionAdds(int section) {
-        assert section < Section.MAX;
-        JourneyLoggerJni.get().incrementSelectionAdds(
-                mJourneyLoggerAndroid, JourneyLogger.this, section);
-    }
-
-    /**
      * Records the fact that the merchant called CanMakePayment and records its return value.
      *
      * @param value The return value of the CanMakePayment call.
@@ -109,9 +83,6 @@ public class JourneyLogger {
      * @param event The event that occurred.
      */
     public void setEventOccurred(int event) {
-        assert event >= 0;
-        assert event < Event.ENUM_MAX;
-
         JourneyLoggerJni.get().setEventOccurred(mJourneyLoggerAndroid, JourneyLogger.this, event);
     }
 
@@ -202,6 +173,14 @@ public class JourneyLogger {
     }
 
     /**
+     * Records that the payment request has entered the given checkout step.
+     * @param step An int indicating the step to be recorded.
+     */
+    public void recordCheckoutStep(int step) {
+        JourneyLoggerJni.get().recordCheckoutStep(mJourneyLoggerAndroid, JourneyLogger.this, step);
+    }
+
+    /**
      * Records the time when request.show() is called.
      */
     public void setTriggerTime() {
@@ -224,12 +203,6 @@ public class JourneyLogger {
         void destroy(long nativeJourneyLoggerAndroid, JourneyLogger caller);
         void setNumberOfSuggestionsShown(long nativeJourneyLoggerAndroid, JourneyLogger caller,
                 int section, int number, boolean hasCompleteSuggestion);
-        void incrementSelectionChanges(
-                long nativeJourneyLoggerAndroid, JourneyLogger caller, int section);
-        void incrementSelectionEdits(
-                long nativeJourneyLoggerAndroid, JourneyLogger caller, int section);
-        void incrementSelectionAdds(
-                long nativeJourneyLoggerAndroid, JourneyLogger caller, int section);
         void setCanMakePaymentValue(
                 long nativeJourneyLoggerAndroid, JourneyLogger caller, boolean value);
         void setHasEnrolledInstrumentValue(
@@ -246,6 +219,7 @@ public class JourneyLogger {
         void setNotShown(long nativeJourneyLoggerAndroid, JourneyLogger caller, int reason);
         void recordTransactionAmount(long nativeJourneyLoggerAndroid, JourneyLogger caller,
                 String currency, String value, boolean completed);
+        void recordCheckoutStep(long nativeJourneyLoggerAndroid, JourneyLogger caller, int step);
         void setTriggerTime(long nativeJourneyLoggerAndroid, JourneyLogger caller);
         void setPaymentAppUkmSourceId(
                 long nativeJourneyLoggerAndroid, JourneyLogger caller, long sourceId);

@@ -96,6 +96,8 @@ class StubWebView : public WebView {
   Status IsPendingNavigation(const Timeout* timeout,
                              bool* is_pending) const override;
   JavaScriptDialogManager* GetJavaScriptDialogManager() override;
+  MobileEmulationOverrideManager* GetMobileEmulationOverrideManager()
+      const override;
   Status OverrideGeolocation(const Geoposition& geoposition) override;
   Status OverrideNetworkConditions(
       const NetworkConditions& network_conditions) override;
@@ -127,6 +129,9 @@ class StubWebView : public WebView {
   std::unique_ptr<base::Value> GetCastSinks() override;
   std::unique_ptr<base::Value> GetCastIssueMessage() override;
   void SetFrame(const std::string& new_frame_id) override;
+  Status GetNodeIdByElement(const std::string& frame,
+                            const base::DictionaryValue& element,
+                            int* node_id) override;
 
  private:
   std::string id_;

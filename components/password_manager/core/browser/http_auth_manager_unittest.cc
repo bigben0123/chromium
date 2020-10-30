@@ -13,7 +13,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/metrics/user_action_tester.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "build/build_config.h"
@@ -30,8 +29,6 @@
 #include "components/password_manager/core/common/password_manager_features.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-using autofill::PasswordForm;
 
 using base::ASCIIToUTF16;
 using base::TestMockTimeTaskRunner;
@@ -53,8 +50,7 @@ class MockPasswordManagerClient : public StubPasswordManagerClient {
   MOCK_CONST_METHOD1(IsSavingAndFillingEnabled, bool(const GURL&));
   MOCK_CONST_METHOD1(IsFillingEnabled, bool(const GURL&));
   MOCK_METHOD2(AutofillHttpAuth,
-               void(const autofill::PasswordForm&,
-                    const PasswordFormManagerForUI*));
+               void(const PasswordForm&, const PasswordFormManagerForUI*));
   MOCK_CONST_METHOD0(GetProfilePasswordStore, PasswordStore*());
   MOCK_CONST_METHOD0(GetAccountPasswordStore, PasswordStore*());
   MOCK_METHOD0(PromptUserToSaveOrUpdatePasswordPtr, void());
@@ -171,7 +167,7 @@ TEST_F(HttpAuthManagerTest, HttpAuthFilling) {
     ASSERT_TRUE(consumer);
     std::vector<std::unique_ptr<PasswordForm>> result;
     result.push_back(std::make_unique<PasswordForm>(stored_form));
-    consumer->OnGetPasswordStoreResultsFrom(store_, std::move(result));
+    consumer->OnGetPasswordStoreResultsFrom(store_.get(), std::move(result));
     testing::Mock::VerifyAndClearExpectations(&store_);
     httpauth_manager()->DetachObserver(&observer);
   }

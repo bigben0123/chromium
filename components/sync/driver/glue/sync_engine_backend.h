@@ -16,17 +16,16 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
-#include "base/trace_event/memory_dump_provider.h"
 #include "components/invalidation/impl/invalidation_switches.h"
 #include "components/invalidation/public/invalidation.h"
-#include "components/sync/base/cancelation_signal.h"
 #include "components/sync/base/system_encryptor.h"
 #include "components/sync/driver/glue/sync_engine_impl.h"
-#include "components/sync/engine/cycle/type_debug_info_observer.h"
 #include "components/sync/engine/model_type_configurer.h"
 #include "components/sync/engine/shutdown_reason.h"
 #include "components/sync/engine/sync_encryption_handler.h"
+#include "components/sync/engine/sync_manager.h"
 #include "components/sync/engine/sync_status_observer.h"
+#include "components/sync/engine_impl/cancelation_signal.h"
 #include "url/gurl.h"
 
 namespace syncer {
@@ -35,9 +34,7 @@ class ModelTypeController;
 class SyncEngineImpl;
 
 class SyncEngineBackend : public base::RefCountedThreadSafe<SyncEngineBackend>,
-                          public base::trace_event::MemoryDumpProvider,
                           public SyncManager::Observer,
-                          public TypeDebugInfoObserver,
                           public SyncStatusObserver {
  public:
   using AllNodesCallback =
@@ -47,10 +44,6 @@ class SyncEngineBackend : public base::RefCountedThreadSafe<SyncEngineBackend>,
   SyncEngineBackend(const std::string& name,
                     const base::FilePath& sync_data_folder,
                     const base::WeakPtr<SyncEngineImpl>& host);
-
-  // MemoryDumpProvider implementation.
-  bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
-                    base::trace_event::ProcessMemoryDump* pmd) override;
 
   // SyncManager::Observer implementation.  The Core just acts like an air
   // traffic controller here, forwarding incoming messages to appropriate
@@ -64,14 +57,6 @@ class SyncEngineBackend : public base::RefCountedThreadSafe<SyncEngineBackend>,
   void OnActionableError(const SyncProtocolError& sync_error) override;
   void OnMigrationRequested(ModelTypeSet types) override;
   void OnProtocolEvent(const ProtocolEvent& event) override;
-
-  // TypeDebugInfoObserver implementation
-  void OnCommitCountersUpdated(ModelType type,
-                               const CommitCounters& counters) override;
-  void OnUpdateCountersUpdated(ModelType type,
-                               const UpdateCounters& counters) override;
-  void OnStatusCountersUpdated(ModelType type,
-                               const StatusCounters& counters) override;
 
   // SyncStatusObserver implementation.
   void OnSyncStatusChanged(const SyncStatus& status) override;
@@ -119,10 +104,6 @@ class SyncEngineBackend : public base::RefCountedThreadSafe<SyncEngineBackend>,
   void DoAddTrustedVaultDecryptionKeys(
       const std::vector<std::vector<uint8_t>>& keys);
 
-  // Called to turn on encryption of all sync data as well as
-  // reencrypt everything.
-  void DoEnableEncryptEverything();
-
   // Ask the syncer to check for updates for the specified types.
   void DoRefreshTypes(ModelTypeSet types);
 
@@ -155,14 +136,6 @@ class SyncEngineBackend : public base::RefCountedThreadSafe<SyncEngineBackend>,
   void SendBufferedProtocolEventsAndEnableForwarding();
   void DisableProtocolEventForwarding();
 
-  // Enables the forwarding of directory type debug counters to the
-  // SyncEngineHost. Also requests that updates to all counters be emitted right
-  // away to initialize any new listeners' states.
-  void EnableDirectoryTypeDebugInfoForwarding();
-
-  // Disables forwarding of directory type debug counters.
-  void DisableDirectoryTypeDebugInfoForwarding();
-
   // Notify the syncer that the cookie jar has changed.
   void DoOnCookieJarChanged(bool account_mismatch,
                             bool empty_jar,
@@ -170,6 +143,10 @@ class SyncEngineBackend : public base::RefCountedThreadSafe<SyncEngineBackend>,
 
   // Notify about change in client id.
   void DoOnInvalidatorClientIdChange(const std::string& client_id);
+
+  // Forwards an invalidation to the sync manager for all data types from the
+  // |payload|.
+  void DoOnInvalidationReceived(const std::string& payload);
 
   // Returns a ListValue representing Nigori node.
   void GetNigoriNodeForDebugging(AllNodesCallback callback);
@@ -196,9 +173,6 @@ class SyncEngineBackend : public base::RefCountedThreadSafe<SyncEngineBackend>,
 
   // Our parent SyncEngineImpl.
   WeakHandle<SyncEngineImpl> host_;
-
-  // Non-null only between calls to DoInitialize() and DoShutdown().
-  std::unique_ptr<SyncBackendRegistrar> registrar_;
 
   // Our encryptor, which uses Chrome's encryption functions.
   SystemEncryptor encryptor_;
@@ -231,9 +205,6 @@ class SyncEngineBackend : public base::RefCountedThreadSafe<SyncEngineBackend>,
 
   // Set when we've been asked to forward sync protocol events to the frontend.
   bool forward_protocol_events_ = false;
-
-  // Set when the forwarding of per-type debug counters is enabled.
-  bool forward_type_info_ = false;
 
   // A map of data type -> invalidation version to track the most recently
   // received invalidation version for each type.

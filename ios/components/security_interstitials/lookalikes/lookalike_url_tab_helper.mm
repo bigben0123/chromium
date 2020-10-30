@@ -4,7 +4,11 @@
 
 #import "ios/components/security_interstitials/lookalikes/lookalike_url_tab_helper.h"
 
+#include "base/feature_list.h"
+#include "components/lookalikes/core/features.h"
+#include "components/lookalikes/core/lookalike_url_ui_util.h"
 #include "components/lookalikes/core/lookalike_url_util.h"
+#include "components/ukm/ios/ukm_url_recorder.h"
 #include "components/url_formatter/spoof_checks/top_domains/top_domain_util.h"
 #include "ios/components/security_interstitials/lookalikes/lookalike_url_container.h"
 #include "ios/components/security_interstitials/lookalikes/lookalike_url_error.h"
@@ -17,15 +21,6 @@
 #endif
 
 namespace {
-// Creates a PolicyDecision that cancels a navigation to show a lookalike
-// error.
-web::WebStatePolicyDecider::PolicyDecision CreateLookalikeErrorDecision() {
-  return web::WebStatePolicyDecider::PolicyDecision::CancelAndDisplayError(
-      [NSError errorWithDomain:kLookalikeUrlErrorDomain
-                          code:kLookalikeUrlErrorCode
-                      userInfo:nil]);
-}
-
 // Creates a PolicyDecision that allows the navigation.
 web::WebStatePolicyDecider::PolicyDecision CreateAllowDecision() {
   return web::WebStatePolicyDecider::PolicyDecision::Allow();
@@ -48,6 +43,7 @@ void LookalikeUrlTabHelper::ShouldAllowResponse(
     return;
   }
 
+  // TODO(crbug.com/1104386): Create container and ReleaseInterstitialParams.
   // Get stored interstitial parameters early. Doing so ensures that a
   // navigation to an irrelevant (for this interstitial's purposes) URL such as
   // chrome://settings while the lookalike interstitial is being shown clears
@@ -58,10 +54,6 @@ void LookalikeUrlTabHelper::ShouldAllowResponse(
   // If, after this, the user somehow ends up on site.tld with a reload (e.g.
   // with ReloadType::ORIGINAL_REQUEST_URL), this will correctly not show an
   // interstitial.
-  LookalikeUrlContainer* lookalike_container =
-      LookalikeUrlContainer::FromWebState(web_state());
-  std::unique_ptr<LookalikeUrlContainer::InterstitialParams>
-      interstitial_params = lookalike_container->ReleaseInterstitialParams();
 
   GURL response_url = net::GURLWithNSURL(response.URL);
 
@@ -79,6 +71,11 @@ void LookalikeUrlTabHelper::ShouldAllowResponse(
     return;
   }
 
+  // TODO(crbug.com/1104386): If this is a reload and if the current
+  // URL is the last URL of the stored redirect chain, the interstitial
+  // was probably reloaded. Stop the reload and navigate back to the
+  // original lookalike URL so that the full checks are exercised again.
+
   const DomainInfo navigated_domain = GetDomainInfo(response_url);
   // Empty domain_and_registry happens on private domains.
   if (navigated_domain.domain_and_registry.empty() ||
@@ -87,7 +84,7 @@ void LookalikeUrlTabHelper::ShouldAllowResponse(
     return;
   }
 
-  // TODO(crbug.com/1058898): After site engagement has been componentized,
+  // TODO(crbug.com/1104384): After site engagement has been componentized,
   // fetch and set |engaged_sites| here so that an interstitial won't be
   // shown on engaged sites, and so that the interstitial will be shown on
   // lookalikes of engaged sites.
@@ -101,24 +98,42 @@ void LookalikeUrlTabHelper::ShouldAllowResponse(
       });
   if (!GetMatchingDomain(navigated_domain, engaged_sites, in_target_allowlist,
                          &matched_domain, &match_type)) {
+    if (base::FeatureList::IsEnabled(
+            lookalikes::features::kLookalikeInterstitialForPunycode) &&
+        ShouldBlockBySpoofCheckResult(navigated_domain)) {
+      match_type = LookalikeUrlMatchType::kFailedSpoofChecks;
+      RecordUMAFromMatchType(match_type);
+      std::move(callback).Run(CreateLookalikeErrorDecision());
+      return;
+    }
+
     std::move(callback).Run(CreateAllowDecision());
     return;
   }
   DCHECK(!matched_domain.empty());
 
-  if (ShouldBlockLookalikeUrlNavigation(match_type, navigated_domain)) {
-    // TODO(crbug.com/1058898): Use the below information to generate the
-    // blocking page UI.
+  RecordUMAFromMatchType(match_type);
+
+  if (ShouldBlockLookalikeUrlNavigation(match_type)) {
     const std::string suggested_domain = GetETLDPlusOne(matched_domain);
     DCHECK(!suggested_domain.empty());
     GURL::Replacements replace_host;
     replace_host.SetHostStr(suggested_domain);
     const GURL suggested_url =
         response_url.ReplaceComponents(replace_host).GetWithEmptyPath();
+    LookalikeUrlContainer* lookalike_container =
+        LookalikeUrlContainer::FromWebState(web_state());
+    lookalike_container->SetLookalikeUrlInfo(suggested_url, response_url,
+                                             match_type);
 
     std::move(callback).Run(CreateLookalikeErrorDecision());
     return;
   }
+
+  // Interstitial normally records UKM, but still record when it's not shown.
+  RecordUkmForLookalikeUrlBlockingPage(
+      ukm::GetSourceIdForWebStateDocument(web_state()), match_type,
+      LookalikeUrlBlockingPageUserAction::kInterstitialNotShown);
 
   std::move(callback).Run(CreateAllowDecision());
 }

@@ -17,6 +17,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/optional.h"
+#include "base/threading/thread_checker.h"
 #include "base/threading/thread_checker_impl.h"
 #include "base/time/time.h"
 #include "components/download/database/in_progress/download_entry.h"
@@ -302,6 +303,8 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItemImpl
   void OnContentCheckCompleted(DownloadDangerType danger_type,
                                DownloadInterruptReason reason) override;
   void OnAsyncScanningCompleted(DownloadDangerType danger_type) override;
+  void OnDownloadScheduleChanged(
+      base::Optional<DownloadSchedule> schedule) override;
   void SetOpenWhenComplete(bool open) override;
   void SetOpened(bool opened) override;
   void SetLastAccessTime(base::Time last_access_time) override;
@@ -574,6 +577,14 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItemImpl
   // If |download_schedule_| presents, maybe interrupt the download and start
   // later. Returns whether the download should be started later.
   bool MaybeDownloadLater();
+
+  // Returns whether the download should proceed later based on network
+  // condition and user scheduled start time defined in |download_schedule_|.
+  bool ShouldDownloadLater() const;
+
+  // Swap the |download_schedule_| with new data, may pass in base::nullopt to
+  // remove the schedule.
+  void SwapDownloadSchedule(base::Optional<DownloadSchedule> download_schedule);
 
   // If all pre-requisites have been met, complete download processing, i.e. do
   // internal cleanup, file rename, and potentially auto-open.  (Dangerous

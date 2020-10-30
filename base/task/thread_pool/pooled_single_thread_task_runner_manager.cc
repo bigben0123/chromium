@@ -4,7 +4,6 @@
 
 #include "base/task/thread_pool/pooled_single_thread_task_runner_manager.h"
 
-#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
@@ -12,6 +11,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/memory/ptr_util.h"
+#include "base/ranges/algorithm.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
@@ -207,7 +207,10 @@ class WorkerThreadDelegate : public WorkerThread::Delegate {
   bool EnqueueTaskSource(
       TransactionWithRegisteredTaskSource transaction_with_task_source) {
     CheckedAutoLock auto_lock(lock_);
-    priority_queue_.Push(std::move(transaction_with_task_source));
+    auto sort_key = transaction_with_task_source.task_source->GetSortKey(
+        /* disable_fair_scheduling */ false);
+    priority_queue_.Push(std::move(transaction_with_task_source.task_source),
+                         sort_key);
     if (!worker_awake_ && CanRunNextTaskSource()) {
       worker_awake_ = true;
       return true;
@@ -719,7 +722,7 @@ void PooledSingleThreadTaskRunnerManager::UnregisterWorkerThread(
     if (workers_.empty())
       return;
 
-    auto worker_iter = std::find(workers_.begin(), workers_.end(), worker);
+    auto worker_iter = ranges::find(workers_, worker);
     DCHECK(worker_iter != workers_.end());
     worker_to_destroy = std::move(*worker_iter);
     workers_.erase(worker_iter);

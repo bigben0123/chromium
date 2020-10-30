@@ -5,15 +5,13 @@
 #ifndef UI_GFX_X_EVENT_H_
 #define UI_GFX_X_EVENT_H_
 
-#include <X11/Xlib.h>
-#include <xcb/xcb.h>
-
 #include <cstdint>
 #include <utility>
 
 #include "base/component_export.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_refptr.h"
+#include "ui/gfx/x/xproto.h"
 
 namespace x11 {
 
@@ -26,16 +24,17 @@ void ReadEvent(Event* event, Connection* connection, ReadBuffer* buffer);
 
 class COMPONENT_EXPORT(X11) Event {
  public:
-  // Used to create events for testing.
   template <typename T>
-  Event(XEvent* xlib_event, T&& xproto_event) {
+  explicit Event(T&& xproto_event, bool sequence_valid = true) {
+    using DecayT = std::decay_t<T>;
     sequence_valid_ = true;
-    sequence_ = xlib_event_.xany.serial;
-    custom_allocated_xlib_event_ = true;
-    xlib_event_ = *xlib_event;
-    type_id_ = T::type_id;
-    deleter_ = [](void* event) { delete reinterpret_cast<T*>(event); };
-    event_ = new T(std::forward<T>(xproto_event));
+    sequence_ = xproto_event.sequence;
+    type_id_ = DecayT::type_id;
+    deleter_ = [](void* event) { delete reinterpret_cast<DecayT*>(event); };
+    auto* event = new DecayT(std::forward<T>(xproto_event));
+    event_ = event;
+    window_ = event->GetWindow();
+    sequence_valid_ = sequence_valid;
   }
 
   Event();
@@ -71,8 +70,11 @@ class COMPONENT_EXPORT(X11) Event {
   bool sequence_valid() const { return sequence_valid_; }
   uint32_t sequence() const { return sequence_; }
 
-  const XEvent& xlib_event() const { return xlib_event_; }
-  XEvent& xlib_event() { return xlib_event_; }
+  x11::Window window() const { return window_ ? *window_ : x11::Window::None; }
+  void set_window(x11::Window window) {
+    if (window_)
+      *window_ = window;
+  }
 
  private:
   friend void ReadEvent(Event* event,
@@ -82,17 +84,16 @@ class COMPONENT_EXPORT(X11) Event {
   void Dealloc();
 
   bool sequence_valid_ = false;
-  uint32_t sequence_ = 0;
-
-  // Indicates if |xlib_event_| was allocated manually and therefore
-  // needs to be freed manually.
-  bool custom_allocated_xlib_event_ = false;
-  XEvent xlib_event_{};
+  uint16_t sequence_ = 0;
 
   // XProto event state.
   int type_id_ = 0;
   void (*deleter_)(void*) = nullptr;
   void* event_ = nullptr;
+
+  // This member points to a field in |event_|, or may be nullptr if there's no
+  // associated window for the event.  It's owned by |event_|, not us.
+  x11::Window* window_ = nullptr;
 };
 
 }  // namespace x11

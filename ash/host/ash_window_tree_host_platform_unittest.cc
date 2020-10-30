@@ -30,6 +30,7 @@ class TestInputController : public ui::InputController {
 
   // these are all stubs that are not used yet in these tests
   bool HasMouse() override { return false; }
+  bool HasPointingStick() override { return false; }
   bool HasTouchpad() override { return false; }
   bool IsCapsLockEnabled() override { return false; }
   void SetCapsLockEnabled(bool enabled) override {}
@@ -66,6 +67,10 @@ class TestInputController : public ui::InputController {
                         GetTouchEventLogReply reply) override {
     std::move(reply).Run(std::vector<base::FilePath>());
   }
+  void PlayVibrationEffect(int id,
+                           uint8_t amplitude,
+                           uint16_t duration_millis) override {}
+  void StopVibration(int id) override {}
   void SetInternalTouchpadEnabled(bool enabled) override {}
   bool IsInternalTouchpadEnabled() const override { return false; }
   void SetTouchscreensEnabled(bool enabled) override {}

@@ -40,12 +40,9 @@ ASH_PUBLIC_EXPORT extern const char kAccessibilityFocusHighlightEnabled[];
 ASH_PUBLIC_EXPORT extern const char kAccessibilitySelectToSpeakEnabled[];
 ASH_PUBLIC_EXPORT extern const char kAccessibilitySwitchAccessEnabled[];
 ASH_PUBLIC_EXPORT extern const char kAccessibilitySwitchAccessSelectKeyCodes[];
-ASH_PUBLIC_EXPORT extern const char kAccessibilitySwitchAccessSelectSetting[];
 ASH_PUBLIC_EXPORT extern const char kAccessibilitySwitchAccessNextKeyCodes[];
-ASH_PUBLIC_EXPORT extern const char kAccessibilitySwitchAccessNextSetting[];
 ASH_PUBLIC_EXPORT extern const char
     kAccessibilitySwitchAccessPreviousKeyCodes[];
-ASH_PUBLIC_EXPORT extern const char kAccessibilitySwitchAccessPreviousSetting[];
 ASH_PUBLIC_EXPORT extern const char kAccessibilitySwitchAccessAutoScanEnabled[];
 ASH_PUBLIC_EXPORT extern const char kAccessibilitySwitchAccessAutoScanSpeedMs[];
 ASH_PUBLIC_EXPORT extern const char
@@ -170,7 +167,8 @@ ASH_PUBLIC_EXPORT extern const char kDetachableBaseDevices[];
 
 ASH_PUBLIC_EXPORT extern const char kCursorMotionBlurEnabled[];
 
-ASH_PUBLIC_EXPORT extern const char kAssistantNumWarmerWelcomeTriggered[];
+ASH_PUBLIC_EXPORT extern const char kAssistantNumSessionsWhereOnboardingShown[];
+ASH_PUBLIC_EXPORT extern const char kAssistantTimeOfLastInteraction[];
 
 ASH_PUBLIC_EXPORT extern const char kVpnConfigAllowed[];
 
@@ -203,6 +201,17 @@ ASH_PUBLIC_EXPORT extern const char kXkbAutoRepeatInterval[];
 
 ASH_PUBLIC_EXPORT extern const char kNaturalScroll[];
 ASH_PUBLIC_EXPORT extern const char kMouseReverseScroll[];
+
+ASH_PUBLIC_EXPORT extern const char kMultipasteNudges[];
+
+ASH_PUBLIC_EXPORT extern const char kDarkModeEnabled[];
+ASH_PUBLIC_EXPORT extern const char kColorModeThemed[];
+
+ASH_PUBLIC_EXPORT extern const char kAppNotificationBadgingEnabled[];
+
+ASH_PUBLIC_EXPORT extern const char kReverseGestureNotificationCount[];
+
+ASH_PUBLIC_EXPORT extern const char kGlobalMediaControlsPinned[];
 
 }  // namespace prefs
 

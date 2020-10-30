@@ -6,17 +6,17 @@ package org.chromium.chrome.browser.download;
 
 import androidx.test.filters.SmallTest;
 
+import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.test.ChromeBrowserTestRule;
+import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.components.offline_items_collection.LegacyHelpers;
 import org.chromium.components.offline_items_collection.OfflineItem;
@@ -32,14 +32,11 @@ import java.util.UUID;
  * Test class to validate that the {@link DownloadInfoBarController} correctly represents the state
  * of the downloads in the current chrome session.
  */
-@RunWith(BaseJUnit4ClassRunner.class)
+@RunWith(ChromeJUnit4ClassRunner.class)
 @Features.EnableFeatures(ChromeFeatureList.DOWNLOAD_PROGRESS_INFOBAR)
 public class DownloadInfoBarControllerTest {
     @Rule
     public final ChromeBrowserTestRule mBrowserTestRule = new ChromeBrowserTestRule();
-
-    @Rule
-    public TestRule mProcessor = new Features.InstrumentationProcessor();
 
     private static final String MESSAGE_SPEEDING_UP = "Speeding up your download.";
     private static final String MESSAGE_DOWNLOADING_FILE = "Downloading file.";
@@ -54,8 +51,7 @@ public class DownloadInfoBarControllerTest {
 
     private static final String TEST_FILE_NAME = "TestFile";
     private static final String MESSAGE_SINGLE_DOWNLOAD_COMPLETE = "TestFile.";
-    private static final long TEST_DURATION_ACCELERATED_INFOBAR = 100;
-    private static final long TEST_DURATION_SHOW_RESULT = 200;
+    private static final long TEST_TO_NEXT_STEP_DELAY = 100;
 
     private TestDownloadInfoBarController mTestController;
 
@@ -86,13 +82,8 @@ public class DownloadInfoBarControllerTest {
         }
 
         @Override
-        protected long getDurationAcceleratedInfoBar() {
-            return TEST_DURATION_ACCELERATED_INFOBAR;
-        }
-
-        @Override
-        protected long getDurationShowResult() {
-            return TEST_DURATION_SHOW_RESULT;
+        protected long getDelayToNextStep(boolean showAccelerating, int resultState) {
+            return TEST_TO_NEXT_STEP_DELAY;
         }
 
         @Override
@@ -138,12 +129,9 @@ public class DownloadInfoBarControllerTest {
     }
 
     private void waitForMessage(String message) {
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return mTestController.mInfo != null
-                        && mTestController.mInfo.message.equals(message);
-            }
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            Criteria.checkThat(mTestController.mInfo, Matchers.notNullValue());
+            Criteria.checkThat(mTestController.mInfo.message, Matchers.is(message));
         });
     }
 

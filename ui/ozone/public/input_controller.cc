@@ -21,6 +21,7 @@ class StubInputController : public InputController {
 
   // InputController:
   bool HasMouse() override { return false; }
+  bool HasPointingStick() override { return false; }
   bool HasTouchpad() override { return false; }
   bool IsCapsLockEnabled() override { return false; }
   void SetCapsLockEnabled(bool enabled) override {}
@@ -67,6 +68,10 @@ class StubInputController : public InputController {
   void GetGesturePropertiesService(
       mojo::PendingReceiver<ui::ozone::mojom::GesturePropertiesService>
           receiver) override {}
+  void PlayVibrationEffect(int id,
+                           uint8_t amplitude,
+                           uint16_t duration_millis) override {}
+  void StopVibration(int id) override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(StubInputController);

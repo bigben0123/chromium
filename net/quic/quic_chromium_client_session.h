@@ -28,7 +28,6 @@
 #include "net/base/net_error_details.h"
 #include "net/base/net_export.h"
 #include "net/base/proxy_server.h"
-#include "net/cert/ct_verify_result.h"
 #include "net/log/net_log_with_source.h"
 #include "net/quic/quic_chromium_client_stream.h"
 #include "net/quic/quic_chromium_packet_reader.h"
@@ -55,7 +54,6 @@ namespace net {
 class CertVerifyResult;
 class DatagramClientSocket;
 class NetLog;
-class NetworkIsolationKey;
 class QuicCryptoClientStreamFactory;
 class QuicServerInfo;
 class QuicStreamFactory;
@@ -164,6 +162,20 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
         NetworkChangeNotifier::NetworkHandle network,
         int error_code) = 0;
 
+    // Called when |session| is closed by |source| with |error_code|
+    // and handshake has been confirmed.
+    virtual void OnSessionClosedAfterHandshake(
+        QuicChromiumClientSession* session,
+        NetworkChangeNotifier::NetworkHandle network,
+        quic::ConnectionCloseSource source,
+        quic::QuicErrorCode error_code) = 0;
+
+    // Called when |this| is registered to monitor the connectivity of the
+    // |session|.
+    virtual void OnSessionRegistered(
+        QuicChromiumClientSession* session,
+        NetworkChangeNotifier::NetworkHandle network) = 0;
+
     // Called when |session| is removed.
     virtual void OnSessionRemoved(QuicChromiumClientSession* session) = 0;
   };
@@ -192,7 +204,7 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
     // returned, then |push_stream_| will be updated with the promised
     // stream.  If ERR_IO_PENDING is returned, then when the rendezvous is
     // eventually completed |callback| will be called.
-    int RendezvousWithPromised(const spdy::SpdyHeaderBlock& headers,
+    int RendezvousWithPromised(const spdy::Http2HeaderBlock& headers,
                                CompletionOnceCallback callback);
 
     // Starts a request to create a stream.  If OK is returned, then
@@ -260,9 +272,9 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
     }
 
     // quic::QuicClientPushPromiseIndex::Delegate implementation
-    bool CheckVary(const spdy::SpdyHeaderBlock& client_request,
-                   const spdy::SpdyHeaderBlock& promise_request,
-                   const spdy::SpdyHeaderBlock& promise_response) override;
+    bool CheckVary(const spdy::Http2HeaderBlock& client_request,
+                   const spdy::Http2HeaderBlock& promise_request,
+                   const spdy::Http2HeaderBlock& promise_response) override;
     void OnRendezvousResult(quic::QuicSpdyStream* stream) override;
 
     // Returns true if the session's connection has sent or received any bytes.
@@ -438,7 +450,7 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
       const char* const connection_description,
       base::TimeTicks dns_resolution_start_time,
       base::TimeTicks dns_resolution_end_time,
-      quic::QuicClientPushPromiseIndex* push_promise_index,
+      std::unique_ptr<quic::QuicClientPushPromiseIndex> push_promise_index,
       ServerPushDelegate* push_delegate,
       const base::TickClock* tick_clock,
       base::SequencedTaskRunner* task_runner,
@@ -506,7 +518,7 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
   // quic::QuicSpdySession methods:
   size_t WriteHeadersOnHeadersStream(
       quic::QuicStreamId id,
-      spdy::SpdyHeaderBlock headers,
+      spdy::Http2HeaderBlock headers,
       bool fin,
       const spdy::SpdyStreamPrecedence& precedence,
       quic::QuicReferenceCountedPointer<quic::QuicAckListenerInterface>
@@ -515,31 +527,30 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
   void UpdateStreamPriority(
       quic::QuicStreamId id,
       const spdy::SpdyStreamPrecedence& new_precedence) override;
+  void OnHttp3GoAway(uint64_t id) override;
 
   // quic::QuicSession methods:
-  void OnStreamFrame(const quic::QuicStreamFrame& frame) override;
   QuicChromiumClientStream* CreateOutgoingBidirectionalStream() override;
   QuicChromiumClientStream* CreateOutgoingUnidirectionalStream() override;
   const quic::QuicCryptoClientStream* GetCryptoStream() const override;
   quic::QuicCryptoClientStream* GetMutableCryptoStream() override;
-  void CloseStream(quic::QuicStreamId stream_id) override;
-  void SendRstStream(quic::QuicStreamId id,
-                     quic::QuicRstStreamErrorCode error,
-                     quic::QuicStreamOffset bytes_written) override;
   void SetDefaultEncryptionLevel(quic::EncryptionLevel level) override;
-  void OnOneRttKeysAvailable() override;
+  void OnTlsHandshakeComplete() override;
+  void OnNewEncryptionKeyAvailable(
+      quic::EncryptionLevel level,
+      std::unique_ptr<quic::QuicEncrypter> encrypter) override;
   void OnCryptoHandshakeMessageSent(
       const quic::CryptoHandshakeMessage& message) override;
   void OnCryptoHandshakeMessageReceived(
       const quic::CryptoHandshakeMessage& message) override;
   void OnGoAway(const quic::QuicGoAwayFrame& frame) override;
-  void OnRstStream(const quic::QuicRstStreamFrame& frame) override;
   void OnCanCreateNewOutgoingStream(bool unidirectional) override;
   bool ValidateStatelessReset(
       const quic::QuicSocketAddress& self_address,
       const quic::QuicSocketAddress& peer_address) override;
+  void SendPing() override;
 
-  // QuicClientSessionBase methods:
+  // QuicSpdyClientSessionBase methods:
   void OnConfigNegotiated() override;
   void OnProofValid(
       const quic::QuicCryptoClientConfig::CachedState& cached) override;
@@ -556,12 +567,14 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
                         bool is_connectivity_probe) override;
   void OnPathDegrading() override;
   void OnForwardProgressMadeAfterPathDegrading() override;
+  void OnKeyUpdate(quic::KeyUpdateReason reason) override;
 
   // QuicChromiumPacketReader::Visitor methods:
   void OnReadError(int result, const DatagramClientSocket* socket) override;
   bool OnPacket(const quic::QuicReceivedPacket& packet,
                 const quic::QuicSocketAddress& local_address,
                 const quic::QuicSocketAddress& peer_address) override;
+  void OnStreamClosed(quic::QuicStreamId stream_id) override;
 
   // MultiplexedSession methods:
   bool GetRemoteEndpoint(IPEndPoint* endpoint) override;
@@ -594,6 +607,9 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
 
   const NetLogWithSource& net_log() const { return net_log_; }
 
+  // Returns true if the stream factory disables gQUIC 0-RTT.
+  bool gquic_zero_rtt_disabled() const;
+
   // Returns a Handle to this session.
   std::unique_ptr<QuicChromiumClientSession::Handle> CreateHandle(
       const HostPortPair& destination);
@@ -603,14 +619,13 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
   // than the number of round-trips needed for the handshake.
   int GetNumSentClientHellos() const;
 
-  // Returns true if |hostname| may be pooled onto this session.  If this
-  // is a secure QUIC session, then |hostname| must match the certificate
-  // presented during the handshake.
+  // Returns true if |hostname| may be pooled onto this session.
+  // |other_session_key| specifies the seession key associated with |hostname|
+  // (its own hostname and port fields are ignored). If this is a secure QUIC
+  // session, then |hostname| must match the certificate presented during the
+  // handshake.
   bool CanPool(const std::string& hostname,
-               PrivacyMode privacy_mode,
-               const SocketTag& socket_tag,
-               const NetworkIsolationKey& network_isolation_key,
-               bool disable_secure_dns) const;
+               const QuicSessionKey& other_session_key) const;
 
   const quic::QuicServerId& server_id() const {
     return session_key_.server_id();
@@ -686,7 +701,7 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
 
   bool HandlePromised(quic::QuicStreamId associated_id,
                       quic::QuicStreamId promised_id,
-                      const spdy::SpdyHeaderBlock& headers) override;
+                      const spdy::Http2HeaderBlock& headers) override;
 
   void DeletePromised(quic::QuicClientPromisedInfo* promised) override;
 
@@ -704,6 +719,10 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
   // See base/trace_event/memory_usage_estimator.h.
   // TODO(xunjieli): It only tracks |packet_readers_|. Write a better estimate.
   size_t EstimateMemoryUsage() const;
+
+  // Looks for a push that matches the provided parameters.
+  quic::QuicClientPromisedInfo* GetPromised(const GURL& url,
+                                            const QuicSessionKey& session_key);
 
   bool require_confirmation() const { return require_confirmation_; }
 
@@ -737,7 +756,7 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
   // A completion callback invoked when a read completes.
   void OnReadComplete(int result);
 
-  void CloseAllStreams(int net_error);
+  void NotifyAllStreamsOfError(int net_error);
   void CloseAllHandles(int net_error);
   void CancelAllRequests(int net_error);
   void NotifyRequestsOfConfirmation(int net_error);
@@ -810,6 +829,8 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
   // Called when default encryption level switches to forward secure.
   void OnCryptoHandshakeComplete();
 
+  void LogZeroRttStats();
+
   QuicSessionKey session_key_;
   bool require_confirmation_;
   bool migrate_session_early_v2_;
@@ -850,7 +871,6 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
   SSLConfigService* ssl_config_service_;
   std::unique_ptr<QuicServerInfo> server_info_;
   std::unique_ptr<CertVerifyResult> cert_verify_result_;
-  std::unique_ptr<ct::CTVerifyResult> ct_verify_result_;
   std::string pinning_failure_log_;
   bool pkp_bypassed_;
   bool is_fatal_cert_error_;
@@ -906,6 +926,18 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
   Http2PriorityDependencies priority_dependency_state_;
 
   quic::QuicStreamId max_allowed_push_id_;
+
+  bool attempted_zero_rtt_;
+
+  size_t num_pings_sent_;
+
+  size_t num_migrations_;
+
+  // The reason for the last 1-RTT key update on the connection. Will be
+  // kInvalid if no key updates have occurred.
+  quic::KeyUpdateReason last_key_update_reason_;
+
+  std::unique_ptr<quic::QuicClientPushPromiseIndex> push_promise_index_;
 
   base::WeakPtrFactory<QuicChromiumClientSession> weak_factory_{this};
 

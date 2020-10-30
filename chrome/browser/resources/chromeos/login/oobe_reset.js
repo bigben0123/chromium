@@ -57,7 +57,6 @@ Polymer({
     'setTpmFirmwareUpdateMode',
     'setShouldShowConfirmationDialog',
     'setScreenState',
-    'setIsForcedPowerwash',
   ],
 
   properties: {
@@ -160,18 +159,12 @@ Polymer({
       type: Boolean,
       value: false,
     },
-
-    isForcedPowerwash_: {
-      type: Boolean,
-      value: false,
-    },
   },
 
   /** @override */
   ready() {
     this.initializeLoginScreen('ResetScreen', {
       resetAllowed: false,
-      enableDebuggingAllowed: false,
     });
   },
 
@@ -232,11 +225,6 @@ Polymer({
   /** @param {RESET_SCREEN_STATE} state  */
   setScreenState(state) {
     this.screenState_ = state;
-  },
-
-  /** @param {boolean} is_forced_powerwash  */
-  setIsForcedPowerwash(is_forced_powerwash) {
-    this.isForcedPowerwash_ = is_forced_powerwash;
   },
   /* ---------- EXTERNAL API END ---------- */
 

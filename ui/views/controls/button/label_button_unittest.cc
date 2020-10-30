@@ -72,7 +72,7 @@ class TestLabelButton : public LabelButton {
  public:
   explicit TestLabelButton(const base::string16& text = base::string16(),
                            int button_context = style::CONTEXT_BUTTON)
-      : LabelButton(nullptr, text, button_context) {}
+      : LabelButton(Button::PressedCallback(), text, button_context) {}
 
   using LabelButton::image;
   using LabelButton::label;
@@ -93,11 +93,15 @@ class LabelButtonTest : public test::WidgetTest {
     // used (which could be derived from the Widget's NativeTheme).
     test_widget_ = CreateTopLevelPlatformWidget();
 
+    // Ensure the Widget is active, since LabelButton appearance in inactive
+    // Windows is platform-dependent.
+    test_widget_->Show();
+
     // The test code below is not prepared to handle dark mode.
     test_widget_->GetNativeTheme()->set_use_dark_colors(false);
 
-    button_ = new TestLabelButton;
-    test_widget_->GetContentsView()->AddChildView(button_);
+    button_ = test_widget_->GetContentsView()->AddChildView(
+        std::make_unique<TestLabelButton>());
 
     // Establish the expected text colors for testing changes due to state.
     themed_normal_text_color_ = button_->GetNativeTheme()->GetSystemColor(
@@ -107,7 +111,8 @@ class LabelButtonTest : public test::WidgetTest {
     // NativeTheme and use a hardcoded black or (on Mac) have a NativeTheme that
     // reliably returns black.
     styled_normal_text_color_ = SK_ColorBLACK;
-#if defined(OS_LINUX) && BUILDFLAG(ENABLE_DESKTOP_AURA)
+#if (defined(OS_LINUX) || defined(OS_CHROMEOS)) && \
+    BUILDFLAG(ENABLE_DESKTOP_AURA)
     // The Linux theme provides a non-black highlight text color, but it's not
     // used for styled buttons.
     styled_highlight_text_color_ = styled_normal_text_color_ =
@@ -136,6 +141,10 @@ class LabelButtonTest : public test::WidgetTest {
   DISALLOW_COPY_AND_ASSIGN(LabelButtonTest);
 };
 
+TEST_F(LabelButtonTest, FocusBehavior) {
+  EXPECT_EQ(PlatformStyle::DefaultFocusBehavior(), button_->GetFocusBehavior());
+}
+
 TEST_F(LabelButtonTest, Init) {
   const base::string16 text(ASCIIToUTF16("abc"));
   TestLabelButton button(text);
@@ -154,7 +163,7 @@ TEST_F(LabelButtonTest, Init) {
                       ax::mojom::StringAttribute::kName));
 
   EXPECT_FALSE(button.GetIsDefault());
-  EXPECT_EQ(Button::STATE_NORMAL, button.state());
+  EXPECT_EQ(Button::STATE_NORMAL, button.GetState());
 
   EXPECT_EQ(button.image()->parent(), &button);
   EXPECT_EQ(button.label()->parent(), &button);
@@ -686,6 +695,36 @@ TEST_F(LabelButtonTest, ImageOrLabelGetClipped) {
   EXPECT_GE(button_->label()->height(), image_size);
 }
 
+TEST_F(LabelButtonTest, UpdateImageAfterSettingImageModel) {
+  auto is_showing_image = [&](const gfx::ImageSkia& image) {
+    return button_->image()->GetImage().BackedBySameObjectAs(image);
+  };
+
+  auto normal_image = CreateTestImage(16, 16);
+  button_->SetImageModel(Button::STATE_NORMAL,
+                         ui::ImageModel::FromImageSkia(normal_image));
+  EXPECT_TRUE(is_showing_image(normal_image));
+
+  // When the button has no specific disabled image, changing the normal image
+  // while the button is disabled should update the currently-visible image.
+  normal_image = CreateTestImage(16, 16);
+  button_->SetState(Button::STATE_DISABLED);
+  button_->SetImageModel(Button::STATE_NORMAL,
+                         ui::ImageModel::FromImageSkia(normal_image));
+  EXPECT_TRUE(is_showing_image(normal_image));
+
+  // Any specific disabled image should take precedence over the normal image.
+  auto disabled_image = CreateTestImage(16, 16);
+  button_->SetImageModel(Button::STATE_DISABLED,
+                         ui::ImageModel::FromImageSkia(disabled_image));
+  EXPECT_TRUE(is_showing_image(disabled_image));
+
+  // Removing the disabled image should result in falling back to the normal
+  // image again.
+  button_->SetImageModel(Button::STATE_DISABLED, ui::ImageModel());
+  EXPECT_TRUE(is_showing_image(normal_image));
+}
+
 // Test fixture for a LabelButton that has an ink drop configured.
 class InkDropLabelButtonTest : public ViewsTestBase {
  public:
@@ -704,13 +743,12 @@ class InkDropLabelButtonTest : public ViewsTestBase {
     widget_->Init(std::move(params));
     widget_->Show();
 
-    button_ = new LabelButton(nullptr, base::string16());
+    button_ = widget_->SetContentsView(std::make_unique<LabelButton>(
+        Button::PressedCallback(), base::string16()));
 
     test_ink_drop_ = new test::TestInkDrop();
     test::InkDropHostViewTestApi(button_).SetInkDrop(
         base::WrapUnique(test_ink_drop_));
-
-    widget_->SetContentsView(button_);
   }
 
   void TearDown() override {

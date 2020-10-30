@@ -14,10 +14,8 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.BaseJUnit4ClassRunner;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.test.util.browser.signin.AccountManagerTestRule;
-import org.chromium.components.signin.AccountManagerFacadeProvider;
-import org.chromium.components.signin.ChromeSigninController;
-import org.chromium.components.signin.base.CoreAccountId;
 import org.chromium.components.signin.base.CoreAccountInfo;
 import org.chromium.components.signin.identitymanager.IdentityManager;
 import org.chromium.components.signin.identitymanager.IdentityMutator;
@@ -48,35 +46,24 @@ public class IdentityManagerIntegrationTest {
 
     @Before
     public void setUp() {
-        mTestAccount1 = createCoreAccountInfoFromEmail(TEST_ACCOUNT1);
-        mTestAccount2 = createCoreAccountInfoFromEmail(TEST_ACCOUNT2);
+        mTestAccount1 = mAccountManagerTestRule.toCoreAccountInfo(TEST_ACCOUNT1);
+        mTestAccount2 = mAccountManagerTestRule.toCoreAccountInfo(TEST_ACCOUNT2);
 
         NativeLibraryTestUtils.loadNativeLibraryAndInitBrowserProcess();
 
-        // Make sure there is no account signed in yet.
-        ChromeSigninController.get().setSignedInAccountName(null);
-
         mAccountManagerTestRule.waitForSeeding();
         TestThreadUtils.runOnUiThreadBlocking(() -> {
+            Profile profile = Profile.getLastUsedRegularProfile();
             mIdentityMutator =
-                    IdentityServicesProvider.get().getSigninManager().getIdentityMutator();
-            mIdentityManager = IdentityServicesProvider.get().getIdentityManager();
+                    IdentityServicesProvider.get().getSigninManager(profile).getIdentityMutator();
+            mIdentityManager = IdentityServicesProvider.get().getIdentityManager(profile);
         });
-    }
-
-    private static CoreAccountInfo createCoreAccountInfoFromEmail(String accountEmail) {
-        String accountGaiaId =
-                AccountManagerFacadeProvider.getInstance().getAccountGaiaId(accountEmail);
-        return new CoreAccountInfo(new CoreAccountId(accountGaiaId), accountEmail, accountGaiaId);
     }
 
     @After
     public void tearDown() {
         TestThreadUtils.runOnUiThreadBlocking(
                 () -> { mIdentityMutator.reloadAllAccountsFromSystemWithPrimaryAccount(null); });
-
-        // TODO(https://crbug.com/1046412): Remove this.
-        ChromeSigninController.get().setSignedInAccountName(null);
     }
 
     @Test

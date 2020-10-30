@@ -24,13 +24,13 @@
 #include "base/time/time.h"
 #include "base/util/type_safety/strong_alias.h"
 #include "build/build_config.h"
+#include "components/download/public/common/quarantine_connection.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/allow_service_worker_result.h"
 #include "content/public/browser/certificate_request_result_type.h"
 #include "content/public/browser/generated_code_cache_settings.h"
 #include "content/public/browser/storage_partition_config.h"
 #include "content/public/common/page_visibility_state.h"
-#include "content/public/common/previews_state.h"
 #include "content/public/common/window_container_type.mojom-forward.h"
 #include "device/vr/buildflags/buildflags.h"
 #include "media/base/video_codecs.h"
@@ -40,12 +40,15 @@
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "mojo/public/cpp/system/message_pipe.h"
 #include "ppapi/buildflags/buildflags.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/mojom/network_context.mojom-forward.h"
 #include "services/network/public/mojom/restricted_cookie_manager.mojom-forward.h"
 #include "services/network/public/mojom/url_loader_factory.mojom-forward.h"
 #include "services/network/public/mojom/websocket.mojom-forward.h"
 #include "storage/browser/file_system/file_system_context.h"
+#include "third_party/blink/public/common/loader/previews_state.h"
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "ui/accessibility/ax_mode.h"
 #include "ui/base/page_transition_types.h"
@@ -55,7 +58,7 @@
 #include "url/origin.h"
 #include "url/url_constants.h"
 
-#if (defined(OS_POSIX) && !defined(OS_MACOSX)) || defined(OS_FUCHSIA)
+#if (defined(OS_POSIX) && !defined(OS_MAC)) || defined(OS_FUCHSIA)
 #include "base/posix/global_descriptors.h"
 #endif
 
@@ -74,6 +77,7 @@ using LoginAuthRequiredCallback =
 
 namespace base {
 class CommandLine;
+class DictionaryValue;
 class FilePath;
 class SequencedTaskRunner;
 }  // namespace base
@@ -81,13 +85,16 @@ class SequencedTaskRunner;
 namespace blink {
 namespace mojom {
 class BadgeService;
-class RendererPreferences;
 class RendererPreferenceWatcher;
 class WebUsbService;
 class WindowFeatures;
 enum class WebFeature : int32_t;
 }  // namespace mojom
+namespace web_pref {
+struct WebPreferences;
+}  // namespace web_pref
 class AssociatedInterfaceRegistry;
+struct RendererPreferences;
 class URLLoaderThrottle;
 }  // namespace blink
 
@@ -117,7 +124,6 @@ class TrustedHeaderClient;
 namespace service_manager {
 class Identity;
 struct Manifest;
-enum class SandboxType;
 class Service;
 
 template <typename...>
@@ -150,7 +156,11 @@ struct ResourceRequest;
 }  // namespace network
 
 namespace sandbox {
+class SeatbeltExecClient;
 class TargetPolicy;
+namespace policy {
+enum class SandboxType;
+}  // namespace policy
 }  // namespace sandbox
 
 namespace ui {
@@ -197,7 +207,6 @@ class ReceiverPresentationServiceDelegate;
 class RenderFrameHost;
 class RenderProcessHost;
 class RenderViewHost;
-class ResourceContext;
 class SerialDelegate;
 class SiteInstance;
 class SpeechRecognitionManagerDelegate;
@@ -217,7 +226,6 @@ struct OpenURLParams;
 struct PepperPluginInfo;
 struct Referrer;
 struct SocketPermissionRequest;
-struct WebPreferences;
 
 #if defined(OS_ANDROID)
 class TtsEnvironmentAndroid;
@@ -360,12 +368,9 @@ class CONTENT_EXPORT ContentBrowserClient {
 
   // Returns true unless the effective URL is part of a site that cannot live in
   // a process restricted to just that site.  This is only called if site
-  // isolation is enabled for this URL, and is a bug workaround.
-  //
-  // TODO(nick): Remove this function once https://crbug.com/160576 is fixed,
-  // and origin lock can be applied to all URLs.
-  virtual bool ShouldLockToOrigin(BrowserContext* browser_context,
-                                  const GURL& effective_url);
+  // isolation is enabled for this URL.
+  virtual bool ShouldLockProcessToSite(BrowserContext* browser_context,
+                                       const GURL& effective_url);
 
   // Returns a boolean indicating whether the WebUI |scheme| requires its
   // process to be locked to the WebUI origin.
@@ -417,12 +422,12 @@ class CONTENT_EXPORT ContentBrowserClient {
   //
   // This method may be called in the following cases:
   // - The default factory to be used by a frame or worker.  In this case both
-  //   the |origin| and |request_initiator_site_lock| are the origin of the
+  //   the |origin| and |request_initiator_origin_lock| are the origin of the
   //   frame or worker (or the origin that is being committed in the frame).
   // - An isolated-world-specific factory for origins covered via
   //   RenderFrameHost::MarkIsolatedWorldAsRequiringSeparateURLLoaderFactory.
   //   In this case |origin| is the origin of the isolated world and the
-  //   |request_initiator_site_lock| is the origin committed in the frame.
+  //   |request_initiator_origin_lock| is the origin committed in the frame.
   virtual void OverrideURLLoaderFactoryParams(
       BrowserContext* browser_context,
       const url::Origin& origin,
@@ -457,6 +462,13 @@ class CONTENT_EXPORT ContentBrowserClient {
   // protocol handlers.
   virtual bool IsHandledURL(const GURL& url);
 
+  // Returns whether a custom handler is registered for the scheme of the
+  // specified URL scheme.
+  // https://html.spec.whatwg.org/multipage/system-state.html#custom-handlers
+  // TODO(crbug.com/1139176) Move custom protocol handler code to content.
+  virtual bool HasCustomSchemeHandler(content::BrowserContext* browser_context,
+                                      const std::string& scheme);
+
   // Returns whether the given process is allowed to commit |url|.  This is a
   // more conservative check than IsSuitableHost, since it is used after a
   // navigation has committed to ensure that the process did not exceed its
@@ -466,7 +478,15 @@ class CONTENT_EXPORT ContentBrowserClient {
 
   // Allows the embedder to override parameters when navigating. Called for both
   // opening new URLs and when transferring URLs across processes.
+  // |web_contents| is the WebContents the navigation will occur in, which is
+  // not necessarily the WebContents the navigation was initiated from. For
+  // example, a popup results in a new WebContents. In some situations
+  // |web_contents| is null. This generally only occurs when code outside of
+  // content triggers this function, such as restore.
+  // WARNING: |web_contents| is temporary, and will be removed. See
+  // https://crbug.com/1141501.
   virtual void OverrideNavigationParams(
+      WebContents* web_contents,
       SiteInstance* site_instance,
       ui::PageTransition* transition,
       bool* is_renderer_initiated,
@@ -578,6 +598,11 @@ class CONTENT_EXPORT ContentBrowserClient {
   // Returns a client GUID used for virus scanning.
   virtual std::string GetApplicationClientGUIDForQuarantineCheck();
 
+  // Gets a callback which can connect to a Quarantine Service instance if
+  // available.
+  virtual download::QuarantineConnectionCallback
+  GetQuarantineConnectionCallback();
+
   // Returns the locale used by the application.
   // This is called on the UI and IO threads.
   virtual std::string GetApplicationLocale();
@@ -617,15 +642,8 @@ class CONTENT_EXPORT ContentBrowserClient {
   // made to access the registration but there is no specific service worker in
   // the registration being acted on.
   //
-  // This is called on the IO thread.
-  virtual AllowServiceWorkerResult AllowServiceWorkerOnIO(
-      const GURL& scope,
-      const GURL& site_for_cookies,
-      const base::Optional<url::Origin>& top_frame_origin,
-      const GURL& script_url,
-      ResourceContext* context);
-  // Same but for the UI thread.
-  virtual AllowServiceWorkerResult AllowServiceWorkerOnUI(
+  // This is called on the UI thread.
+  virtual AllowServiceWorkerResult AllowServiceWorker(
       const GURL& scope,
       const GURL& site_for_cookies,
       const base::Optional<url::Origin>& top_frame_origin,
@@ -662,7 +680,7 @@ class CONTENT_EXPORT ContentBrowserClient {
   // from their closest ancestor frame.
   virtual void UpdateRendererPreferencesForWorker(
       BrowserContext* browser_context,
-      blink::mojom::RendererPreferences* out_prefs);
+      blink::RendererPreferences* out_prefs);
 
   // Allow the embedder to control if access to file system by a shared worker
   // is allowed.
@@ -735,7 +753,8 @@ class CONTENT_EXPORT ContentBrowserClient {
 
   // Allows the embedder to override the LocationProvider implementation.
   // Return nullptr to indicate the default one for the platform should be
-  // created.
+  // created. This is used by Qt, see
+  // https://bugs.chromium.org/p/chromium/issues/detail?id=725057#c7
   virtual std::unique_ptr<device::LocationProvider>
   OverrideSystemLocationProvider();
 
@@ -874,7 +893,15 @@ class CONTENT_EXPORT ContentBrowserClient {
   // the renderer. The content layer will add its own settings, and then it's up
   // to the embedder to update it if it wants.
   virtual void OverrideWebkitPrefs(RenderViewHost* render_view_host,
-                                   WebPreferences* prefs) {}
+                                   blink::web_pref::WebPreferences* prefs) {}
+
+  // Similar to OverrideWebkitPrefs, but is only called after navigations. Some
+  // attributes in WebPreferences might need its value updated after navigation,
+  // and this method will give the opportunity for embedder to update them.
+  // Returns true if some values |prefs| changed due to embedder override.
+  virtual bool OverrideWebPreferencesAfterNavigation(
+      WebContents* web_contents,
+      blink::web_pref::WebPreferences* prefs);
 
   // Notifies that BrowserURLHandler has been created, so that the embedder can
   // optionally add their own handlers.
@@ -1150,12 +1177,12 @@ class CONTENT_EXPORT ContentBrowserClient {
 
   // Populates |mappings| with all files that need to be mapped before launching
   // a child process.
-#if (defined(OS_POSIX) && !defined(OS_MACOSX)) || defined(OS_FUCHSIA)
+#if (defined(OS_POSIX) && !defined(OS_MAC)) || defined(OS_FUCHSIA)
   virtual void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
       int child_process_id,
       content::PosixFileDescriptorInfo* mappings) {}
-#endif  // defined(OS_POSIX) && !defined(OS_MACOSX) || defined(OS_FUCHSIA)
+#endif  // defined(OS_POSIX) && !defined(OS_MAC) || defined(OS_FUCHSIA)
 
 #if defined(OS_WIN)
   // Defines flags that can be passed to PreSpawnRenderer.
@@ -1174,7 +1201,7 @@ class CONTENT_EXPORT ContentBrowserClient {
   // empty string if this sandboxed process type does not support living inside
   // an AppContainer. Called on PROCESS_LAUNCHER thread.
   virtual base::string16 GetAppContainerSidForSandboxType(
-      service_manager::SandboxType sandbox_type);
+      sandbox::policy::SandboxType sandbox_type);
 
   // Returns whether renderer code integrity is enabled.
   // This is called on the UI thread.
@@ -1214,13 +1241,19 @@ class CONTENT_EXPORT ContentBrowserClient {
 
   // Allows the embedder to register per-scheme URLLoaderFactory implementations
   // to handle navigation URL requests for schemes not handled by the Network
-  // Service. Only called when the Network Service is enabled.
+  // Service.
+  //
   // Note that a RenderFrameHost or RenderProcessHost aren't passed in because
   // these can change during a navigation (e.g. depending on redirects).
+  //
+  // |ukm_source_id| can be used to record UKM events associated with the
+  // navigation.
   using NonNetworkURLLoaderFactoryMap =
-      std::map<std::string, std::unique_ptr<network::mojom::URLLoaderFactory>>;
+      std::map<std::string,
+               mojo::PendingRemote<network::mojom::URLLoaderFactory>>;
   virtual void RegisterNonNetworkNavigationURLLoaderFactories(
       int frame_tree_node_id,
+      ukm::SourceIdObj ukm_source_id,
       NonNetworkURLLoaderFactoryMap* factories);
 
   // Allows the embedder to register per-scheme URLLoaderFactory
@@ -1321,6 +1354,10 @@ class CONTENT_EXPORT ContentBrowserClient {
   // |navigation_id| is valid iff |type| is |kNavigation|. It corresponds to the
   // Navigation ID returned by NavigationHandle::GetNavigationId().
   //
+  // |ukm_source_id| can be used to record UKM events associated with the
+  // page or worker this URLLoaderFactory is intended for (it may be
+  // kInvalidUkmSourceId if there is no such ID available).
+  //
   // |*factory_receiver| is always valid upon entry and MUST be valid upon
   // return. The embedder may swap out the value of |*factory_receiver| for its
   // own, in which case it must return |true| to indicate that it's proxying
@@ -1362,6 +1399,7 @@ class CONTENT_EXPORT ContentBrowserClient {
       URLLoaderFactoryType type,
       const url::Origin& request_initiator,
       base::Optional<int64_t> navigation_id,
+      ukm::SourceIdObj ukm_source_id,
       mojo::PendingReceiver<network::mojom::URLLoaderFactory>* factory_receiver,
       mojo::PendingRemote<network::mojom::TrustedURLLoaderHeaderClient>*
           header_client,
@@ -1487,6 +1525,14 @@ class CONTENT_EXPORT ContentBrowserClient {
   // BrowserContexts' storage. Multiple paths can be returned, e.g. in case the
   // persistent storage location differs from the cache storage location.
   virtual std::vector<base::FilePath> GetNetworkContextsParentDirectory();
+
+  // Called once during initialization of NetworkService to provide constants
+  // to NetLog.  (Though it may be called multiples times if NetworkService
+  // crashes and needs to be reinitialized).  The return value is merged with
+  // |GetNetConstants()| and passed to FileNetLogObserver - see documentation
+  // of |FileNetLogObserver::CreateBounded()| for more information.  The
+  // convention is to put new constants under a subdict at the key "clientInfo".
+  virtual base::DictionaryValue GetNetLogConstants();
 
 #if defined(OS_ANDROID)
   // Only used by Android WebView.
@@ -1661,10 +1707,13 @@ class CONTENT_EXPORT ContentBrowserClient {
       int64_t recv_bytes,
       int64_t sent_bytes);
 
-  // Returns the path to a root directory to which sandboxed out-of-process
-  // Storage Service instances should be confined. By default this is empty,
-  // and the browser cannot create sandboxed Storage Service instances.
+  // Returns the absolute path to a directory in which sandboxed out-of-process
+  // Storage Service instances should be confined. By default this is empty, and
+  // the browser cannot create sandboxed Storage Service instances.
   virtual base::FilePath GetSandboxedStorageServiceDataDirectory();
+
+  // Returns true if the audio service should be sandboxed. false otherwise.
+  virtual bool ShouldSandboxAudioService();
 
   // Asks the embedder for the PreviewsState which says which previews should
   // be enabled for the given navigation. The PreviewsState is a bitmask of
@@ -1672,8 +1721,8 @@ class CONTENT_EXPORT ContentBrowserClient {
   // keep sub-frame navigation state consistent with main frame state.
   // |current_navigation_url| is the URL that is currently being navigated to,
   // and can differ from GetURL() in |navigation_handle| on redirects.
-  virtual content::PreviewsState DetermineAllowedPreviews(
-      content::PreviewsState initial_state,
+  virtual blink::PreviewsState DetermineAllowedPreviews(
+      blink::PreviewsState initial_state,
       content::NavigationHandle* navigation_handle,
       const GURL& current_navigation_url);
 
@@ -1681,8 +1730,8 @@ class CONTENT_EXPORT ContentBrowserClient {
   // renderer. |initial_state| was pre-determined by |DetermineAllowedPreviews|.
   // |navigation_handle| is the corresponding navigation object.
   // |response_headers| are the response headers related to this navigation.
-  virtual content::PreviewsState DetermineCommittedPreviews(
-      content::PreviewsState initial_state,
+  virtual blink::PreviewsState DetermineCommittedPreviews(
+      blink::PreviewsState initial_state,
       content::NavigationHandle* navigation_handle,
       const net::HttpResponseHeaders* response_headers);
 
@@ -1750,6 +1799,12 @@ class CONTENT_EXPORT ContentBrowserClient {
       bool user_gesture,
       NavigationDownloadPolicy* download_policy);
 
+  // Returns the interest cohort associated with the |browser_context|.
+  virtual std::string GetInterestCohortForJsApi(
+      content::BrowserContext* browser_context,
+      const url::Origin& requesting_origin,
+      const net::SiteForCookies& site_for_cookies);
+
   // Returns whether a site is blocked to use Bluetooth scanning API.
   virtual bool IsBluetoothScanningBlocked(
       content::BrowserContext* browser_context,
@@ -1811,18 +1866,6 @@ class CONTENT_EXPORT ContentBrowserClient {
   // fullscreen when mock screen orientation changes.
   virtual bool CanEnterFullscreenWithoutUserActivation();
 
-  // Called to log a UKM event for the
-  // Extensions.CrossOriginFetchFromContentScript3 metric.  See the metric
-  // definition in //tools/metrics/ukm/ukm.xml for more details, including when
-  // this event should be logged.
-  //
-  // |isolated_world_host| is the hostname of the isolated world origin that has
-  // initiated the network request.  See the doc comment for
-  // network.mojom.URLRequest.isolated_world_origin for more details.  In
-  // practice, |isolated_world_host| is the Chrome Extension ID.
-  virtual void LogUkmEventForCrossOriginFetchFromContentScript3(
-      const std::string& isolated_world_host);
-
 #if BUILDFLAG(ENABLE_PLUGINS)
   // Returns true if |embedder_origin| is allowed to embed a plugin described by
   // |plugin_info|.  This method allows restricting some internal plugins (like
@@ -1843,16 +1886,39 @@ class CONTENT_EXPORT ContentBrowserClient {
   // External applications and services may launch the browser in a mode which
   // exposes browser control interfaces via Mojo. Any such interface binding
   // request received from an external client is passed to this method.
-  virtual void BindBrowserControlInterface(
-      mojo::GenericPendingReceiver receiver);
+  virtual void BindBrowserControlInterface(mojo::ScopedMessagePipeHandle pipe);
 
   // Returns true when a context (e.g., iframe) whose URL is |url| should
   // inherit the parent COEP value implicitly, similar to "blob:"
   virtual bool ShouldInheritCrossOriginEmbedderPolicyImplicitly(
       const GURL& url);
 
+  // Returns whether a context whose URL is |url| should be allowed to make
+  // insecure private network requests.
+  //
+  // See the CORS-RFC1918 spec for more details:
+  // https://wicg.github.io/cors-rfc1918.
+  //
+  // |browser_context| must not be nullptr. Caller retains ownership.
+  // |url| is the URL of a navigation ready to commit.
+  virtual bool ShouldAllowInsecurePrivateNetworkRequests(
+      BrowserContext* browser_context,
+      const GURL& url);
+
   // Returns the URL-Keyed Metrics service for chrome:ukm.
   virtual ukm::UkmService* GetUkmService();
+
+#if defined(OS_MAC)
+  // Sets up the embedder sandbox parameters for the given sandbox type. Returns
+  // true if parameters were successfully set up or false if no additional
+  // parameters were set up.
+  virtual bool SetupEmbedderSandboxParameters(
+      sandbox::policy::SandboxType sandbox_type,
+      sandbox::SeatbeltExecClient* client);
+#endif  // defined(OS_MAC)
+
+  virtual void GetHyphenationDictionary(
+      base::OnceCallback<void(const base::FilePath&)>);
 };
 
 }  // namespace content

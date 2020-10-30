@@ -899,24 +899,10 @@ var availableTests = [
         assertEq('encrypted_data', result);
       }));
   },
-  function setWifiTDLSEnabledState() {
-    chrome.networkingPrivate.setWifiTDLSEnabledState(
-        'aa:bb:cc:dd:ee:ff', true, callbackPass(function(result) {
-          assertEq(ConnectionStateType.CONNECTED, result);
-        }));
-  },
-  function getWifiTDLSStatus() {
-    chrome.networkingPrivate.getWifiTDLSStatus(
-        'aa:bb:cc:dd:ee:ff', callbackPass(function(result) {
-          assertEq(ConnectionStateType.CONNECTED, result);
-        }));
-  },
   function getCaptivePortalStatus() {
     var networks = [['stub_ethernet_guid', 'Online'],
                     ['stub_wifi1_guid', 'Offline'],
-                    ['stub_wifi2_guid', 'Portal'],
-                    ['stub_cellular1_guid', 'ProxyAuthRequired'],
-                    ['stub_vpn1_guid', 'Unknown']];
+                    ['stub_wifi2_guid', 'Portal']];
     networks.forEach(function(network) {
       var guid = network[0];
       var expectedStatus = network[1];
@@ -931,7 +917,7 @@ var availableTests = [
     var done = chrome.test.callbackAdded();
     var listener =
         new privateHelpers.watchForCaptivePortalState(
-            'wifi_guid', 'Online', done);
+            'stub_wifi1_guid', 'Portal', done);
     chrome.test.sendMessage('notifyPortalDetectorObservers');
   },
   function unlockCellularSim() {

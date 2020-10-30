@@ -10,6 +10,8 @@
 
 #include "base/callback.h"
 #include "base/time/time.h"
+#include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
 #include "components/url_formatter/url_formatter.h"
 #include "url/gurl.h"
 
@@ -17,6 +19,9 @@ class GURL;
 
 namespace lookalikes {
 extern const char kHistogramName[];
+
+// Register applicable preferences with the provided registry.
+void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 }
 
 using LookalikeTargetAllowlistChecker =
@@ -147,8 +152,7 @@ bool IsTopDomain(const DomainInfo& domain_info);
 std::string GetETLDPlusOne(const std::string& hostname);
 
 // Returns true if a lookalike interstitial should be shown.
-bool ShouldBlockLookalikeUrlNavigation(LookalikeUrlMatchType match_type,
-                                       const DomainInfo& navigated_domain);
+bool ShouldBlockLookalikeUrlNavigation(LookalikeUrlMatchType match_type);
 
 // Returns true if a domain is visually similar to the hostname of |url|. The
 // matching domain can be a top domain or an engaged site. Similarity
@@ -185,5 +189,17 @@ TargetEmbeddingType GetTargetEmbeddingType(
     const std::vector<DomainInfo>& engaged_sites,
     const LookalikeTargetAllowlistChecker& in_target_allowlist,
     std::string* safe_hostname);
+
+// Returns true if a navigation to an IDN should be blocked.
+bool ShouldBlockBySpoofCheckResult(const DomainInfo& navigated_domain);
+
+// Checks whether the given url is allowlisted by enterprise policy, and
+// thus no warnings should be shown on that host.
+bool IsAllowedByEnterprisePolicy(const PrefService* pref_service,
+                                 const GURL& url);
+
+// Add the given hosts to the allowlist policy setting.
+void SetEnterpriseAllowlistForTesting(PrefService* pref_service,
+                                      const std::vector<std::string>& hosts);
 
 #endif  // COMPONENTS_LOOKALIKES_CORE_LOOKALIKE_URL_UTIL_H_

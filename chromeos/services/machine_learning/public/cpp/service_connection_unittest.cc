@@ -22,7 +22,6 @@
 #include "chromeos/services/machine_learning/public/mojom/tensor.mojom.h"
 #include "mojo/core/embedder/embedder.h"
 #include "mojo/core/embedder/scoped_ipc_support.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -255,7 +254,7 @@ TEST_F(ServiceConnectionTest,
   bool infer_callback_done = false;
   text_classifier->Annotate(
       std::move(request),
-      base::Bind(
+      base::BindOnce(
           [](bool* infer_callback_done,
              std::vector<mojom::TextAnnotationPtr> annotations) {
             *infer_callback_done = true;
@@ -302,21 +301,117 @@ TEST_F(ServiceConnectionTest,
   request->user_selection = mojom::CodepointSpan::New();
   bool infer_callback_done = false;
   text_classifier->SuggestSelection(
-      std::move(request),
+      std::move(request), base::BindOnce(
+                              [](bool* infer_callback_done,
+                                 mojom::CodepointSpanPtr suggested_span) {
+                                *infer_callback_done = true;
+                                // Check if the suggestion is correct.
+                                EXPECT_EQ(suggested_span->start_offset, 1u);
+                                EXPECT_EQ(suggested_span->end_offset, 2u);
+                              },
+                              &infer_callback_done));
+  base::RunLoop().RunUntilIdle();
+  ASSERT_TRUE(infer_callback_done);
+}
+
+// Tests the fake ML service for text classifier language identification.
+TEST_F(ServiceConnectionTest,
+       FakeServiceConnectionForTextClassifierFindLanguages) {
+  mojo::Remote<mojom::TextClassifier> text_classifier;
+  bool callback_done = false;
+  FakeServiceConnectionImpl fake_service_connection;
+  ServiceConnection::UseFakeServiceConnectionForTesting(
+      &fake_service_connection);
+
+  std::vector<mojom::TextLanguagePtr> languages;
+  languages.emplace_back(mojom::TextLanguage::New("en", 0.9));
+  languages.emplace_back(mojom::TextLanguage::New("fr", 0.1));
+  fake_service_connection.SetOutputLanguages(languages);
+
+  ServiceConnection::GetInstance()->LoadTextClassifier(
+      text_classifier.BindNewPipeAndPassReceiver(),
+      base::BindOnce(
+          [](bool* callback_done, mojom::LoadModelResult result) {
+            EXPECT_EQ(result, mojom::LoadModelResult::OK);
+            *callback_done = true;
+          },
+          &callback_done));
+  base::RunLoop().RunUntilIdle();
+  ASSERT_TRUE(callback_done);
+  ASSERT_TRUE(text_classifier.is_bound());
+
+  std::string input_text = "dummy input text";
+  bool infer_callback_done = false;
+  text_classifier->FindLanguages(
+      input_text, base::BindOnce(
+                      [](bool* infer_callback_done,
+                         std::vector<mojom::TextLanguagePtr> languages) {
+                        *infer_callback_done = true;
+                        // Check if the suggestion is correct.
+                        ASSERT_EQ(languages.size(), 2ul);
+                        EXPECT_EQ(languages[0]->locale, "en");
+                        EXPECT_EQ(languages[0]->confidence, 0.9f);
+                        EXPECT_EQ(languages[1]->locale, "fr");
+                        EXPECT_EQ(languages[1]->confidence, 0.1f);
+                      },
+                      &infer_callback_done));
+  base::RunLoop().RunUntilIdle();
+  ASSERT_TRUE(infer_callback_done);
+}
+
+// Tests the fake ML service for handwriting.
+TEST_F(ServiceConnectionTest, FakeHandWritingRecognizer) {
+  mojo::Remote<mojom::HandwritingRecognizer> recognizer;
+  bool callback_done = false;
+  FakeServiceConnectionImpl fake_service_connection;
+  ServiceConnection::UseFakeServiceConnectionForTesting(
+      &fake_service_connection);
+
+  ServiceConnection::GetInstance()->LoadHandwritingModel(
+      mojom::HandwritingRecognizerSpec::New("en"),
+      recognizer.BindNewPipeAndPassReceiver(),
+      base::BindOnce(
+          [](bool* callback_done, mojom::LoadHandwritingModelResult result) {
+            EXPECT_EQ(result, mojom::LoadHandwritingModelResult::OK);
+            *callback_done = true;
+          },
+          &callback_done));
+  base::RunLoop().RunUntilIdle();
+  ASSERT_TRUE(callback_done);
+  ASSERT_TRUE(recognizer.is_bound());
+
+  // Construct fake output.
+  mojom::HandwritingRecognizerResultPtr result =
+      mojom::HandwritingRecognizerResult::New();
+  result->status = mojom::HandwritingRecognizerResult::Status::OK;
+  mojom::HandwritingRecognizerCandidatePtr candidate =
+      mojom::HandwritingRecognizerCandidate::New();
+  candidate->text = "cat";
+  candidate->score = 0.5f;
+  result->candidates.emplace_back(std::move(candidate));
+  fake_service_connection.SetOutputHandwritingRecognizerResult(result);
+
+  auto query = mojom::HandwritingRecognitionQuery::New();
+  bool infer_callback_done = false;
+  recognizer->Recognize(
+      std::move(query),
       base::Bind(
           [](bool* infer_callback_done,
-             mojom::CodepointSpanPtr suggested_span) {
+             mojom::HandwritingRecognizerResultPtr result) {
             *infer_callback_done = true;
-            // Check if the suggestion is correct.
-            EXPECT_EQ(suggested_span->start_offset, 1u);
-            EXPECT_EQ(suggested_span->end_offset, 2u);
+            // Check if the annotation is correct.
+            ASSERT_EQ(result->status,
+                      mojom::HandwritingRecognizerResult::Status::OK);
+            EXPECT_EQ(result->candidates.at(0)->text, "cat");
+            EXPECT_EQ(result->candidates.at(0)->score, 0.5f);
           },
           &infer_callback_done));
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(infer_callback_done);
 }
 
-// Tests the fake ML service for handwriting.
+// Tests the deprecated fake ML service for handwriting.
+// Deprecated API.
 TEST_F(ServiceConnectionTest, FakeHandWritingRecognizerWithSpec) {
   mojo::Remote<mojom::HandwritingRecognizer> recognizer;
   bool callback_done = false;
@@ -352,7 +447,7 @@ TEST_F(ServiceConnectionTest, FakeHandWritingRecognizerWithSpec) {
   bool infer_callback_done = false;
   recognizer->Recognize(
       std::move(query),
-      base::Bind(
+      base::BindOnce(
           [](bool* infer_callback_done,
              mojom::HandwritingRecognizerResultPtr result) {
             *infer_callback_done = true;

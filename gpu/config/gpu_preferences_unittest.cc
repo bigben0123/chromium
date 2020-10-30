@@ -8,6 +8,7 @@
 #include "base/command_line.h"
 #include "base/message_loop/message_pump_type.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "gpu/config/gpu_switches.h"
 #include "gpu/ipc/common/gpu_preferences.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -67,18 +68,21 @@ void CheckGpuPreferencesEqual(GpuPreferences left, GpuPreferences right) {
             right.disable_biplanar_gpu_memory_buffers_for_video_frames);
   EXPECT_EQ(left.texture_target_exception_list,
             right.texture_target_exception_list);
-  EXPECT_EQ(left.ignore_gpu_blacklist, right.ignore_gpu_blacklist);
+  EXPECT_EQ(left.ignore_gpu_blocklist, right.ignore_gpu_blocklist);
   EXPECT_EQ(left.enable_oop_rasterization, right.enable_oop_rasterization);
   EXPECT_EQ(left.disable_oop_rasterization, right.disable_oop_rasterization);
   EXPECT_EQ(left.watchdog_starts_backgrounded,
             right.watchdog_starts_backgrounded);
   EXPECT_EQ(left.gr_context_type, right.gr_context_type);
   EXPECT_EQ(left.use_vulkan, right.use_vulkan);
+  EXPECT_EQ(left.enable_vulkan_protected_memory,
+            right.enable_vulkan_protected_memory);
   EXPECT_EQ(left.enable_gpu_benchmarking_extension,
             right.enable_gpu_benchmarking_extension);
   EXPECT_EQ(left.enable_webgpu, right.enable_webgpu);
   EXPECT_EQ(left.enable_dawn_backend_validation,
             right.enable_dawn_backend_validation);
+  EXPECT_EQ(left.disable_dawn_robustness, right.disable_dawn_robustness);
   EXPECT_EQ(left.enable_gpu_blocked_time_metric,
             right.enable_gpu_blocked_time_metric);
   EXPECT_EQ(left.enable_perf_data_collection,
@@ -88,8 +92,10 @@ void CheckGpuPreferencesEqual(GpuPreferences left, GpuPreferences right) {
 #endif
   EXPECT_EQ(left.enable_native_gpu_memory_buffers,
             right.enable_native_gpu_memory_buffers);
-  EXPECT_EQ(left.force_disable_new_accelerated_video_decoder,
-            right.force_disable_new_accelerated_video_decoder);
+#if BUILDFLAG(IS_ASH)
+  EXPECT_EQ(left.platform_disallows_chromeos_direct_video_decoder,
+            right.platform_disallows_chromeos_direct_video_decoder);
+#endif
 }
 
 }  // namespace
@@ -110,12 +116,6 @@ TEST(GpuPreferencesTest, EncodeDecode) {
 
     GpuPreferences default_prefs;
     mojom::GpuPreferences prefs_mojom;
-
-    // Make sure all fields are included in mojo struct.
-    // TODO(zmo): This test isn't perfect. If a field isn't included in
-    // mojom::GpuPreferences, the two struct sizes might still be equal due to
-    // alignment.
-    EXPECT_EQ(sizeof(default_prefs), sizeof(prefs_mojom));
 
 #define GPU_PREFERENCES_FIELD(name, value)         \
   input_prefs.name = value;                        \
@@ -164,7 +164,7 @@ TEST(GpuPreferencesTest, EncodeDecode) {
     GPU_PREFERENCES_FIELD(use_passthrough_cmd_decoder, true)
     GPU_PREFERENCES_FIELD(disable_biplanar_gpu_memory_buffers_for_video_frames,
                           true)
-    GPU_PREFERENCES_FIELD(ignore_gpu_blacklist, true)
+    GPU_PREFERENCES_FIELD(ignore_gpu_blocklist, true)
     GPU_PREFERENCES_FIELD(enable_oop_rasterization, true)
     GPU_PREFERENCES_FIELD(disable_oop_rasterization, true)
     GPU_PREFERENCES_FIELD(watchdog_starts_backgrounded, true)
@@ -182,7 +182,10 @@ TEST(GpuPreferencesTest, EncodeDecode) {
                                base::MessagePumpType::UI)
 #endif
     GPU_PREFERENCES_FIELD(enable_native_gpu_memory_buffers, true);
-    GPU_PREFERENCES_FIELD(force_disable_new_accelerated_video_decoder, true);
+#if BUILDFLAG(IS_ASH)
+    GPU_PREFERENCES_FIELD(platform_disallows_chromeos_direct_video_decoder,
+                          true);
+#endif
 
     input_prefs.texture_target_exception_list.emplace_back(
         gfx::BufferUsage::SCANOUT, gfx::BufferFormat::RGBA_8888);
@@ -258,7 +261,7 @@ TEST(GpuPreferencesTest, DISABLED_DecodePreferences) {
     PRINT_INT(texture_target_exception_list[i].usage);
     PRINT_INT(texture_target_exception_list[i].format);
   }
-  PRINT_BOOL(ignore_gpu_blacklist);
+  PRINT_BOOL(ignore_gpu_blocklist);
   PRINT_BOOL(enable_oop_rasterization);
   PRINT_BOOL(disable_oop_rasterization);
   PRINT_BOOL(watchdog_starts_backgrounded);
@@ -273,7 +276,9 @@ TEST(GpuPreferencesTest, DISABLED_DecodePreferences) {
   PRINT_INT(message_pump_type);
 #endif
   PRINT_BOOL(enable_native_gpu_memory_buffers);
-  PRINT_BOOL(force_disable_new_accelerated_video_decoder);
+#if BUILDFLAG(IS_ASH)
+  PRINT_BOOL(platform_disallows_chromeos_direct_video_decoder);
+#endif
   printf("}\n");
 }
 

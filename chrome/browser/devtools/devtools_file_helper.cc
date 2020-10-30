@@ -155,7 +155,8 @@ std::string RegisterFileSystem(WebContents* web_contents,
 
   content::ChildProcessSecurityPolicy* policy =
       content::ChildProcessSecurityPolicy::GetInstance();
-  RenderViewHost* render_view_host = web_contents->GetRenderViewHost();
+  RenderViewHost* render_view_host =
+      web_contents->GetMainFrame()->GetRenderViewHost();
   int renderer_id = render_view_host->GetProcess()->GetID();
   policy->GrantReadFileSystem(renderer_id, file_system.id());
   policy->GrantWriteFileSystem(renderer_id, file_system.id());
@@ -413,7 +414,7 @@ void DevToolsFileHelper::RemoveFileSystem(const std::string& file_system_path) {
   DictionaryPrefUpdate update(profile_->GetPrefs(),
                               prefs::kDevToolsFileSystemPaths);
   base::DictionaryValue* file_systems_paths_value = update.Get();
-  file_systems_paths_value->RemoveWithoutPathExpansion(file_system_path, NULL);
+  file_systems_paths_value->RemoveKey(file_system_path);
 }
 
 bool DevToolsFileHelper::IsFileSystemAdded(

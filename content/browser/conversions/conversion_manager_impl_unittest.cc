@@ -120,8 +120,7 @@ class ConversionManagerImplTest : public testing::Test {
     test_reporter_ = reporter.get();
     conversion_manager_ = ConversionManagerImpl::CreateForTesting(
         std::move(reporter), std::make_unique<ConstantStartupDelayPolicy>(),
-        task_environment_.GetMockClock(), dir_.GetPath(),
-        base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()}));
+        task_environment_.GetMockClock(), dir_.GetPath());
   }
 
   const base::Clock& clock() { return *task_environment_.GetMockClock(); }
@@ -315,7 +314,7 @@ TEST_F(ConversionManagerImplTest, ConversionsSentFromUI_ReportedImmediately) {
 }
 
 // TODO(crbug.com/1088449): Flaky on Linux and Android.
-#if defined(OS_LINUX) || defined(OS_ANDROID)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
 #define MAYBE_ExpiredReportsAtStartup_Delayed \
   DISABLED_ExpiredReportsAtStartup_Delayed
 #else

@@ -71,7 +71,8 @@ constexpr char kIsEmbargoed[] = "isEmbargoed";
 constexpr char kIsDiscarded[] = "isDiscarded";
 
 enum class SiteSettingSource {
-  kAdsFilterBlacklist,
+  kAllowlist,
+  kAdsFilterBlocklist,
   kDefault,
   kDrmDisabled,
   kEmbargo,

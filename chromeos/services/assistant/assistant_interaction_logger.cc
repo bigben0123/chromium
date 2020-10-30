@@ -6,6 +6,8 @@
 
 #include <utility>
 
+#include "chromeos/services/assistant/public/cpp/features.h"
+
 namespace chromeos {
 namespace assistant {
 
@@ -17,9 +19,22 @@ std::string ResolutionToString(AssistantInteractionResolution resolution) {
   return result.str();
 }
 
-#define LOG_INTERACTION()                      \
-  VLOG(AssistantInteractionLogger::kVLogLevel) \
-      << "Assistant: " << __FUNCTION__ << ": "
+bool IsPIILoggingAllowed() {
+  return features::IsAssistantDebuggingEnabled();
+}
+
+std::string HidePiiMaybe(const std::string& value) {
+  if (IsPIILoggingAllowed())
+    return "[PII](" + value + ")";
+  else
+    return "[Redacted PII]";
+}
+
+#define LOG_INTERACTION() \
+  LOG_INTERACTION_AT_LEVEL(AssistantInteractionLogger::kVLogLevel)
+
+#define LOG_INTERACTION_AT_LEVEL(_level) \
+  VLOG(_level) << "Assistant: " << __func__ << ": "
 
 }  // namespace
 
@@ -35,8 +50,8 @@ void AssistantInteractionLogger::OnInteractionStarted(
     const AssistantInteractionMetadata& metadata) {
   switch (metadata.type) {
     case AssistantInteractionType::kText:
-      LOG_INTERACTION() << "Text interaction with query '" << metadata.query
-                        << "'";
+      LOG_INTERACTION() << "Text interaction with query "
+                        << HidePiiMaybe(metadata.query);
       break;
     case AssistantInteractionType::kVoice:
       LOG_INTERACTION() << "Voice interaction";
@@ -54,6 +69,8 @@ void AssistantInteractionLogger::OnHtmlResponse(const std::string& response,
   // Displaying fallback instead of the response as the response is filled with
   // HTML tags and rather large.
   LOG_INTERACTION() << "with fallback '" << fallback << "'";
+  // Display HTML at highest verbosity.
+  LOG_INTERACTION_AT_LEVEL(3) << "with HTML: " << HidePiiMaybe(response);
 }
 
 void AssistantInteractionLogger::OnSuggestionsResponse(
@@ -65,7 +82,7 @@ void AssistantInteractionLogger::OnSuggestionsResponse(
 }
 
 void AssistantInteractionLogger::OnTextResponse(const std::string& response) {
-  LOG_INTERACTION() << "'" << response << "'";
+  LOG_INTERACTION() << HidePiiMaybe(response);
 }
 
 void AssistantInteractionLogger::OnOpenUrlResponse(const GURL& url,
@@ -76,7 +93,7 @@ void AssistantInteractionLogger::OnOpenUrlResponse(const GURL& url,
 bool AssistantInteractionLogger::OnOpenAppResponse(
     const AndroidAppInfo& app_info) {
   LOG_INTERACTION() << "with app '" << app_info.package_name << "'";
-  return true;
+  return false;
 }
 
 void AssistantInteractionLogger::OnSpeechRecognitionStarted() {

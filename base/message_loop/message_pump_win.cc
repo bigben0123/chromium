@@ -15,21 +15,15 @@
 #include "base/numerics/ranges.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/trace_event/base_tracing.h"
+#include "base/tracing_buildflags.h"
+
+#if BUILDFLAG(ENABLE_BASE_TRACING)
+#include "third_party/perfetto/protos/perfetto/trace/track_event/chrome_message_pump.pbzero.h"
+#endif  // BUILDFLAG(ENABLE_BASE_TRACING)
 
 namespace base {
 
 namespace {
-
-// Jank analysis uncovered that Windows uses native ::PeekMessage calls as an
-// opportunity to yield to other threads according to some heuristics (e.g.
-// presumably when there's no input but perhaps a single WM_USER message posted
-// later than another thread was readied). MessagePumpForUI doesn't intend to
-// give this opportunity to the kernel when invoking ::PeekMessage however. This
-// experiment attempts to regain control of the pump (behind an experiment
-// because of how fragile this code is -- experiments help external contributors
-// diagnose regressions, e.g. crbug.com/1078475).
-const Feature kPreventMessagePumpHangs{"PreventMessagePumpHangs",
-                                       FEATURE_DISABLED_BY_DEFAULT};
 
 enum MessageLoopProblems {
   MESSAGE_POST_ERROR,
@@ -494,9 +488,13 @@ bool MessagePumpForUI::ProcessNextWindowsMessage() {
     // PeekMessage can run a message if there are sent messages, trace that and
     // emit the boolean param to see if it ever janks independently (ref.
     // comment on GetQueueStatus).
-    TRACE_EVENT1("base",
-                 "MessagePumpForUI::ProcessNextWindowsMessage PeekMessage",
-                 "sent_messages_in_queue", more_work_is_plausible);
+    TRACE_EVENT(
+        "base", "MessagePumpForUI::ProcessNextWindowsMessage PeekMessage",
+        [&](perfetto::EventContext ctx) {
+          perfetto::protos::pbzero::ChromeMessagePump* msg_pump_data =
+              ctx.event()->set_chrome_message_pump();
+          msg_pump_data->set_sent_messages_in_queue(more_work_is_plausible);
+        });
     has_msg = ::PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE) != FALSE;
   }
   if (has_msg)
@@ -552,32 +550,28 @@ bool MessagePumpForUI::ProcessPumpReplacementMessage() {
   // that peeked replacement. Note that the re-post of kMsgHaveWork may be
   // asynchronous to this thread!!
 
-  // Bump the work id since ::PeekMessage may process internal events.
-  state_->delegate->BeforeDoInternalWork();
-
-  // The system headers don't define this; it's equivalent to PM_QS_INPUT |
-  // PM_QS_PAINT | PM_QS_POSTMESSAGE. i.e., anything but QS_SENDMESSAGE. Since
-  // we're looking to replace our kMsgHaveWork posted message, we can ignore
-  // sent messages (which never compete with posted messages in the initial
-  // PeekMessage call).
-  constexpr auto PM_QS_ALLEVENTS = QS_ALLEVENTS << 16;
-  static_assert(
-      PM_QS_ALLEVENTS == (PM_QS_INPUT | PM_QS_PAINT | PM_QS_POSTMESSAGE), "");
-  static_assert((PM_QS_ALLEVENTS & PM_QS_SENDMESSAGE) == 0, "");
-
   MSG msg;
   bool have_message = false;
   {
+    // Bump the work id since ::PeekMessage may process internal events.
+    state_->delegate->BeforeDoInternalWork();
+
     TRACE_EVENT0("base",
                  "MessagePumpForUI::ProcessPumpReplacementMessage PeekMessage");
 
-    static const auto peek_replacement_message_modifier =
-        base::FeatureList::IsEnabled(kPreventMessagePumpHangs) ? PM_QS_ALLEVENTS
-                                                               : 0;
+    // The system headers don't define PM_QS_ALLEVENTS; it's equivalent to
+    // PM_QS_INPUT | PM_QS_PAINT | PM_QS_POSTMESSAGE. i.e., anything but
+    // QS_SENDMESSAGE.
+    // Since we're looking to replace our kMsgHaveWork posted message, we can
+    // ignore sent messages (which never compete with posted messages in the
+    // initial PeekMessage call).
+    constexpr auto PM_QS_ALLEVENTS = QS_ALLEVENTS << 16;
+    static_assert(
+        PM_QS_ALLEVENTS == (PM_QS_INPUT | PM_QS_PAINT | PM_QS_POSTMESSAGE), "");
+    static_assert((PM_QS_ALLEVENTS & PM_QS_SENDMESSAGE) == 0, "");
 
-    have_message =
-        ::PeekMessage(&msg, nullptr, 0, 0,
-                      PM_REMOVE | peek_replacement_message_modifier) != FALSE;
+    have_message = ::PeekMessage(&msg, nullptr, 0, 0,
+                                 PM_REMOVE | PM_QS_ALLEVENTS) != FALSE;
   }
 
   // Expect no message or a message different than kMsgHaveWork.

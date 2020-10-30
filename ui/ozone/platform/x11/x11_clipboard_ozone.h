@@ -12,8 +12,6 @@
 #include "base/containers/flat_map.h"
 #include "ui/events/platform/x11/x11_event_source.h"
 #include "ui/gfx/x/event.h"
-#include "ui/gfx/x/x11.h"
-#include "ui/gfx/x/x11_types.h"
 #include "ui/gfx/x/xfixes.h"
 #include "ui/gfx/x/xproto.h"
 #include "ui/ozone/public/platform_clipboard.h"
@@ -49,6 +47,7 @@ class X11ClipboardOzone : public PlatformClipboard, public XEventDispatcher {
   bool IsSelectionOwner(ClipboardBuffer buffer) override;
   void SetSequenceNumberUpdateCb(
       PlatformClipboard::SequenceNumberUpdateCb cb) override;
+  bool IsSelectionBufferAvailable() const override;
 
  private:
   struct SelectionState;

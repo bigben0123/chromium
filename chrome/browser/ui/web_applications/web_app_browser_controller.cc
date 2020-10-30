@@ -6,6 +6,8 @@
 
 #include "base/bind_helpers.h"
 #include "base/strings/string_util.h"
+#include "chrome/browser/apps/app_service/app_service_proxy.h"
+#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -17,7 +19,9 @@
 #include "chrome/browser/web_applications/components/web_app_constants.h"
 #include "chrome/browser/web_applications/components/web_app_helpers.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
+#include "chrome/common/chrome_features.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_features.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/image/image.h"
 #include "url/gurl.h"
@@ -43,12 +47,24 @@ WebAppBrowserController::WebAppBrowserController(Browser* browser)
 WebAppBrowserController::~WebAppBrowserController() = default;
 
 bool WebAppBrowserController::HasMinimalUiButtons() const {
-  return registrar().GetAppEffectiveDisplayMode(GetAppId()) ==
-         DisplayMode::kMinimalUi;
+  if (has_tab_strip())
+    return false;
+  DisplayMode app_display_mode =
+      registrar().GetEffectiveDisplayModeFromManifest(GetAppId());
+  return app_display_mode == DisplayMode::kBrowser ||
+         app_display_mode == DisplayMode::kMinimalUi;
 }
 
 bool WebAppBrowserController::IsHostedApp() const {
   return true;
+}
+
+bool WebAppBrowserController::IsWindowControlsOverlayEnabled() const {
+  if (!base::FeatureList::IsEnabled(features::kWebAppWindowControlsOverlay))
+    return false;
+
+  DisplayMode display = registrar().GetAppEffectiveDisplayMode(GetAppId());
+  return display == DisplayMode::kWindowControlsOverlay;
 }
 
 #if defined(OS_CHROMEOS)
@@ -96,9 +112,18 @@ gfx::ImageSkia WebAppBrowserController::GetWindowAppIcon() const {
     return *app_icon_;
   app_icon_ = GetFallbackAppIcon();
 
-  if (provider_.icon_manager().HasSmallestIcon(GetAppId(),
+#if defined(OS_CHROMEOS)
+  if (base::FeatureList::IsEnabled(features::kAppServiceAdaptiveIcon) &&
+      apps::AppServiceProxyFactory::IsAppServiceAvailableForProfile(
+          browser()->profile())) {
+    LoadAppIcon(true /* allow_placeholder_icon */);
+    return *app_icon_;
+  }
+#endif
+
+  if (provider_.icon_manager().HasSmallestIcon(GetAppId(), {IconPurpose::ANY},
                                                web_app::kWebAppIconSmall)) {
-    provider_.icon_manager().ReadSmallestIcon(
+    provider_.icon_manager().ReadSmallestIconAny(
         GetAppId(), web_app::kWebAppIconSmall,
         base::BindOnce(&WebAppBrowserController::OnReadIcon,
                        weak_ptr_factory_.GetWeakPtr()));
@@ -124,8 +149,14 @@ base::Optional<SkColor> WebAppBrowserController::GetThemeColor() const {
   return registrar().GetAppThemeColor(GetAppId());
 }
 
-GURL WebAppBrowserController::GetAppLaunchURL() const {
-  return registrar().GetAppLaunchURL(GetAppId());
+base::Optional<SkColor> WebAppBrowserController::GetBackgroundColor() const {
+  if (auto color = AppBrowserController::GetBackgroundColor())
+    return color;
+  return registrar().GetAppBackgroundColor(GetAppId());
+}
+
+GURL WebAppBrowserController::GetAppStartUrl() const {
+  return registrar().GetAppStartUrl(GetAppId());
 }
 
 bool WebAppBrowserController::IsUrlInAppScope(const GURL& url) const {
@@ -173,7 +204,7 @@ base::string16 WebAppBrowserController::GetAppShortName() const {
 }
 
 base::string16 WebAppBrowserController::GetFormattedUrlOrigin() const {
-  return FormatUrlOrigin(GetAppLaunchURL());
+  return FormatUrlOrigin(GetAppStartUrl());
 }
 
 bool WebAppBrowserController::CanUninstall() const {
@@ -208,6 +239,30 @@ const AppRegistrar& WebAppBrowserController::registrar() const {
   return provider_.registrar();
 }
 
+void WebAppBrowserController::LoadAppIcon(bool allow_placeholder_icon) const {
+  apps::AppServiceProxyFactory::GetForProfile(browser()->profile())
+      ->LoadIcon(apps::mojom::AppType::kWeb, GetAppId(),
+                 apps::mojom::IconType::kStandard, web_app::kWebAppIconSmall,
+                 allow_placeholder_icon,
+                 base::BindOnce(&WebAppBrowserController::OnLoadIcon,
+                                weak_ptr_factory_.GetWeakPtr()));
+}
+
+void WebAppBrowserController::OnLoadIcon(apps::mojom::IconValuePtr icon_value) {
+  if (icon_value->icon_type != apps::mojom::IconType::kStandard)
+    return;
+
+  app_icon_ = icon_value->uncompressed;
+
+  if (icon_value->is_placeholder_icon)
+    LoadAppIcon(false /* allow_placeholder_icon */);
+
+  if (auto* contents = web_contents())
+    contents->NotifyNavigationStateChanged(content::INVALIDATE_TYPE_TAB);
+  if (callback_for_testing_)
+    std::move(callback_for_testing_).Run();
+}
+
 void WebAppBrowserController::OnReadIcon(const SkBitmap& bitmap) {
   if (bitmap.empty()) {
     DLOG(ERROR) << "Failed to read icon for web app";
@@ -237,7 +292,7 @@ void WebAppBrowserController::PerformDigitalAssetLinkVerification(
   if (!apk_web_app_service || !apk_web_app_service->IsWebOnlyTwa(GetAppId()))
     return;
 
-  const std::string origin = GetAppLaunchURL().GetOrigin().spec();
+  const std::string origin = GetAppStartUrl().GetOrigin().spec();
   const base::Optional<std::string> package_name =
       apk_web_app_service->GetPackageNameForWebApp(GetAppId());
   const base::Optional<std::string> fingerprint =

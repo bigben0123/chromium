@@ -47,18 +47,20 @@ export class TestPasswordManagerProxy extends TestBrowserProxy {
       'startBulkPasswordCheck',
       'stopBulkPasswordCheck',
       'getCompromisedCredentials',
+      'getWeakCredentials',
       'getPasswordCheckStatus',
-      'getPlaintextCompromisedPassword',
-      'changeCompromisedCredential',
-      'removeCompromisedCredential',
+      'getPlaintextInsecurePassword',
+      'changeInsecureCredential',
+      'removeInsecureCredential',
       'recordPasswordCheckInteraction',
       'recordPasswordCheckReferrer',
       'isOptedInForAccountStorage',
       'removeSavedPassword',
       'removeSavedPasswords',
-      'movePasswordToAccount',
+      'movePasswordsToAccount',
       'removeException',
       'removeExceptions',
+      'changeSavedPassword',
     ]);
 
     /** @private {!PasswordManagerExpectations} */
@@ -69,6 +71,7 @@ export class TestPasswordManagerProxy extends TestBrowserProxy {
       passwords: [],
       exceptions: [],
       leakedCredentials: [],
+      weakCredentials: [],
       checkStatus: makePasswordCheckStatus(),
     };
 
@@ -79,6 +82,7 @@ export class TestPasswordManagerProxy extends TestBrowserProxy {
       addExceptionListChangedListener: null,
       requestPlaintextPassword: null,
       addCompromisedCredentialsListener: null,
+      addWeakCredentialsListener: null,
       addAccountStorageOptInStateListener: null,
     };
 
@@ -116,8 +120,8 @@ export class TestPasswordManagerProxy extends TestBrowserProxy {
   }
 
   /** @override */
-  movePasswordToAccount(id) {
-    this.methodCalled('movePasswordToAccount', id);
+  movePasswordsToAccount(ids) {
+    this.methodCalled('movePasswordsToAccount', ids);
   }
 
   /** @override */
@@ -241,6 +245,12 @@ export class TestPasswordManagerProxy extends TestBrowserProxy {
   }
 
   /** @override */
+  getWeakCredentials() {
+    this.methodCalled('getWeakCredentials');
+    return Promise.resolve(this.data.weakCredentials);
+  }
+
+  /** @override */
   getPasswordCheckStatus() {
     this.methodCalled('getPasswordCheckStatus');
     return Promise.resolve(this.data.checkStatus);
@@ -255,6 +265,14 @@ export class TestPasswordManagerProxy extends TestBrowserProxy {
   removeCompromisedCredentialsListener(listener) {}
 
   /** @override */
+  addWeakCredentialsListener(listener) {
+    this.lastCallback.addWeakCredentialsListener = listener;
+  }
+
+  /** @override */
+  removeWeakCredentialsListener(listener) {}
+
+  /** @override */
   addPasswordCheckStatusListener(listener) {
     this.lastCallback.addPasswordCheckStatusListener = listener;
   }
@@ -263,28 +281,28 @@ export class TestPasswordManagerProxy extends TestBrowserProxy {
   removePasswordCheckStatusListener(listener) {}
 
   /** @override */
-  getPlaintextCompromisedPassword(credential, reason) {
-    this.methodCalled('getPlaintextCompromisedPassword', {credential, reason});
+  getPlaintextInsecurePassword(credential, reason) {
+    this.methodCalled('getPlaintextInsecurePassword', {credential, reason});
     if (!this.plaintextPassword_) {
       return Promise.reject('Could not obtain plaintext password');
     }
 
     const newCredential =
-        /** @type {PasswordManagerProxy.CompromisedCredential} */ (
+        /** @type {PasswordManagerProxy.InsecureCredential} */ (
             Object.assign({}, credential));
     newCredential.password = this.plaintextPassword_;
     return Promise.resolve(newCredential);
   }
 
   /** @override */
-  changeCompromisedCredential(credential, newPassword) {
-    this.methodCalled('changeCompromisedCredential', {credential, newPassword});
+  changeInsecureCredential(credential, newPassword) {
+    this.methodCalled('changeInsecureCredential', {credential, newPassword});
     return Promise.resolve();
   }
 
   /** @override */
-  removeCompromisedCredential(compromisedCredential) {
-    this.methodCalled('removeCompromisedCredential', compromisedCredential);
+  removeInsecureCredential(insecureCredential) {
+    this.methodCalled('removeInsecureCredential', insecureCredential);
   }
 
   /** override */
@@ -295,6 +313,12 @@ export class TestPasswordManagerProxy extends TestBrowserProxy {
   /** override */
   recordPasswordCheckReferrer(referrer) {
     this.methodCalled('recordPasswordCheckReferrer', referrer);
+  }
+
+  /** override */
+  changeSavedPassword(ids, newUsername, newPassword) {
+    this.methodCalled('changeSavedPassword', {ids, newUsername, newPassword});
+    return Promise.resolve();
   }
 
   /** override */

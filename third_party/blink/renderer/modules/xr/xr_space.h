@@ -42,7 +42,7 @@ class XRSpace : public EventTargetWithInlineData {
   // Convenience method to try to get the inverse of the above. This will return
   // the pose of the mojo origin in this space's native origin.
   // Returns nullopt if computing a transform is not possible.
-  virtual base::Optional<TransformationMatrix> NativeFromMojo() = 0;
+  base::Optional<TransformationMatrix> NativeFromMojo();
 
   // Gets the viewer pose in the native coordinates of this space, corresponding
   // to a transform from viewer coordinates to this space's native coordinates.
@@ -90,6 +90,9 @@ class XRSpace : public EventTargetWithInlineData {
 
   XRSession* session() const { return session_; }
 
+  // ToString() helper, used for debugging.
+  virtual std::string ToString() const = 0;
+
   // EventTarget overrides.
   ExecutionContext* GetExecutionContext() const override;
   const AtomicString& InterfaceName() const override;
@@ -98,10 +101,6 @@ class XRSpace : public EventTargetWithInlineData {
   NativeOrigin() const = 0;
 
   void Trace(Visitor* visitor) const override;
-
- protected:
-  static base::Optional<TransformationMatrix> TryInvert(
-      const base::Optional<TransformationMatrix>& matrix);
 
  private:
   const Member<XRSession> session_;

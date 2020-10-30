@@ -16,10 +16,12 @@
 #include "base/check_op.h"
 #include "base/containers/flat_set.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/memory_usage_estimator.h"
 #include "base/trace_event/process_memory_dump.h"
@@ -118,6 +120,7 @@ void TabRestoreServiceHelper::BrowserClosing(LiveTabContext* context) {
   window->bounds = context->GetRestoredBounds();
   window->show_state = context->GetRestoredState();
   window->workspace = context->GetWorkspace();
+  window->user_title = context->GetUserTitle();
 
   base::flat_set<tab_groups::TabGroupId> seen_groups;
   for (int tab_index = 0; tab_index < context->GetTabCount(); ++tab_index) {
@@ -256,6 +259,26 @@ std::vector<LiveTab*> TabRestoreServiceHelper::RestoreMostRecentEntry(
     LiveTabContext* context) {
   if (entries_.empty())
     return std::vector<LiveTab*>();
+  auto& entry = *entries_.front();
+  switch (entry.type) {
+    case TabRestoreService::TAB: {
+      auto& tab = static_cast<const Tab&>(entry);
+      if (tab.timestamp != base::Time() &&
+          !tab.timestamp.ToDeltaSinceWindowsEpoch().is_zero())
+        UMA_HISTOGRAM_LONG_TIMES("TabManager.TimeSinceTabClosedUntilRestored",
+                                 TimeNow() - tab.timestamp);
+      break;
+    }
+    case TabRestoreService::WINDOW: {
+      auto& window = static_cast<Window&>(entry);
+      if (window.timestamp != base::Time() &&
+          !window.timestamp.ToDeltaSinceWindowsEpoch().is_zero())
+        UMA_HISTOGRAM_LONG_TIMES(
+            "TabManager.TimeSinceWindowClosedUntilRestored",
+            TimeNow() - window.timestamp);
+      break;
+    }
+  }
   return RestoreEntryById(context, entries_.front()->id,
                           WindowOpenDisposition::UNKNOWN);
 }
@@ -315,9 +338,9 @@ std::vector<LiveTab*> TabRestoreServiceHelper::RestoreEntryById(
       // single tab within it. If the entry's ID matches the one to restore,
       // then the entire window will be restored.
       if (!restoring_tab_in_window) {
-        context =
-            client_->CreateLiveTabContext(window.app_name, window.bounds,
-                                          window.show_state, window.workspace);
+        context = client_->CreateLiveTabContext(
+            window.app_name, window.bounds, window.show_state, window.workspace,
+            window.user_title);
         for (size_t tab_i = 0; tab_i < window.tabs.size(); ++tab_i) {
           const Tab& tab = *window.tabs[tab_i];
           LiveTab* restored_tab = context->AddRestoredTab(
@@ -598,9 +621,21 @@ LiveTabContext* TabRestoreServiceHelper::RestoreTab(
         tab.user_agent_override);
   } else {
     // We only respect the tab's original browser if there's no disposition.
-    if (disposition == WindowOpenDisposition::UNKNOWN && tab.browser_id) {
-      context = client_->FindLiveTabContextWithID(
-          SessionID::FromSerializedValue(tab.browser_id));
+    if (disposition == WindowOpenDisposition::UNKNOWN) {
+      if (tab.browser_id) {
+        context = client_->FindLiveTabContextWithID(
+            SessionID::FromSerializedValue(tab.browser_id));
+      }
+
+      // Restore a grouped tab into its original group, even if the group has
+      // since been moved to a different context. If the original group doesn't
+      // exist any more, fall back to using the tab's original browser.
+      if (tab.group.has_value()) {
+        LiveTabContext* group_context =
+            client_->FindLiveTabContextWithGroup(tab.group.value());
+        if (group_context)
+          context = group_context;
+      }
     }
 
     int tab_index = -1;
@@ -611,8 +646,9 @@ LiveTabContext* TabRestoreServiceHelper::RestoreTab(
     if (context && disposition != WindowOpenDisposition::NEW_WINDOW) {
       tab_index = tab.tabstrip_index;
     } else {
-      context = client_->CreateLiveTabContext(
-          std::string(), gfx::Rect(), ui::SHOW_STATE_NORMAL, std::string());
+      context = client_->CreateLiveTabContext(std::string(), gfx::Rect(),
+                                              ui::SHOW_STATE_NORMAL,
+                                              std::string(), std::string());
       if (tab.browser_id)
         UpdateTabBrowserIDs(tab.browser_id, context->GetSessionID());
     }

@@ -23,13 +23,16 @@
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
-#include "net/dns/dns_config.h"
+#include "net/dns/public/secure_dns_mode.h"
 #include "net/log/net_log.h"
 #include "net/log/trace_net_log_observer.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
+#include "services/network/first_party_sets/preloaded_first_party_sets.h"
 #include "services/network/keepalive_statistics_recorder.h"
 #include "services/network/network_change_manager.h"
 #include "services/network/network_quality_estimator_manager.h"
@@ -40,6 +43,7 @@
 #include "services/network/public/mojom/network_quality_estimator_manager.mojom.h"
 #include "services/network/public/mojom/network_service.mojom.h"
 #include "services/network/public/mojom/trust_tokens.mojom.h"
+#include "services/network/public/mojom/url_loader.mojom.h"
 #include "services/network/trust_tokens/trust_token_key_commitments.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 
@@ -62,6 +66,7 @@ class NetLogProxySink;
 class NetworkContext;
 class NetworkService;
 class NetworkUsageAccumulator;
+class SCTAuditingCache;
 
 // DataPipeUseTracker tracks the mojo data pipe usage in the network
 // service.
@@ -147,7 +152,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
   // mojom::NetworkService implementation:
   void SetClient(mojo::PendingRemote<mojom::NetworkServiceClient> client,
                  mojom::NetworkServiceParamsPtr params) override;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_ASH)
   void ReinitializeLogging(mojom::LoggingSettingsPtr settings) override;
 #endif
   void StartNetLog(base::File file,
@@ -162,7 +167,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
       mojom::NetworkContextParamsPtr params) override;
   void ConfigureStubHostResolver(
       bool insecure_dns_client_enabled,
-      net::DnsConfig::SecureDnsMode secure_dns_mode,
+      net::SecureDnsMode secure_dns_mode,
       base::Optional<std::vector<mojom::DnsOverHttpsServerPtr>>
           dns_over_https_servers) override;
   void DisableQuic() override;
@@ -192,10 +197,10 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
       base::span<const uint8_t> config,
       mojom::NetworkService::UpdateLegacyTLSConfigCallback callback) override;
   void OnCertDBChanged() override;
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#if defined(OS_LINUX) || BUILDFLAG(IS_LACROS)
   void SetCryptConfig(mojom::CryptConfigPtr crypt_config) override;
 #endif
-#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#if defined(OS_WIN) || defined(OS_MAC)
   void SetEncryptionKey(const std::string& encryption_key) override;
 #endif
   void AddCorbExceptionForPlugin(int32_t process_id) override;
@@ -213,12 +218,22 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
       std::vector<mojom::EnvironmentVariablePtr> environment) override;
   void SetTrustTokenKeyCommitments(const std::string& raw_commitments,
                                    base::OnceClosure done) override;
+#if BUILDFLAG(IS_CT_SUPPORTED)
+  void ClearSCTAuditingCache() override;
+  void ConfigureSCTAuditing(
+      bool enabled,
+      double sampling_rate,
+      const GURL& reporting_uri,
+      const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
+      mojo::PendingRemote<mojom::URLLoaderFactory> factory) override;
+#endif
 
 #if defined(OS_ANDROID)
   void DumpWithoutCrashing(base::Time dump_request_time) override;
 #endif
   void BindTestInterface(
       mojo::PendingReceiver<mojom::NetworkServiceTest> receiver) override;
+  void SetPreloadedFirstPartySets(const std::string& raw_sets) override;
 
   // Returns an HttpAuthHandlerFactory for the given NetworkContext.
   std::unique_ptr<net::HttpAuthHandlerFactory> CreateHttpAuthHandlerFactory(
@@ -264,6 +279,10 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
     return legacy_tls_config_distributor_.get();
   }
 
+  const PreloadedFirstPartySets* preloaded_first_party_sets() const {
+    return preloaded_first_party_sets_.get();
+  }
+
   bool os_crypt_config_set() const { return os_crypt_config_set_; }
 
   void set_host_resolver_factory_for_testing(
@@ -282,6 +301,10 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
   const TrustTokenKeyCommitments* trust_token_key_commitments() const {
     return trust_token_key_commitments_.get();
   }
+
+#if BUILDFLAG(IS_CT_SUPPORTED)
+  SCTAuditingCache* sct_auditing_cache() { return sct_auditing_cache_.get(); }
+#endif
 
   void OnDataPipeCreated(DataPipeUser user);
   void OnDataPipeDropped(DataPipeUser user);
@@ -354,6 +377,10 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
   mojom::HttpAuthDynamicParamsPtr http_auth_dynamic_network_service_params_;
   mojom::HttpAuthStaticParamsPtr http_auth_static_network_service_params_;
 
+  // Globally-scoped state for First-Party Sets that were preloaded (and
+  // updated) via the component updater.
+  std::unique_ptr<PreloadedFirstPartySets> preloaded_first_party_sets_;
+
   // NetworkContexts created by CreateNetworkContext(). They call into the
   // NetworkService when their connection is closed so that it can delete
   // them.  It will also delete them when the NetworkService itself is torn
@@ -406,6 +433,10 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
   std::unique_ptr<TrustTokenKeyCommitments> trust_token_key_commitments_;
 
   std::unique_ptr<DelayedDohProbeActivator> doh_probe_activator_;
+
+#if BUILDFLAG(IS_CT_SUPPORTED)
+  std::unique_ptr<SCTAuditingCache> sct_auditing_cache_;
+#endif
 
   // Map from a renderer process id, to the set of plugin origins embedded by
   // that renderer process (the renderer will proxy requests from PPAPI - such

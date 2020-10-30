@@ -845,8 +845,7 @@ FloatPoint TransformationMatrix::ProjectPoint(const FloatPoint& p,
   return FloatPoint(static_cast<float>(out_x), static_cast<float>(out_y));
 }
 
-FloatQuad TransformationMatrix::ProjectQuad(const FloatQuad& q,
-                                            bool* clamped) const {
+FloatQuad TransformationMatrix::ProjectQuad(const FloatQuad& q) const {
   FloatQuad projected_quad;
 
   bool clamped1 = false;
@@ -858,9 +857,6 @@ FloatQuad TransformationMatrix::ProjectQuad(const FloatQuad& q,
   projected_quad.SetP2(ProjectPoint(q.P2(), &clamped2));
   projected_quad.SetP3(ProjectPoint(q.P3(), &clamped3));
   projected_quad.SetP4(ProjectPoint(q.P4(), &clamped4));
-
-  if (clamped)
-    *clamped = clamped1 || clamped2 || clamped3 || clamped4;
 
   // If all points on the quad had w < 0, then the entire quad would not be
   // visible to the projected surface.
@@ -1042,7 +1038,9 @@ TransformationMatrix& TransformationMatrix::Rotate3d(double x,
   TransformationMatrix mat;
 
   // Optimize cases where the axis is along a major axis
-  if (x == 1.0 && y == 0.0 && z == 0.0) {
+  // Since we've already normalized the vector we don't need to check that the
+  // other two dimensions are zero
+  if (x == 1.0) {
     mat.matrix_[0][0] = 1.0;
     mat.matrix_[0][1] = 0.0;
     mat.matrix_[0][2] = 0.0;
@@ -1055,7 +1053,7 @@ TransformationMatrix& TransformationMatrix::Rotate3d(double x,
     mat.matrix_[0][3] = mat.matrix_[1][3] = mat.matrix_[2][3] = 0.0;
     mat.matrix_[3][0] = mat.matrix_[3][1] = mat.matrix_[3][2] = 0.0;
     mat.matrix_[3][3] = 1.0;
-  } else if (x == 0.0 && y == 1.0 && z == 0.0) {
+  } else if (y == 1.0) {
     mat.matrix_[0][0] = cos_theta;
     mat.matrix_[0][1] = 0.0;
     mat.matrix_[0][2] = -sin_theta;
@@ -1068,7 +1066,7 @@ TransformationMatrix& TransformationMatrix::Rotate3d(double x,
     mat.matrix_[0][3] = mat.matrix_[1][3] = mat.matrix_[2][3] = 0.0;
     mat.matrix_[3][0] = mat.matrix_[3][1] = mat.matrix_[3][2] = 0.0;
     mat.matrix_[3][3] = 1.0;
-  } else if (x == 0.0 && y == 0.0 && z == 1.0) {
+  } else if (z == 1.0) {
     mat.matrix_[0][0] = cos_theta;
     mat.matrix_[0][1] = sin_theta;
     mat.matrix_[0][2] = 0.0;

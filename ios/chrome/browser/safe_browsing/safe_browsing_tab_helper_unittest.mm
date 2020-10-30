@@ -15,6 +15,7 @@
 #import "ios/chrome/browser/prerender/prerender_service_factory.h"
 #import "ios/chrome/browser/safe_browsing/fake_safe_browsing_service.h"
 #import "ios/chrome/browser/safe_browsing/safe_browsing_error.h"
+#import "ios/chrome/browser/safe_browsing/safe_browsing_query_manager.h"
 #import "ios/chrome/browser/safe_browsing/safe_browsing_unsafe_resource_container.h"
 #import "ios/web/public/navigation/navigation_item.h"
 #import "ios/web/public/test/fakes/fake_navigation_context.h"
@@ -42,6 +43,7 @@ class SafeBrowsingTabHelperTest
         browser_state_(TestChromeBrowserState::Builder().Build()) {
     feature_list_.InitAndEnableFeature(
         safe_browsing::kSafeBrowsingAvailableOnIOS);
+    SafeBrowsingQueryManager::CreateForWebState(&web_state_);
     SafeBrowsingTabHelper::CreateForWebState(&web_state_);
     SafeBrowsingUrlAllowList::CreateForWebState(&web_state_);
     SafeBrowsingUnsafeResourceContainer::CreateForWebState(&web_state_);
@@ -135,6 +137,20 @@ class SafeBrowsingTabHelperTest
     return service;
   }
 
+  // Stores an UnsafeResource for |url| in the query manager.  It is expected
+  // that an UnsafeResource is stored before check completion for unsafe URLs
+  // that show an error page.
+  void StoreUnsafeResource(const GURL& url, bool is_main_frame = true) {
+    security_interstitials::UnsafeResource resource;
+    resource.url = url;
+    resource.resource_type = is_main_frame
+                                 ? safe_browsing::ResourceType::kMainFrame
+                                 : safe_browsing::ResourceType::kSubFrame;
+    resource.web_state_getter = web_state_.CreateDefaultGetter();
+    SafeBrowsingQueryManager::FromWebState(&web_state_)
+        ->StoreUnsafeResource(resource);
+  }
+
   web::WebTaskEnvironment task_environment_;
   std::unique_ptr<ChromeBrowserState> browser_state_;
   web::TestWebState web_state_;
@@ -162,6 +178,7 @@ TEST_P(SafeBrowsingTabHelperTest, SingleSafeRequestAndResponse) {
 TEST_P(SafeBrowsingTabHelperTest, SingleUnsafeRequestAndResponse) {
   GURL url("http://" + FakeSafeBrowsingService::kUnsafeHost);
   EXPECT_TRUE(ShouldAllowRequestUrl(url).ShouldAllowNavigation());
+  StoreUnsafeResource(url);
 
   if (SafeBrowsingDecisionArrivesBeforeResponse())
     base::RunLoop().RunUntilIdle();
@@ -192,6 +209,7 @@ TEST_P(SafeBrowsingTabHelperTest, UnsafeRequestAndResponseWithDifferingRef) {
   GURL request_url("http://" + FakeSafeBrowsingService::kUnsafeHost);
   GURL response_url("http://" + FakeSafeBrowsingService::kUnsafeHost + "#ref");
   EXPECT_TRUE(ShouldAllowRequestUrl(request_url).ShouldAllowNavigation());
+  StoreUnsafeResource(request_url);
 
   if (SafeBrowsingDecisionArrivesBeforeResponse())
     base::RunLoop().RunUntilIdle();
@@ -228,6 +246,7 @@ TEST_P(SafeBrowsingTabHelperTest, MultipleRequestsSingleResponse) {
   EXPECT_TRUE(ShouldAllowRequestUrl(url1).ShouldAllowNavigation());
   EXPECT_TRUE(ShouldAllowRequestUrl(url2).ShouldAllowNavigation());
   EXPECT_TRUE(ShouldAllowRequestUrl(url3).ShouldAllowNavigation());
+  StoreUnsafeResource(url3);
 
   if (SafeBrowsingDecisionArrivesBeforeResponse())
     base::RunLoop().RunUntilIdle();
@@ -243,6 +262,7 @@ TEST_P(SafeBrowsingTabHelperTest, RepeatedRequestsGetDistinctResponse) {
   // Compare the NSError objects.
   GURL url("http://" + FakeSafeBrowsingService::kUnsafeHost);
   EXPECT_TRUE(ShouldAllowRequestUrl(url).ShouldAllowNavigation());
+  StoreUnsafeResource(url);
 
   if (SafeBrowsingDecisionArrivesBeforeResponse())
     base::RunLoop().RunUntilIdle();
@@ -430,18 +450,7 @@ TEST_P(SafeBrowsingTabHelperTest, UnsafeSubFrameRequestAndResponse) {
   auto sub_frame_request_decision =
       ShouldAllowRequestUrl(url, /*for_main_frame=*/false);
   EXPECT_TRUE(sub_frame_request_decision.ShouldAllowNavigation());
-
-  // The tab helper expects that the sub frame's UnsafeResource is stored in the
-  // container before the URL check completes.
-  security_interstitials::UnsafeResource resource;
-  resource.url = url;
-  resource.threat_type = safe_browsing::SB_THREAT_TYPE_URL_PHISHING;
-  resource.resource_type = safe_browsing::ResourceType::kSubFrame;
-  resource.web_state_getter = web_state_.CreateDefaultGetter();
-  SafeBrowsingUrlAllowList::FromWebState(&web_state_)
-      ->AddPendingUnsafeNavigationDecision(url, resource.threat_type);
-  SafeBrowsingUnsafeResourceContainer::FromWebState(&web_state_)
-      ->StoreUnsafeResource(resource);
+  StoreUnsafeResource(url, /*is_main_frame*/ false);
 
   if (SafeBrowsingDecisionArrivesBeforeResponse()) {
     // If a sub frame navigation is deemed unsafe before its response policy
@@ -492,18 +501,7 @@ TEST_P(SafeBrowsingTabHelperTest,
   auto sub_frame_request_decision =
       ShouldAllowRequestUrl(request_url, /*for_main_frame=*/false);
   EXPECT_TRUE(sub_frame_request_decision.ShouldAllowNavigation());
-
-  // The tab helper expects that the sub frame's UnsafeResource is stored in the
-  // container before the URL check completes.
-  security_interstitials::UnsafeResource resource;
-  resource.url = request_url;
-  resource.threat_type = safe_browsing::SB_THREAT_TYPE_URL_PHISHING;
-  resource.resource_type = safe_browsing::ResourceType::kSubFrame;
-  resource.web_state_getter = web_state_.CreateDefaultGetter();
-  SafeBrowsingUrlAllowList::FromWebState(&web_state_)
-      ->AddPendingUnsafeNavigationDecision(request_url, resource.threat_type);
-  SafeBrowsingUnsafeResourceContainer::FromWebState(&web_state_)
-      ->StoreUnsafeResource(resource);
+  StoreUnsafeResource(request_url, /*is_main_frame*/ false);
 
   if (SafeBrowsingDecisionArrivesBeforeResponse()) {
     // If a sub frame navigation is deemed unsafe before its response policy
@@ -540,6 +538,34 @@ TEST_P(SafeBrowsingTabHelperTest,
   EXPECT_EQ(kUnsafeResourceErrorCode, error.code);
 }
 
+// Tests the case of a subframe reload request that arrives when both the last
+// committed item and pending items are null, which happens in practice during
+// a back/forward navigation to a restore_session URL.
+TEST_P(SafeBrowsingTabHelperTest, StaleIframeReload) {
+  GURL unsafe_url("http://" + FakeSafeBrowsingService::kUnsafeHost);
+
+  // Ensure that the navigation manager's state is consistent with what happens
+  // during a back/forward navigation to a restore_session URL.
+  ASSERT_FALSE(navigation_manager_->GetLastCommittedItem());
+  ASSERT_FALSE(navigation_manager_->GetPendingItem());
+
+  auto request_decision =
+      ShouldAllowRequestUrl(unsafe_url, /*for_main_frame=*/false,
+                            ui::PageTransition::PAGE_TRANSITION_RELOAD);
+  EXPECT_TRUE(request_decision.ShouldAllowNavigation());
+
+  if (SafeBrowsingDecisionArrivesBeforeResponse())
+    base::RunLoop().RunUntilIdle();
+
+  // Ensure that a subsequent main frame request is handled correctly.
+  GURL safe_url("http://chromium.test");
+  EXPECT_TRUE(ShouldAllowRequestUrl(safe_url).ShouldAllowNavigation());
+  if (SafeBrowsingDecisionArrivesBeforeResponse())
+    base::RunLoop().RunUntilIdle();
+  auto response_decision = ShouldAllowResponseUrl(safe_url);
+  EXPECT_TRUE(response_decision.ShouldAllowNavigation());
+}
+
 // Tests the case of a redirection chain, where all URLs in the chain are safe.
 TEST_P(SafeBrowsingTabHelperTest, SafeRedirectChain) {
   GURL url1("http://chromium1.test");
@@ -571,6 +597,7 @@ TEST_P(SafeBrowsingTabHelperTest, RedirectChainFirstRequestUnsafe) {
   GURL url2("http://chromium2.test");
   GURL url3("http://chromium3.test");
   EXPECT_TRUE(ShouldAllowRequestUrl(url1).ShouldAllowNavigation());
+  StoreUnsafeResource(url1);
   if (SafeBrowsingDecisionArrivesBeforeResponse())
     base::RunLoop().RunUntilIdle();
 
@@ -600,6 +627,7 @@ TEST_P(SafeBrowsingTabHelperTest, RedirectChainMiddleRequestUnsafe) {
     base::RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(ShouldAllowRequestUrl(url2).ShouldAllowNavigation());
+  StoreUnsafeResource(url2);
   if (SafeBrowsingDecisionArrivesBeforeResponse())
     base::RunLoop().RunUntilIdle();
   SimulateMainFrameRedirect();
@@ -630,6 +658,7 @@ TEST_P(SafeBrowsingTabHelperTest, RedirectChainFinalRequestUnsafe) {
   SimulateMainFrameRedirect();
 
   EXPECT_TRUE(ShouldAllowRequestUrl(url3).ShouldAllowNavigation());
+  StoreUnsafeResource(url3);
   if (SafeBrowsingDecisionArrivesBeforeResponse())
     base::RunLoop().RunUntilIdle();
   SimulateMainFrameRedirect();
@@ -646,15 +675,18 @@ TEST_P(SafeBrowsingTabHelperTest, RedirectChainAllRequestsUnsafe) {
   GURL url2("http://" + FakeSafeBrowsingService::kUnsafeHost + "/2");
   GURL url3("http://" + FakeSafeBrowsingService::kUnsafeHost + "/3");
   EXPECT_TRUE(ShouldAllowRequestUrl(url1).ShouldAllowNavigation());
+  StoreUnsafeResource(url1);
   if (SafeBrowsingDecisionArrivesBeforeResponse())
     base::RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(ShouldAllowRequestUrl(url2).ShouldAllowNavigation());
+  StoreUnsafeResource(url2);
   if (SafeBrowsingDecisionArrivesBeforeResponse())
     base::RunLoop().RunUntilIdle();
   SimulateMainFrameRedirect();
 
   EXPECT_TRUE(ShouldAllowRequestUrl(url3).ShouldAllowNavigation());
+  StoreUnsafeResource(url3);
   if (SafeBrowsingDecisionArrivesBeforeResponse())
     base::RunLoop().RunUntilIdle();
   SimulateMainFrameRedirect();
@@ -672,10 +704,12 @@ TEST_P(SafeBrowsingTabHelperTest, ConsecutiveRequestsWithoutRedirect) {
   GURL url2("http://" + FakeSafeBrowsingService::kUnsafeHost + "/2");
   GURL url3("http://chromium.test");
   EXPECT_TRUE(ShouldAllowRequestUrl(url1).ShouldAllowNavigation());
+  StoreUnsafeResource(url1);
   if (SafeBrowsingDecisionArrivesBeforeResponse())
     base::RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(ShouldAllowRequestUrl(url2).ShouldAllowNavigation());
+  StoreUnsafeResource(url2);
   if (SafeBrowsingDecisionArrivesBeforeResponse())
     base::RunLoop().RunUntilIdle();
 
@@ -696,10 +730,12 @@ TEST_P(SafeBrowsingTabHelperTest, InterruptedUnsafeRedirectChain) {
   GURL url2("http://" + FakeSafeBrowsingService::kUnsafeHost + "/2");
   GURL url3("http://chromium3.test");
   EXPECT_TRUE(ShouldAllowRequestUrl(url1).ShouldAllowNavigation());
+  StoreUnsafeResource(url1);
   if (SafeBrowsingDecisionArrivesBeforeResponse())
     base::RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(ShouldAllowRequestUrl(url2).ShouldAllowNavigation());
+  StoreUnsafeResource(url2);
   if (SafeBrowsingDecisionArrivesBeforeResponse())
     base::RunLoop().RunUntilIdle();
   SimulateMainFrameRedirect();
@@ -738,6 +774,7 @@ TEST_P(SafeBrowsingTabHelperTest, RedirectToSameSafeURL) {
 TEST_P(SafeBrowsingTabHelperTest, RedirectToSameUnsafeURL) {
   GURL url("http://" + FakeSafeBrowsingService::kUnsafeHost);
   EXPECT_TRUE(ShouldAllowRequestUrl(url).ShouldAllowNavigation());
+  StoreUnsafeResource(url);
   if (SafeBrowsingDecisionArrivesBeforeResponse())
     base::RunLoop().RunUntilIdle();
 
@@ -762,11 +799,12 @@ TEST_P(SafeBrowsingTabHelperTest, UnsafeMainFrameRequestCancelsPrerendering) {
       PrerenderServiceFactory::GetForBrowserState(
           ChromeBrowserState::FromBrowserState(web_state_.GetBrowserState()));
   prerender_service->StartPrerender(unsafe_url, web::Referrer(),
-                                    ui::PAGE_TRANSITION_LINK,
+                                    ui::PAGE_TRANSITION_LINK, &web_state_,
                                     /*immediately=*/true);
 
   EXPECT_TRUE(ShouldAllowRequestUrl(unsafe_url).ShouldAllowNavigation());
   EXPECT_TRUE(prerender_service->HasPrerenderForUrl(unsafe_url));
+  StoreUnsafeResource(unsafe_url);
 
   // When |unsafe_url| is determined to be unsafe, the prerender should be
   // cancelled.
@@ -792,23 +830,13 @@ TEST_P(SafeBrowsingTabHelperTest, UnsafeSubframeRequestCancelsPrerendering) {
       PrerenderServiceFactory::GetForBrowserState(
           ChromeBrowserState::FromBrowserState(web_state_.GetBrowserState()));
   prerender_service->StartPrerender(main_frame_item->GetURL(), web::Referrer(),
-                                    ui::PAGE_TRANSITION_LINK,
+                                    ui::PAGE_TRANSITION_LINK, &web_state_,
                                     /*immediately=*/true);
 
   EXPECT_TRUE(ShouldAllowRequestUrl(unsafe_url, /*for_main_frame=*/false)
                   .ShouldAllowNavigation());
 
-  // The tab helper expects that the sub frame's UnsafeResource is stored in the
-  // container before the URL check completes.
-  security_interstitials::UnsafeResource resource;
-  resource.url = unsafe_url;
-  resource.threat_type = safe_browsing::SB_THREAT_TYPE_URL_PHISHING;
-  resource.resource_type = safe_browsing::ResourceType::kSubFrame;
-  resource.web_state_getter = web_state_.CreateDefaultGetter();
-  SafeBrowsingUrlAllowList::FromWebState(&web_state_)
-      ->AddPendingUnsafeNavigationDecision(unsafe_url, resource.threat_type);
-  SafeBrowsingUnsafeResourceContainer::FromWebState(&web_state_)
-      ->StoreUnsafeResource(resource);
+  StoreUnsafeResource(unsafe_url, /*is_main_frame*/ false);
 
   // When |unsafe_url| is determined to be unsafe, the prerender should be
   // cancelled.
@@ -836,7 +864,7 @@ TEST_P(SafeBrowsingTabHelperTest,
       PrerenderServiceFactory::GetForBrowserState(
           ChromeBrowserState::FromBrowserState(web_state_.GetBrowserState()));
   prerender_service->StartPrerender(safe_url, web::Referrer(),
-                                    ui::PAGE_TRANSITION_LINK,
+                                    ui::PAGE_TRANSITION_LINK, &web_state_,
                                     /*immediately=*/true);
 
   EXPECT_TRUE(ShouldAllowRequestUrl(safe_url).ShouldAllowNavigation());
@@ -863,7 +891,7 @@ TEST_P(SafeBrowsingTabHelperTest,
       PrerenderServiceFactory::GetForBrowserState(
           ChromeBrowserState::FromBrowserState(web_state_.GetBrowserState()));
   prerender_service->StartPrerender(main_frame_item->GetURL(), web::Referrer(),
-                                    ui::PAGE_TRANSITION_LINK,
+                                    ui::PAGE_TRANSITION_LINK, &web_state_,
                                     /*immediately=*/true);
 
   EXPECT_TRUE(ShouldAllowRequestUrl(safe_url, /*for_main_frame=*/false)

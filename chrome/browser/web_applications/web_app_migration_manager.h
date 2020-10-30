@@ -5,11 +5,13 @@
 #ifndef CHROME_BROWSER_WEB_APPLICATIONS_WEB_APP_MIGRATION_MANAGER_H_
 #define CHROME_BROWSER_WEB_APPLICATIONS_WEB_APP_MIGRATION_MANAGER_H_
 
+#include <map>
 #include <memory>
 #include <vector>
 
 #include "base/callback_forward.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/web_applications/components/os_integration_manager.h"
 #include "chrome/browser/web_applications/components/web_app_id.h"
 #include "chrome/browser/web_applications/extensions/bookmark_app_file_handler_manager.h"
 #include "chrome/browser/web_applications/extensions/bookmark_app_icon_manager.h"
@@ -34,7 +36,8 @@ class WebAppMigrationManager {
  public:
   WebAppMigrationManager(Profile* profile,
                          AbstractWebAppDatabaseFactory* database_factory,
-                         WebAppIconManager* web_app_icon_manager);
+                         WebAppIconManager* web_app_icon_manager,
+                         OsIntegrationManager* os_integration_manager);
   WebAppMigrationManager(const WebAppMigrationManager&) = delete;
   WebAppMigrationManager& operator=(const WebAppMigrationManager&) = delete;
   ~WebAppMigrationManager();
@@ -52,9 +55,12 @@ class WebAppMigrationManager {
   // Migrates next bookmark app in |bookmark_app_ids_| queue or starts
   // the registry migration if the queue is empty.
   void MigrateNextBookmarkAppIcons();
-  void OnBookmarkAppIconsRead(const AppId& app_id,
-                              std::map<SquareSizePx, SkBitmap> icon_bitmaps);
-  void OnWebAppIconsWritten(bool success);
+  void OnBookmarkAppIconsRead(const AppId& app_id, IconBitmaps icon_bitmaps);
+  void OnWebAppIconsWritten(const AppId& app_id, bool success);
+  void OnBookmarkAppShortcutsMenuIconsRead(
+      const AppId& app_id,
+      ShortcutsMenuIconsBitmaps shortcuts_menu_icons_bitmaps);
+  void OnWebAppShortcutsMenuIconsWritten(bool success);
 
   void MigrateBookmarkAppInstallSource(const AppId& app_id, WebApp* web_app);
   bool CanMigrateBookmarkApp(const AppId& app_id) const;

@@ -58,6 +58,10 @@ class TabGroupHighlightPathGenerator : public views::HighlightPathGenerator {
   TabGroupHighlightPathGenerator(const views::View* chip,
                                  const views::View* title)
       : chip_(chip), title_(title) {}
+  TabGroupHighlightPathGenerator(const TabGroupHighlightPathGenerator&) =
+      delete;
+  TabGroupHighlightPathGenerator& operator=(
+      const TabGroupHighlightPathGenerator&) = delete;
 
   // views::HighlightPathGenerator:
   SkPath GetHighlightPath(const views::View* view) override {
@@ -70,8 +74,6 @@ class TabGroupHighlightPathGenerator : public views::HighlightPathGenerator {
  private:
   const views::View* const chip_;
   const views::View* const title_;
-
-  DISALLOW_COPY_AND_ASSIGN(TabGroupHighlightPathGenerator);
 };
 
 }  // namespace
@@ -106,7 +108,9 @@ TabGroupHeader::TabGroupHeader(TabStrip* tab_strip,
   last_modified_expansion_ = base::TimeTicks::Now();
 }
 
-TabGroupHeader::~TabGroupHeader() = default;
+TabGroupHeader::~TabGroupHeader() {
+  LogCollapseTime();
+}
 
 bool TabGroupHeader::OnKeyPressed(const ui::KeyEvent& event) {
   if ((event.key_code() == ui::VKEY_SPACE ||
@@ -117,9 +121,15 @@ bool TabGroupHeader::OnKeyPressed(const ui::KeyEvent& event) {
       // editor bubble to toggling the collapsed state of the group.
       bool successful_toggle =
           tab_strip_->controller()->ToggleTabGroupCollapsedState(
-              group().value(), true);
-      if (successful_toggle)
+              group().value(), ToggleTabGroupCollapsedStateOrigin::kKeyboard);
+      if (successful_toggle) {
+#if defined(OS_WIN)
+        NotifyAccessibilityEvent(ax::mojom::Event::kSelection, true);
+#else
+        NotifyAccessibilityEvent(ax::mojom::Event::kAlert, true);
+#endif
         LogCollapseTime();
+      }
     } else {
       editor_bubble_tracker_.Opened(TabGroupEditorBubbleView::Show(
           tab_strip_->controller()->GetBrowser(), group().value(), this));
@@ -128,7 +138,7 @@ bool TabGroupHeader::OnKeyPressed(const ui::KeyEvent& event) {
   }
 
   constexpr int kModifiedFlag =
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
       ui::EF_COMMAND_DOWN;
 #else
       ui::EF_CONTROL_DOWN;
@@ -176,7 +186,7 @@ void TabGroupHeader::OnMouseReleased(const ui::MouseEvent& event) {
     if (event.IsLeftMouseButton() && !dragging()) {
       bool successful_toggle =
           tab_strip_->controller()->ToggleTabGroupCollapsedState(
-              group().value(), true);
+              group().value(), ToggleTabGroupCollapsedStateOrigin::kMouse);
       if (successful_toggle)
         LogCollapseTime();
     }
@@ -207,11 +217,26 @@ void TabGroupHeader::OnGestureEvent(ui::GestureEvent* event) {
   tab_strip_->UpdateHoverCard(nullptr);
   switch (event->type()) {
     case ui::ET_GESTURE_TAP: {
+      if (base::FeatureList::IsEnabled(features::kTabGroupsCollapse)) {
+        // The collapse feature changes the behavior from showing the
+        // editor bubble to toggling the collapsed state of the group.
+        bool successful_toggle =
+            tab_strip_->controller()->ToggleTabGroupCollapsedState(
+                group().value(), ToggleTabGroupCollapsedStateOrigin::kGesture);
+        if (successful_toggle)
+          LogCollapseTime();
+      } else {
+        editor_bubble_tracker_.Opened(TabGroupEditorBubbleView::Show(
+            tab_strip_->controller()->GetBrowser(), group().value(), this));
+      }
+      break;
+    }
+
+    case ui::ET_GESTURE_LONG_TAP: {
       editor_bubble_tracker_.Opened(TabGroupEditorBubbleView::Show(
           tab_strip_->controller()->GetBrowser(), group().value(), this));
       break;
     }
-
     case ui::ET_GESTURE_SCROLL_BEGIN: {
       tab_strip_->MaybeStartDrag(this, *event, tab_strip_->GetSelectionModel());
       break;
@@ -231,8 +256,9 @@ void TabGroupHeader::OnFocus() {
 void TabGroupHeader::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->role = ax::mojom::Role::kTabList;
   node_data->AddState(ax::mojom::State::kEditable);
-
-  if (tab_strip_->controller()->IsGroupCollapsed(group().value())) {
+  bool is_collapsed =
+      tab_strip_->controller()->IsGroupCollapsed(group().value());
+  if (is_collapsed) {
     node_data->AddState(ax::mojom::State::kCollapsed);
     node_data->RemoveState(ax::mojom::State::kExpanded);
   } else {
@@ -244,12 +270,25 @@ void TabGroupHeader::GetAccessibleNodeData(ui::AXNodeData* node_data) {
       tab_strip_->controller()->GetGroupTitle(group().value());
   base::string16 contents =
       tab_strip_->controller()->GetGroupContentString(group().value());
+  base::string16 collapsed_state = base::string16();
+
+// Windows screen reader properly announces the state set above in |node_data|
+// and will read out the state change when the header's collapsed state is
+// toggled. The state is added into the title for other platforms and the title
+// will be reread with the updated state when the header's collapsed state is
+// toggled.
+#if !defined(OS_WIN)
+  collapsed_state =
+      is_collapsed ? l10n_util::GetStringUTF16(IDS_GROUP_AX_LABEL_COLLAPSED)
+                   : l10n_util::GetStringUTF16(IDS_GROUP_AX_LABEL_EXPANDED);
+#endif
   if (title.empty()) {
     node_data->SetName(l10n_util::GetStringFUTF16(
-        IDS_GROUP_AX_LABEL_UNNAMED_GROUP_FORMAT, contents));
+        IDS_GROUP_AX_LABEL_UNNAMED_GROUP_FORMAT, contents, collapsed_state));
   } else {
-    node_data->SetName(l10n_util::GetStringFUTF16(
-        IDS_GROUP_AX_LABEL_NAMED_GROUP_FORMAT, title, contents));
+    node_data->SetName(
+        l10n_util::GetStringFUTF16(IDS_GROUP_AX_LABEL_NAMED_GROUP_FORMAT, title,
+                                   contents, collapsed_state));
   }
 }
 
@@ -296,7 +335,7 @@ void TabGroupHeader::ShowContextMenuForViewImpl(
   // reached this function via mouse if and only if the current OS is Mac.
   // Therefore, we don't stop the menu propagation in that case.
   constexpr bool kStopContextMenuPropagation =
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
       false;
 #else
       true;

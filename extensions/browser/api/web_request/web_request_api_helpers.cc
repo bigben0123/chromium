@@ -94,17 +94,6 @@ bool ParseCookieLifetime(const net::ParsedCookie& cookie,
   return false;
 }
 
-std::set<std::string> GetExtraHeaderRequestHeaders(
-    bool is_out_of_blink_cors_enabled) {
-  std::set<std::string> headers(
-      {"accept-encoding", "accept-language", "cookie", "referer"});
-
-  if (is_out_of_blink_cors_enabled)
-    headers.insert("origin");
-
-  return headers;
-}
-
 void RecordRequestHeaderRemoved(RequestHeaderType type) {
   UMA_HISTOGRAM_ENUMERATION("Extensions.WebRequest.RequestHeaderRemoved", type);
 }
@@ -115,6 +104,21 @@ void RecordRequestHeaderAdded(RequestHeaderType type) {
 
 void RecordRequestHeaderChanged(RequestHeaderType type) {
   UMA_HISTOGRAM_ENUMERATION("Extensions.WebRequest.RequestHeaderChanged", type);
+}
+
+void RecordDNRRequestHeaderRemoved(RequestHeaderType type) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "Extensions.DeclarativeNetRequest.RequestHeaderRemoved", type);
+}
+
+void RecordDNRRequestHeaderAdded(RequestHeaderType type) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "Extensions.DeclarativeNetRequest.RequestHeaderAdded", type);
+}
+
+void RecordDNRRequestHeaderChanged(RequestHeaderType type) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "Extensions.DeclarativeNetRequest.RequestHeaderChanged", type);
 }
 
 bool IsStringLowerCaseASCII(base::StringPiece s) {
@@ -234,6 +238,21 @@ void RecordResponseHeaderAdded(ResponseHeaderType type) {
 void RecordResponseHeaderRemoved(ResponseHeaderType type) {
   UMA_HISTOGRAM_ENUMERATION("Extensions.WebRequest.ResponseHeaderRemoved",
                             type);
+}
+
+void RecordDNRResponseHeaderChanged(ResponseHeaderType type) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "Extensions.DeclarativeNetRequest.ResponseHeaderChanged", type);
+}
+
+void RecordDNRResponseHeaderAdded(ResponseHeaderType type) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "Extensions.DeclarativeNetRequest.ResponseHeaderAdded", type);
+}
+
+void RecordDNRResponseHeaderRemoved(ResponseHeaderType type) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "Extensions.DeclarativeNetRequest.ResponseHeaderRemoved", type);
 }
 
 using ResponseHeaderEntry = std::pair<const char*, ResponseHeaderType>;
@@ -389,22 +408,30 @@ bool ModifyRequestHeadersForAction(
     }
     header_actions->emplace(header, header_action);
 
-    // TODO(crbug.com/1088103): Record request headers modified by the
-    // Declarative Net Request API.
     switch (header_info.operation) {
-      case extensions::api::declarative_net_request::HEADER_OPERATION_SET:
+      case extensions::api::declarative_net_request::HEADER_OPERATION_SET: {
+        bool has_header = headers->HasHeader(header);
+
         headers->SetHeader(header, *header_info.value);
         header_modified = true;
         set_headers->insert(header);
+
+        if (has_header)
+          RecordRequestHeader(header, &RecordDNRRequestHeaderChanged);
+        else
+          RecordRequestHeader(header, &RecordDNRRequestHeaderAdded);
         break;
+      }
       case extensions::api::declarative_net_request::HEADER_OPERATION_REMOVE: {
         while (headers->HasHeader(header)) {
           header_modified = true;
           headers->RemoveHeader(header);
         }
 
-        if (header_modified)
+        if (header_modified) {
           removed_headers->insert(header);
+          RecordRequestHeader(header, &RecordDNRRequestHeaderRemoved);
+        }
         break;
       }
       case extensions::api::declarative_net_request::HEADER_OPERATION_APPEND:
@@ -471,14 +498,13 @@ bool ModifyResponseHeadersForAction(
     }
     (*header_actions)[header].push_back(header_action);
 
-    // TODO(crbug.com/1088103): Record response headers modified by the
-    // Declarative Net Request API.
     switch (header_info.operation) {
       case extensions::api::declarative_net_request::HEADER_OPERATION_REMOVE: {
         if (has_header(header)) {
           header_modified = true;
           create_override_headers_if_needed(override_response_headers);
           override_response_headers->get()->RemoveHeader(header);
+          RecordResponseHeader(header, &RecordDNRResponseHeaderRemoved);
         }
 
         break;
@@ -487,6 +513,13 @@ bool ModifyResponseHeadersForAction(
         header_modified = true;
         create_override_headers_if_needed(override_response_headers);
         override_response_headers->get()->AddHeader(header, *header_info.value);
+
+        // Record only the first time a header is appended. appends following a
+        // set from the same extension are treated as part of the set and are
+        // not logged.
+        if ((*header_actions)[header].size() == 1)
+          RecordResponseHeader(header, &RecordDNRResponseHeaderAdded);
+
         break;
       }
       case extensions::api::declarative_net_request::HEADER_OPERATION_SET: {
@@ -494,6 +527,7 @@ bool ModifyResponseHeadersForAction(
         create_override_headers_if_needed(override_response_headers);
         override_response_headers->get()->RemoveHeader(header);
         override_response_headers->get()->AddHeader(header, *header_info.value);
+        RecordResponseHeader(header, &RecordDNRResponseHeaderChanged);
         break;
       }
       case extensions::api::declarative_net_request::HEADER_OPERATION_NONE:
@@ -517,11 +551,7 @@ IgnoredAction::IgnoredAction(IgnoredAction&& rhs) = default;
 bool ExtraInfoSpec::InitFromValue(content::BrowserContext* browser_context,
                                   const base::ListValue& value,
                                   int* extra_info_spec) {
-  *extra_info_spec =
-      extensions::ExtensionsBrowserClient::Get()
-              ->ShouldForceWebRequestExtraHeaders(browser_context)
-          ? EXTRA_HEADERS
-          : 0;
+  *extra_info_spec = 0;
   for (size_t i = 0; i < value.GetSize(); ++i) {
     std::string str;
     if (!value.GetString(i, &str))
@@ -846,10 +876,13 @@ EventResponseDelta CalculateOnAuthRequiredDelta(
   return result;
 }
 
-void MergeCancelOfResponses(const EventResponseDeltas& deltas, bool* canceled) {
+void MergeCancelOfResponses(
+    const EventResponseDeltas& deltas,
+    base::Optional<extensions::ExtensionId>* canceled_by_extension) {
+  *canceled_by_extension = base::nullopt;
   for (const auto& delta : deltas) {
     if (delta.cancel) {
-      *canceled = true;
+      *canceled_by_extension = delta.extension_id;
       break;
     }
   }
@@ -1705,18 +1738,11 @@ std::unique_ptr<base::DictionaryValue> CreateHeaderDictionary(
 bool ShouldHideRequestHeader(content::BrowserContext* browser_context,
                              int extra_info_spec,
                              const std::string& name) {
-  static const std::set<std::string> kRequestHeadersForOutOfBlinkCors =
-      GetExtraHeaderRequestHeaders(/*is_out_of_blink_cors_enabled=*/true);
-  static const std::set<std::string> kRequestHeadersForBlinkCors =
-      GetExtraHeaderRequestHeaders(/*is_out_of_blink_cors_enabled=*/false);
-  bool is_out_of_blink_cors_enabled =
-      browser_context && browser_context->ShouldEnableOutOfBlinkCors();
-  const std::set<std::string>& request_headers =
-      is_out_of_blink_cors_enabled ? kRequestHeadersForOutOfBlinkCors
-                                   : kRequestHeadersForBlinkCors;
+  static const std::set<std::string> kRequestHeaders(
+      {"accept-encoding", "accept-language", "cookie", "origin", "referer"});
   return !(extra_info_spec & ExtraInfoSpec::EXTRA_HEADERS) &&
-         request_headers.find(base::ToLowerASCII(name)) !=
-             request_headers.end();
+         kRequestHeaders.find(base::ToLowerASCII(name)) !=
+             kRequestHeaders.end();
 }
 
 bool ShouldHideResponseHeader(int extra_info_spec, const std::string& name) {

@@ -4,8 +4,12 @@
 
 static_library("search") {
   sources = [
+    "ntp_features.cc",
+    "ntp_features.h",
     "search.cc",
     "search.h",
+    "search_provider_observer.cc",
+    "search_provider_observer.h",
   ]
 
   deps = [
@@ -18,10 +22,12 @@ static_library("search") {
 
 source_set("unit_tests") {
   testonly = true
-  sources = [
-    "search_android_unittest.cc",
-    "search_unittest.cc",
-  ]
+
+  sources = [ "search_unittest.cc" ]
+  if (is_android) {
+    sources += [ "search_android_unittest.cc" ]
+  }
+
   deps = [
     ":search",
     "//base",

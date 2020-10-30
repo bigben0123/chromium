@@ -25,7 +25,7 @@
 #include "build/build_config.h"
 #include "components/browser_ui/util/android/url_constants.h"
 #include "components/browsing_data/content/local_storage_helper.h"
-#include "components/content_settings/browser/tab_specific_content_settings.h"
+#include "components/content_settings/browser/page_specific_content_settings.h"
 #include "components/content_settings/core/browser/content_settings_registry.h"
 #include "components/content_settings/core/browser/content_settings_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -115,46 +115,24 @@ ContentSettingsType kPermissionType[] = {
 #if !defined(OS_ANDROID)
     ContentSettingsType::HID_GUARD,
     ContentSettingsType::SERIAL_GUARD,
-    ContentSettingsType::NATIVE_FILE_SYSTEM_WRITE_GUARD,
+    ContentSettingsType::FILE_SYSTEM_WRITE_GUARD,
+    ContentSettingsType::FONT_ACCESS,
 #endif
     ContentSettingsType::BLUETOOTH_GUARD,
     ContentSettingsType::BLUETOOTH_SCANNING,
     ContentSettingsType::VR,
     ContentSettingsType::AR,
+    ContentSettingsType::IDLE_DETECTION,
 };
-
-// Checks whether this permission is currently the factory default, as set by
-// Chrome. Specifically, that the following three conditions are true:
-//   - The current active setting comes from the default or pref provider.
-//   - The setting is the factory default setting (as opposed to a global
-//     default setting set by the user).
-//   - The setting is a wildcard setting applying to all origins (which can only
-//     be set from the default provider).
-bool IsPermissionFactoryDefault(HostContentSettingsMap* content_settings,
-                                const PageInfoUI::PermissionInfo& info) {
-  const ContentSetting factory_default_setting =
-      content_settings::ContentSettingsRegistry::GetInstance()
-          ->Get(info.type)
-          ->GetInitialDefaultSetting();
-
-  // Settings that are granted in regular mode get reduced to ASK in incognito
-  // mode. These settings should not be displayed either.
-  const bool is_incognito_default =
-      info.is_incognito && info.setting == CONTENT_SETTING_ASK &&
-      factory_default_setting == CONTENT_SETTING_ASK;
-
-  return info.source == content_settings::SETTING_SOURCE_USER &&
-         factory_default_setting == info.default_setting &&
-         (info.setting == CONTENT_SETTING_DEFAULT || is_incognito_default);
-}
 
 // Determines whether to show permission |type| in the Page Info UI. Only
 // applies to permissions listed in |kPermissionType|.
-bool ShouldShowPermission(const PageInfoUI::PermissionInfo& info,
+bool ShouldShowPermission(const PageInfo::PermissionInfo& info,
                           const GURL& site_url,
                           HostContentSettingsMap* content_settings,
                           content::WebContents* web_contents,
-                          bool changed_since_last_page_load) {
+                          bool changed_since_last_page_load,
+                          bool is_subresource_filter_activated) {
   // Note |ContentSettingsType::ADS| will show up regardless of its default
   // value when it has been activated on the current origin.
   if (info.type == ContentSettingsType::ADS) {
@@ -163,11 +141,7 @@ bool ShouldShowPermission(const PageInfoUI::PermissionInfo& info,
       return false;
     }
 
-    // The setting for subresource filtering should not show up if the site is
-    // not activated, both on android and desktop platforms.
-    return content_settings->GetWebsiteSetting(
-               site_url, GURL(), ContentSettingsType::ADS_DATA, std::string(),
-               nullptr) != nullptr;
+    return is_subresource_filter_activated;
   }
 
   if (info.type == ContentSettingsType::SOUND) {
@@ -184,8 +158,8 @@ bool ShouldShowPermission(const PageInfoUI::PermissionInfo& info,
   if (info.type == ContentSettingsType::GEOLOCATION && !info.is_incognito)
     return true;
 
-  // The Native File System write permission is desktop only at the moment.
-  if (info.type == ContentSettingsType::NATIVE_FILE_SYSTEM_WRITE_GUARD)
+  // The File System write permission is desktop only at the moment.
+  if (info.type == ContentSettingsType::FILE_SYSTEM_WRITE_GUARD)
     return false;
 #else
   // Flash is shown if the user has ever changed its setting for |site_url|.
@@ -200,9 +174,9 @@ bool ShouldShowPermission(const PageInfoUI::PermissionInfo& info,
   if (info.type == ContentSettingsType::NFC)
     return false;
 
-  // Display the Native File System write permission if the Native File System
-  // API is currently being used.
-  if (info.type == ContentSettingsType::NATIVE_FILE_SYSTEM_WRITE_GUARD &&
+  // Display the File System write permission if the File System API is
+  // currently being used.
+  if (info.type == ContentSettingsType::FILE_SYSTEM_WRITE_GUARD &&
       web_contents->HasNativeFileSystemHandles()) {
     return true;
   }
@@ -241,12 +215,12 @@ bool ShouldShowPermission(const PageInfoUI::PermissionInfo& info,
   if (info.type == ContentSettingsType::BLUETOOTH_GUARD &&
       base::FeatureList::IsEnabled(
           features::kWebBluetoothNewPermissionsBackend) &&
-      !IsPermissionFactoryDefault(content_settings, info)) {
+      !PageInfo::IsPermissionFactoryDefault(info)) {
     return true;
   }
 
   // Show the content setting when it has a non-default value.
-  if (!IsPermissionFactoryDefault(content_settings, info))
+  if (!PageInfo::IsPermissionFactoryDefault(info))
     return true;
 
   return false;
@@ -430,11 +404,37 @@ PageInfo::~PageInfo() {
   }
 }
 
+// static
+bool PageInfo::IsPermissionFactoryDefault(const PermissionInfo& info) {
+  const ContentSetting factory_default_setting =
+      content_settings::ContentSettingsRegistry::GetInstance()
+          ->Get(info.type)
+          ->GetInitialDefaultSetting();
+
+  // Settings that are granted in regular mode get reduced to ASK in incognito
+  // mode. These settings should not be displayed either.
+  const bool is_incognito_default =
+      info.is_incognito && info.setting == CONTENT_SETTING_ASK &&
+      factory_default_setting == CONTENT_SETTING_ASK;
+
+  return info.source == content_settings::SETTING_SOURCE_USER &&
+         factory_default_setting == info.default_setting &&
+         (info.setting == CONTENT_SETTING_DEFAULT || is_incognito_default);
+}
+
+// static
+bool PageInfo::IsFileOrInternalPage(const GURL& url) {
+  return url.SchemeIs(content::kChromeUIScheme) ||
+         url.SchemeIs(content::kChromeDevToolsScheme) ||
+         url.SchemeIs(content::kViewSourceScheme) ||
+         url.SchemeIs(url::kFileScheme);
+}
+
 void PageInfo::InitializeUiState(PageInfoUI* ui) {
   ui_ = ui;
   DCHECK(ui_);
   // TabSpecificContentSetting needs to be created before page load.
-  DCHECK(GetTabSpecificContentSettings());
+  DCHECK(GetPageSpecificContentSettings());
 
   ComputeUIInputs(site_url_);
   PresentSitePermissions();
@@ -511,6 +511,11 @@ void PageInfo::RecordPageInfoAction(PageInfoAction action) {
     UMA_HISTOGRAM_ENUMERATION("Security.PageInfo.Action.HttpUrl.Neutral",
                               action, PAGE_INFO_COUNT);
   }
+}
+
+void PageInfo::UpdatePermissions() {
+  // Refresh the UI to reflect the new setting.
+  PresentSitePermissions();
 }
 
 void PageInfo::OnSitePermissionChanged(ContentSettingsType type,
@@ -917,7 +922,7 @@ void PageInfo::PresentSitePermissions() {
   PermissionInfoList permission_info_list;
   ChosenObjectInfoList chosen_object_info_list;
 
-  PageInfoUI::PermissionInfo permission_info;
+  PermissionInfo permission_info;
   HostContentSettingsMap* content_settings = GetContentSettings();
   for (const ContentSettingsType type : kPermissionType) {
     permission_info.type = type;
@@ -971,7 +976,8 @@ void PageInfo::PresentSitePermissions() {
 
     if (ShouldShowPermission(
             permission_info, site_url_, content_settings, web_contents(),
-            HasContentSettingChangedViaPageInfo(permission_info.type))) {
+            HasContentSettingChangedViaPageInfo(permission_info.type),
+            delegate_->IsSubresourceFilterActivated(site_url_))) {
       permission_info_list.push_back(permission_info);
     }
   }
@@ -1000,7 +1006,7 @@ void PageInfo::PresentSiteData() {
 
   // Add first party cookie and site data counts.
   // TODO(crbug.com/1058597): Remove the calls to the |delegate_| once
-  // TabSpecificContentSettings has been componentized.
+  // PageSpecificContentSettings has been componentized.
   PageInfoUI::CookieInfo cookie_info;
   cookie_info.allowed = GetFirstPartyAllowedCookiesCount(site_url_);
   cookie_info.blocked = GetFirstPartyBlockedCookiesCount(site_url_);
@@ -1131,14 +1137,16 @@ void PageInfo::GetSafeBrowsingStatusByMaliciousContentStatus(
   }
 }
 
-content_settings::TabSpecificContentSettings*
-PageInfo::GetTabSpecificContentSettings() const {
-  return content_settings::TabSpecificContentSettings::FromWebContents(
-      web_contents());
+content_settings::PageSpecificContentSettings*
+PageInfo::GetPageSpecificContentSettings() const {
+  // TODO(https://crbug.com/1103176): PageInfo should be per page. Why is it
+  // a WebContentsObserver if it is not observing anything?
+  return content_settings::PageSpecificContentSettings::GetForFrame(
+      web_contents()->GetMainFrame());
 }
 
 bool PageInfo::HasContentSettingChangedViaPageInfo(ContentSettingsType type) {
-  auto* settings = GetTabSpecificContentSettings();
+  auto* settings = GetPageSpecificContentSettings();
   if (!settings)
     return false;
 
@@ -1146,7 +1154,7 @@ bool PageInfo::HasContentSettingChangedViaPageInfo(ContentSettingsType type) {
 }
 
 void PageInfo::ContentSettingChangedViaPageInfo(ContentSettingsType type) {
-  auto* settings = GetTabSpecificContentSettings();
+  auto* settings = GetPageSpecificContentSettings();
   if (!settings)
     return;
 
@@ -1154,7 +1162,7 @@ void PageInfo::ContentSettingChangedViaPageInfo(ContentSettingsType type) {
 }
 
 int PageInfo::GetFirstPartyAllowedCookiesCount(const GURL& site_url) {
-  auto* settings = GetTabSpecificContentSettings();
+  auto* settings = GetPageSpecificContentSettings();
   if (!settings)
     return 0;
   return settings->allowed_local_shared_objects().GetObjectCountForDomain(
@@ -1162,7 +1170,7 @@ int PageInfo::GetFirstPartyAllowedCookiesCount(const GURL& site_url) {
 }
 
 int PageInfo::GetFirstPartyBlockedCookiesCount(const GURL& site_url) {
-  auto* settings = GetTabSpecificContentSettings();
+  auto* settings = GetPageSpecificContentSettings();
   if (!settings)
     return 0;
 
@@ -1171,7 +1179,7 @@ int PageInfo::GetFirstPartyBlockedCookiesCount(const GURL& site_url) {
 }
 
 int PageInfo::GetThirdPartyAllowedCookiesCount(const GURL& site_url) {
-  auto* settings = GetTabSpecificContentSettings();
+  auto* settings = GetPageSpecificContentSettings();
   if (!settings)
     return 0;
 
@@ -1180,7 +1188,7 @@ int PageInfo::GetThirdPartyAllowedCookiesCount(const GURL& site_url) {
 }
 
 int PageInfo::GetThirdPartyBlockedCookiesCount(const GURL& site_url) {
-  auto* settings = GetTabSpecificContentSettings();
+  auto* settings = GetPageSpecificContentSettings();
   if (!settings)
     return 0;
 

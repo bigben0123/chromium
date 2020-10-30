@@ -70,13 +70,17 @@ base::Optional<SkColor> GetDarkSchemeColor(NativeTheme::ColorId color_id) {
     case NativeTheme::kColorId_ButtonColor:
     case NativeTheme::kColorId_DialogBackground:
     case NativeTheme::kColorId_BubbleBackground:
+    case NativeTheme::kColorId_NotificationDefaultBackground:
       return color_utils::AlphaBlend(SK_ColorWHITE, gfx::kGoogleGrey900, 0.04f);
+    case NativeTheme::kColorId_AvatarIconGuest:
     case NativeTheme::kColorId_DialogForeground:
       return gfx::kGoogleGrey500;
-    case NativeTheme::kColorId_BubbleForeground:
-      return gfx::kGoogleGrey200;
     case NativeTheme::kColorId_BubbleFooterBackground:
       return SkColorSetRGB(0x32, 0x36, 0x39);
+    case NativeTheme::kColorId_AvatarHeaderArt:
+      return gfx::kGoogleGrey800;
+    case NativeTheme::kColorId_AvatarIconIncognito:
+      return gfx::kGoogleGrey200;
 
     // FocusableBorder
     case NativeTheme::kColorId_FocusedBorderColor:
@@ -194,6 +198,10 @@ base::Optional<SkColor> GetDarkSchemeColor(NativeTheme::ColorId color_id) {
       return gfx::kGoogleBlue800;
 
     // Tooltip
+    case NativeTheme::kColorId_TooltipIcon:
+      return SkColorSetA(gfx::kGoogleGrey200, 0xBD);
+    case NativeTheme::kColorId_TooltipIconHovered:
+      return SK_ColorWHITE;
     case NativeTheme::kColorId_TooltipText:
       return SkColorSetA(gfx::kGoogleGrey200, 0xDE);
 
@@ -226,8 +234,6 @@ base::Optional<SkColor> GetDarkSchemeColor(NativeTheme::ColorId color_id) {
     case NativeTheme::kColorId_MenuIconColor:
     case NativeTheme::kColorId_DefaultIconColor:
       return gfx::kGoogleGrey500;
-    case NativeTheme::kColorId_DefaultFrameCaptionForegroundColor:
-      return gfx::kGoogleGrey200;
     default:
       return base::nullopt;
   }
@@ -244,11 +250,15 @@ SkColor GetDefaultColor(NativeTheme::ColorId color_id,
     case NativeTheme::kColorId_ButtonColor:
     case NativeTheme::kColorId_DialogBackground:
     case NativeTheme::kColorId_BubbleBackground:
+    case NativeTheme::kColorId_NotificationDefaultBackground:
       return SK_ColorWHITE;
+    case NativeTheme::kColorId_AvatarHeaderArt:
+      return gfx::kGoogleGrey300;
+    case NativeTheme::kColorId_AvatarIconIncognito:
+      return kPrimaryTextColor;
+    case NativeTheme::kColorId_AvatarIconGuest:
     case NativeTheme::kColorId_DialogForeground:
       return gfx::kGoogleGrey700;
-    case NativeTheme::kColorId_BubbleForeground:
-      return kPrimaryTextColor;
     case NativeTheme::kColorId_BubbleFooterBackground:
       return gfx::kGoogleGrey050;
 
@@ -420,17 +430,27 @@ SkColor GetDefaultColor(NativeTheme::ColorId color_id,
       return gfx::kGoogleBlue600;
 
     // Notification view
-    // TODO(crbug.com/1065604): Add support for dark mode.
-    case NativeTheme::kColorId_NotificationDefaultBackground:
     case NativeTheme::kColorId_NotificationPlaceholderIconColor:
       return SK_ColorWHITE;
     case NativeTheme::kColorId_NotificationActionsRowBackground:
-    case NativeTheme::kColorId_NotificationInlineSettingsBackground:
-      return SkColorSetRGB(0xee, 0xee, 0xee);
-    case NativeTheme::kColorId_NotificationLargeImageBackground:
-      return SkColorSetRGB(0xf5, 0xf5, 0xf5);
+    case NativeTheme::kColorId_NotificationInlineSettingsBackground: {
+      const SkColor bg = base_theme->GetSystemColor(
+          NativeTheme::kColorId_NotificationDefaultBackground, color_scheme);
+      // The alpha value here (0x14) is chosen to generate 0xEEE from 0xFFF.
+      return color_utils::BlendTowardMaxContrast(bg, 0x14);
+    }
+    case NativeTheme::kColorId_NotificationLargeImageBackground: {
+      const SkColor bg = base_theme->GetSystemColor(
+          NativeTheme::kColorId_NotificationDefaultBackground, color_scheme);
+      // The alpha value here (0x0C) is chosen to generate 0xF5F5F5 from 0xFFF.
+      return color_utils::BlendTowardMaxContrast(bg, 0x0C);
+    }
     case NativeTheme::kColorId_NotificationEmptyPlaceholderIconColor:
       return SkColorSetA(SK_ColorWHITE, 0x60);
+    case NativeTheme::kColorId_NotificationEmptyPlaceholderTextColor:
+      return SkColorSetA(SK_ColorWHITE, gfx::kDisabledControlAlpha);
+    case NativeTheme::kColorId_NotificationInkDropBase:
+      return gfx::kGoogleBlue600;
 #if defined(OS_CHROMEOS)
     case NativeTheme::kColorId_NotificationButtonBackground:
       return SkColorSetA(SK_ColorWHITE, 0.9 * 0xff);
@@ -503,9 +523,9 @@ SkColor GetDefaultColor(NativeTheme::ColorId color_id,
       return SkColorSetA(bg, 0xCC);
     }
     case NativeTheme::kColorId_TooltipIcon:
-      return SkColorSetARGB(0xBD, 0x44, 0x44, 0x44);
+      return SkColorSetA(gfx::kGoogleGrey800, 0xBD);
     case NativeTheme::kColorId_TooltipIconHovered:
-      return SkColorSetARGB(0xBD, 0, 0, 0);
+      return SkColorSetA(SK_ColorBLACK, 0xBD);
     case NativeTheme::kColorId_TooltipText:
       return SkColorSetA(kPrimaryTextColor, 0xDE);
 
@@ -600,9 +620,6 @@ SkColor GetDefaultColor(NativeTheme::ColorId color_id,
 
     case NativeTheme::kColorId_BubbleBorder:
       return gfx::kGoogleGrey300;
-
-    case NativeTheme::kColorId_DefaultFrameCaptionForegroundColor:
-      return gfx::kGoogleGrey700;
 
     case NativeTheme::kColorId_NumColors:
       // Keeping the kColorId_NumColors case instead of using the default case

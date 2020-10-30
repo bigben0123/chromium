@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/callback.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
@@ -14,9 +15,11 @@
 #include "base/task_runner.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "chrome/browser/policy/messaging_layer/encryption/encryption_module.h"
 #include "chrome/browser/policy/messaging_layer/storage/storage_queue.h"
 #include "chrome/browser/policy/messaging_layer/util/status_macros.h"
 #include "chrome/browser/policy/messaging_layer/util/task_runner_context.h"
+#include "components/policy/proto/record.pb.h"
 
 namespace reporting {
 
@@ -55,6 +58,13 @@ const uint64_t background_queue_total = 64 * 1024LL * 1024LL;
 constexpr base::TimeDelta background_upload_period =
     base::TimeDelta::FromMinutes(1);
 
+constexpr base::FilePath::CharType manual_queue_subdir[] =
+    FILE_PATH_LITERAL("Manual");
+constexpr base::FilePath::CharType manual_queue_prefix[] =
+    FILE_PATH_LITERAL("P_Manual");
+const uint64_t manual_queue_total = 64 * 1024LL * 1024LL;
+constexpr base::TimeDelta manual_upload_period = base::TimeDelta::Max();
+
 // Returns vector of <priority, queue_options> for all expected queues in
 // Storage. Queues are all located under the given root directory.
 std::vector<std::pair<Priority, StorageQueue::Options>> ExpectedQueues(
@@ -86,6 +96,13 @@ std::vector<std::pair<Priority, StorageQueue::Options>> ExpectedQueues(
               .set_file_prefix(background_queue_prefix)
               .set_total_size(background_queue_total)
               .set_upload_period(background_upload_period)),
+      std::make_pair(
+          MANUAL_BATCH,
+          StorageQueue::Options()
+              .set_directory(root_directory.Append(manual_queue_subdir))
+              .set_file_prefix(manual_queue_prefix)
+              .set_total_size(manual_queue_total)
+              .set_upload_period(manual_upload_period)),
   };
 }
 
@@ -108,12 +125,27 @@ class Storage::QueueUploaderInterface : public StorageQueue::UploaderInterface {
                                                     std::move(uploader));
   }
 
-  void ProcessBlob(StatusOr<base::span<const uint8_t>> data,
-                   base::OnceCallback<void(bool)> processed_cb) override {
-    storage_interface_->ProcessBlob(priority_, data, std::move(processed_cb));
+  void ProcessRecord(EncryptedRecord encrypted_record,
+                     base::OnceCallback<void(bool)> processed_cb) override {
+    // Update sequencing information: add Priority.
+    SequencingInformation* const sequencing_info =
+        encrypted_record.mutable_sequencing_information();
+    sequencing_info->set_priority(priority_);
+    storage_interface_->ProcessRecord(std::move(encrypted_record),
+                                      std::move(processed_cb));
   }
+
+  void ProcessGap(SequencingInformation start,
+                  uint64_t count,
+                  base::OnceCallback<void(bool)> processed_cb) override {
+    // Update sequencing information: add Priority.
+    start.set_priority(priority_);
+    storage_interface_->ProcessGap(std::move(start), count,
+                                   std::move(processed_cb));
+  }
+
   void Completed(Status final_status) override {
-    storage_interface_->Completed(priority_, final_status);
+    storage_interface_->Completed(final_status);
   }
 
  private:
@@ -124,6 +156,7 @@ class Storage::QueueUploaderInterface : public StorageQueue::UploaderInterface {
 void Storage::Create(
     const Options& options,
     StartUploadCb start_upload_cb,
+    scoped_refptr<EncryptionModule> encryption_module,
     base::OnceCallback<void(StatusOr<scoped_refptr<Storage>>)> completion_cb) {
   // Initialize Storage object, populating all the queues.
   class StorageInitContext
@@ -132,6 +165,7 @@ void Storage::Create(
     StorageInitContext(
         const std::vector<std::pair<Priority, StorageQueue::Options>>&
             queues_options,
+        scoped_refptr<EncryptionModule> encryption_module,
         scoped_refptr<Storage> storage,
         base::OnceCallback<void(StatusOr<scoped_refptr<Storage>>)> callback)
         : TaskRunnerContext<StatusOr<scoped_refptr<Storage>>>(
@@ -139,6 +173,7 @@ void Storage::Create(
               base::ThreadPool::CreateSequencedTaskRunner(
                   {base::TaskPriority::BEST_EFFORT, base::MayBlock()})),
           queues_options_(queues_options),
+          encryption_module_(encryption_module),
           storage_(std::move(storage)),
           count_(queues_options_.size()) {}
 
@@ -154,7 +189,9 @@ void Storage::Create(
             base::BindRepeating(&QueueUploaderInterface::ProvideUploader,
                                 /*priority=*/queue_options.first,
                                 storage_->start_upload_cb_),
-            base::BindOnce(&StorageInitContext::ScheduleAddQueue, this,
+            encryption_module_,
+            base::BindOnce(&StorageInitContext::ScheduleAddQueue,
+                           base::Unretained(this),
                            /*priority=*/queue_options.first));
       }
     }
@@ -162,7 +199,7 @@ void Storage::Create(
     void ScheduleAddQueue(
         Priority priority,
         StatusOr<scoped_refptr<StorageQueue>> storage_queue_result) {
-      Schedule(&StorageInitContext::AddQueue, this, priority,
+      Schedule(&StorageInitContext::AddQueue, base::Unretained(this), priority,
                std::move(storage_queue_result));
     }
 
@@ -193,6 +230,7 @@ void Storage::Create(
 
     const std::vector<std::pair<Priority, StorageQueue::Options>>
         queues_options_;
+    scoped_refptr<EncryptionModule> encryption_module_;
     scoped_refptr<Storage> storage_;
     int32_t count_;
     Status final_status_;
@@ -205,7 +243,8 @@ void Storage::Create(
 
   // Asynchronously run initialization.
   Start<StorageInitContext>(ExpectedQueues(storage->options_.directory()),
-                            std::move(storage), std::move(completion_cb));
+                            encryption_module, std::move(storage),
+                            std::move(completion_cb));
 }
 
 Storage::Storage(const Options& options, StartUploadCb start_upload_cb)
@@ -214,19 +253,13 @@ Storage::Storage(const Options& options, StartUploadCb start_upload_cb)
 Storage::~Storage() = default;
 
 void Storage::Write(Priority priority,
-                    base::span<const uint8_t> data,
+                    Record record,
                     base::OnceCallback<void(Status)> completion_cb) {
   // Note: queues_ never change after initialization is finished, so there is no
   // need to protect or serialize access to it.
-  auto it = queues_.find(priority);
-  if (it == queues_.end()) {
-    std::move(completion_cb)
-        .Run(Status(error::NOT_FOUND,
-                    base::StrCat({"Undefined priority=",
-                                  base::NumberToString(priority)})));
-    return;
-  }
-  it->second->Write(data, std::move(completion_cb));
+  ASSIGN_OR_ONCE_CALLBACK_AND_RETURN(scoped_refptr<StorageQueue> queue,
+                                     completion_cb, GetQueue(priority));
+  queue->Write(std::move(record), std::move(completion_cb));
 }
 
 void Storage::Confirm(Priority priority,
@@ -234,15 +267,27 @@ void Storage::Confirm(Priority priority,
                       base::OnceCallback<void(Status)> completion_cb) {
   // Note: queues_ never change after initialization is finished, so there is no
   // need to protect or serialize access to it.
+  ASSIGN_OR_ONCE_CALLBACK_AND_RETURN(scoped_refptr<StorageQueue> queue,
+                                     completion_cb, GetQueue(priority));
+  queue->Confirm(seq_number, std::move(completion_cb));
+}
+
+Status Storage::Flush(Priority priority) {
+  // Note: queues_ never change after initialization is finished, so there is no
+  // need to protect or serialize access to it.
+  ASSIGN_OR_RETURN(scoped_refptr<StorageQueue> queue, GetQueue(priority));
+  queue->Flush();
+  return Status::StatusOK();
+}
+
+StatusOr<scoped_refptr<StorageQueue>> Storage::GetQueue(Priority priority) {
   auto it = queues_.find(priority);
   if (it == queues_.end()) {
-    std::move(completion_cb)
-        .Run(Status(error::NOT_FOUND,
-                    base::StrCat({"Undefined priority=",
-                                  base::NumberToString(priority)})));
-    return;
+    return Status(
+        error::NOT_FOUND,
+        base::StrCat({"Undefined priority=", base::NumberToString(priority)}));
   }
-  it->second->Confirm(seq_number, std::move(completion_cb));
+  return it->second;
 }
 
 }  // namespace reporting

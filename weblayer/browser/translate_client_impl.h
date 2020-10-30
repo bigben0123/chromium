@@ -35,7 +35,7 @@ class TranslateClientImpl
   ~TranslateClientImpl() override;
 
   // Gets the LanguageState associated with the page.
-  translate::LanguageState& GetLanguageState();
+  const translate::LanguageState& GetLanguageState();
 
   // Returns the ContentTranslateDriver instance associated with this
   // WebContents.
@@ -64,6 +64,7 @@ class TranslateClientImpl
                        bool triggered_from_menu) override;
   bool IsTranslatableURL(const GURL& url) override;
   void ShowReportLanguageDetectionErrorUI(const GURL& report_url) override;
+  bool IsAutofillAssistantRunning() const override;
 
   // ContentTranslateDriver::Observer implementation.
   void OnLanguageDetermined(

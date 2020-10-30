@@ -8,6 +8,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.os.Handler;
 import android.text.TextUtils;
+import android.text.format.DateUtils;
 
 import androidx.annotation.IntDef;
 import androidx.annotation.Nullable;
@@ -19,28 +20,38 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
-import org.chromium.chrome.browser.DeviceConditions;
+import org.chromium.chrome.browser.app.ChromeActivity;
+import org.chromium.chrome.browser.device.DeviceConditions;
+import org.chromium.chrome.browser.download.DownloadLaterMetrics.DownloadLaterUiEvent;
+import org.chromium.chrome.browser.download.dialogs.DownloadLaterDialogHelper;
+import org.chromium.chrome.browser.download.dialogs.DownloadLaterDialogHelper.Source;
 import org.chromium.chrome.browser.download.items.OfflineContentAggregatorFactory;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.infobar.DownloadProgressInfoBar;
 import org.chromium.chrome.browser.infobar.IPHInfoBarSupport;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
 import org.chromium.chrome.browser.infobar.InfoBarIdentifier;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.ui.messages.infobar.InfoBar;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetControllerProvider;
+import org.chromium.components.browser_ui.util.date.CalendarUtils;
 import org.chromium.components.download.DownloadState;
 import org.chromium.components.feature_engagement.FeatureConstants;
+import org.chromium.components.infobars.InfoBar;
 import org.chromium.components.offline_items_collection.ContentId;
 import org.chromium.components.offline_items_collection.LegacyHelpers;
 import org.chromium.components.offline_items_collection.OfflineContentProvider;
 import org.chromium.components.offline_items_collection.OfflineItem;
+import org.chromium.components.offline_items_collection.OfflineItemSchedule;
 import org.chromium.components.offline_items_collection.OfflineItemState;
 import org.chromium.components.offline_items_collection.UpdateDelta;
+import org.chromium.components.prefs.PrefService;
+import org.chromium.components.user_prefs.UserPrefs;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
@@ -59,6 +70,7 @@ public class DownloadInfoBarController implements OfflineContentProvider.Observe
     private static final String SPEEDING_UP_MESSAGE_ENABLED = "speeding_up_message_enabled";
     private static final long DURATION_ACCELERATED_INFOBAR_IN_MS = 3000;
     private static final long DURATION_SHOW_RESULT_IN_MS = 6000;
+    private static final long DURATION_SHOW_RESULT_DOWNLOAD_SCHEDULED_IN_MS = 12000;
 
     // Values for the histogram Android.Download.InfoBar.Shown. Keep this in sync with the
     // DownloadInfoBar.ShownState enum in enums.xml.
@@ -163,6 +175,9 @@ public class DownloadInfoBarController implements OfflineContentProvider.Observe
         @ResultState
         public int resultState;
 
+        // Contains the information to change the download schedule for download later feature.
+        public OfflineItemSchedule schedule;
+
         @Override
         public int hashCode() {
             int result = (id == null ? 0 : id.hashCode());
@@ -196,6 +211,7 @@ public class DownloadInfoBarController implements OfflineContentProvider.Observe
             forceReparent = other.forceReparent;
             downloadCount = other.downloadCount;
             resultState = other.resultState;
+            schedule = other.schedule;
         }
     }
 
@@ -236,6 +252,7 @@ public class DownloadInfoBarController implements OfflineContentProvider.Observe
             result = 31 * result + pending;
             result = 31 * result + failed;
             result = 31 * result + completed;
+            result = 31 * result + scheduled;
             return result;
         }
 
@@ -246,7 +263,8 @@ public class DownloadInfoBarController implements OfflineContentProvider.Observe
 
             DownloadCount other = (DownloadCount) obj;
             return inProgress == other.inProgress && pending == other.pending
-                    && failed == other.failed && completed == other.completed;
+                    && failed == other.failed && completed == other.completed
+                    && scheduled == other.scheduled;
         }
     }
 
@@ -285,6 +303,9 @@ public class DownloadInfoBarController implements OfflineContentProvider.Observe
 
     // Represents the currently displayed InfoBar data.
     private DownloadProgressInfoBarData mCurrentInfo;
+
+    // Used to show the download later dialog to change download schedule.
+    private DownloadLaterDialogHelper mDownloadLaterDialogHelper;
 
     /** Constructor. */
     public DownloadInfoBarController(boolean isIncognito) {
@@ -353,7 +374,7 @@ public class DownloadInfoBarController implements OfflineContentProvider.Observe
 
     // OfflineContentProvider.Observer implementation.
     @Override
-    public void onItemsAdded(ArrayList<OfflineItem> items) {
+    public void onItemsAdded(List<OfflineItem> items) {
         for (OfflineItem item : items) {
             if (!isVisibleToUser(item)) continue;
             computeNextStepForUpdate(item);
@@ -398,7 +419,9 @@ public class DownloadInfoBarController implements OfflineContentProvider.Observe
     public IPHInfoBarSupport.TrackerParameters getTrackerParameters() {
         if (getDownloadCount().inProgress == 0) return null;
 
-        if (getActivity() == null || getActivity().getBottomSheetController().isSheetOpen()) {
+        if (getActivity() == null
+                || BottomSheetControllerProvider.from(getActivity().getWindowAndroid())
+                           .isSheetOpen()) {
             return null;
         }
 
@@ -551,7 +574,7 @@ public class DownloadInfoBarController implements OfflineContentProvider.Observe
 
     /**
      * Determines the {@link OfflineItemState} for the message to be shown on the infobar. For
-     * DOWNLOADING state, it will return {@link OfflineItemState.IN_PROGRESS}. Otherwise it should
+     * DOWNLOADING state, it will return {@link OfflineItemState#IN_PROGRESS}. Otherwise it should
      * show the result state which can be complete, failed or pending. There is usually a delay of
      * DURATION_SHOW_RESULT_IN_MS between transition between these states, except for the complete
      * state which must be shown as soon as received. While the InfoBar is in one of these states,
@@ -620,8 +643,7 @@ public class DownloadInfoBarController implements OfflineContentProvider.Observe
             info.icon = R.drawable.ic_error_outline_googblue_24dp;
         } else if (resultState == ResultState.SCHEDULED) {
             stringRes = R.plurals.multiple_download_scheduled;
-            // TODO(shaktisahu, xingliu): Provide icon.
-            info.icon = R.drawable.ic_phone_googblue_36dp;
+            info.icon = R.drawable.ic_file_download_scheduled_24dp;
         } else {
             assert false : "Unexpected resultState " + resultState + " and infoBarState "
                            + infoBarState;
@@ -677,6 +699,8 @@ public class DownloadInfoBarController implements OfflineContentProvider.Observe
             } else if (singleDownloadScheduled) {
                 info.message = getMessageForDownloadScheduled(itemToShow);
                 info.link = getContext().getString(R.string.change_link);
+                info.id = itemToShow.id;
+                info.schedule = itemToShow.schedule.clone();
             } else {
                 // TODO(shaktisahu): Incorporate various types of failure messages.
                 // TODO(shaktisahu, xingliu): Consult UX to handle multiple schedule variations.
@@ -695,8 +719,7 @@ public class DownloadInfoBarController implements OfflineContentProvider.Observe
         clearEndTimerRunnable();
 
         if (startTimer) {
-            long delay =
-                    showAccelerating ? getDurationAcceleratedInfoBar() : getDurationShowResult();
+            long delay = getDelayToNextStep(showAccelerating, resultState);
             mEndTimerRunnable = () -> {
                 mEndTimerRunnable = null;
                 if (mCurrentInfo != null) mCurrentInfo.resultState = ResultState.INVALID;
@@ -718,6 +741,12 @@ public class DownloadInfoBarController implements OfflineContentProvider.Observe
         info.downloadCount = getDownloadCount();
         info.forceReparent = !info.downloadCount.equals(
                 mCurrentInfo == null ? null : mCurrentInfo.downloadCount);
+
+        // TODO(xingliu, shaktisahu): downloadCount may not be updated at the correct time, see
+        // https://crbug.com/1127522. For now, scheduled download will always show in new tabs.
+        if (info.downloadCount.scheduled > 0) {
+            info.forceReparent = true;
+        }
     }
 
     private void setAccessibilityMessage(
@@ -738,10 +767,15 @@ public class DownloadInfoBarController implements OfflineContentProvider.Observe
         if (offlineItem.schedule.onlyOnWifi) {
             return getContext().getString(R.string.download_scheduled_on_wifi);
         } else {
-            // TODO(shaktisahu, xinigliu) : Get exact date and time format.
-            Date scheduledDate = new Date(offlineItem.schedule.startTimeMs);
-            return getContext().getString(
-                    R.string.download_scheduled_on_date, scheduledDate.toString());
+            long now = new Date().getTime();
+            String dateTimeString = DateUtils
+                                            .formatSameDayTime(offlineItem.schedule.startTimeMs,
+                                                    now, DateFormat.MEDIUM, DateFormat.SHORT)
+                                            .toString();
+            int stringId = CalendarUtils.isSameDay(now, offlineItem.schedule.startTimeMs)
+                    ? R.string.download_scheduled_on_time
+                    : R.string.download_scheduled_on_date;
+            return getContext().getString(stringId, dateTimeString);
         }
     }
 
@@ -763,13 +797,12 @@ public class DownloadInfoBarController implements OfflineContentProvider.Observe
     }
 
     @VisibleForTesting
-    protected long getDurationAcceleratedInfoBar() {
-        return DURATION_ACCELERATED_INFOBAR_IN_MS;
-    }
+    protected long getDelayToNextStep(boolean showAccelerating, @ResultState int resultState) {
+        if (showAccelerating) return DURATION_ACCELERATED_INFOBAR_IN_MS;
 
-    @VisibleForTesting
-    protected long getDurationShowResult() {
-        return DURATION_SHOW_RESULT_IN_MS;
+        // Scheduled download uses a longer delay to reset tracking downloads states.
+        return resultState == ResultState.SCHEDULED ? DURATION_SHOW_RESULT_DOWNLOAD_SCHEDULED_IN_MS
+                                                    : DURATION_SHOW_RESULT_IN_MS;
     }
 
     @VisibleForTesting
@@ -1007,19 +1040,21 @@ public class DownloadInfoBarController implements OfflineContentProvider.Observe
 
     private class DownloadProgressInfoBarClient implements DownloadProgressInfoBar.Client {
         @Override
-        public void onLinkClicked(ContentId itemId) {
-            // TODO(shaktisahu, xingliu) : This assumes that the item is being opened. For scheduled
-            // downloads, we need to open the dialog.
+        public void onLinkClicked(ContentId itemId, final OfflineItemSchedule schedule) {
             mTrackedItems.remove(itemId);
             removeNotification(itemId);
-            if (itemId != null) {
+
+            if (itemId != null && schedule != null) {
+                onChangeScheduleClicked(itemId, schedule);
+            } else if (itemId != null) {
                 DownloadUtils.openItem(
                         itemId, mIsIncognito, DownloadOpenSource.DOWNLOAD_PROGRESS_INFO_BAR);
+                recordLinkClicked(true /*openItem*/);
             } else {
                 DownloadManagerService.openDownloadsPage(
                         getContext(), DownloadOpenSource.DOWNLOAD_PROGRESS_INFO_BAR);
+                recordLinkClicked(false /*openItem*/);
             }
-            recordLinkClicked(itemId != null);
             closePreviousInfoBar();
         }
 
@@ -1032,6 +1067,30 @@ public class DownloadInfoBarController implements OfflineContentProvider.Observe
                 computeNextStepForUpdate(null, false, true, false);
             }
         }
+    }
+
+    private void onChangeScheduleClicked(
+            final ContentId id, final OfflineItemSchedule currentSchedule) {
+        if (mDownloadLaterDialogHelper != null) mDownloadLaterDialogHelper.destroy();
+        ChromeActivity activity = getActivity();
+        if (activity == null) return;
+
+        PrefService prefService = UserPrefs.get(Profile.getLastUsedRegularProfile());
+        // Show the download later dialog to let the user change download schedule.
+        mDownloadLaterDialogHelper = DownloadLaterDialogHelper.create(
+                activity, activity.getModalDialogManager(), prefService);
+        DownloadLaterMetrics.recordDownloadLaterUiEvent(
+                DownloadLaterUiEvent.DOWNLOAD_INFOBAR_CHANGE_SCHEDULE_CLICKED);
+        mDownloadLaterDialogHelper.showChangeScheduleDialog(
+                currentSchedule, Source.DOWNLOAD_INFOBAR, (newSchedule) -> {
+                    if (newSchedule == null) return;
+                    if (mUseNewDownloadPath) {
+                        OfflineContentAggregatorFactory.get().changeSchedule(id, newSchedule);
+                    } else {
+                        DownloadManagerService.getDownloadManagerService().changeSchedule(
+                                id, newSchedule, mIsIncognito);
+                    }
+                });
     }
 
     private void recordInfoBarState(
@@ -1095,7 +1154,6 @@ public class DownloadInfoBarController implements OfflineContentProvider.Observe
         if (openItem) {
             RecordUserAction.record("Android.Download.InfoBar.LinkClicked.OpenDownload");
         } else {
-            // TODO(shaktisahu, xingliu): This could be scheduled download as well.
             RecordUserAction.record("Android.Download.InfoBar.LinkClicked.OpenDownloadHome");
         }
     }

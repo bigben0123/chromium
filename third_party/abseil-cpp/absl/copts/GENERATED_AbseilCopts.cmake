@@ -16,7 +16,6 @@ list(APPEND ABSL_CLANG_CL_FLAGS
     "-Wno-extra-semi-stmt"
     "-Wno-packed"
     "-Wno-padded"
-    "-Wno-sign-compare"
     "-Wno-float-conversion"
     "-Wno-float-equal"
     "-Wno-format-nonliteral"
@@ -81,13 +80,14 @@ list(APPEND ABSL_GCC_FLAGS
     "-Wmissing-declarations"
     "-Woverlength-strings"
     "-Wpointer-arith"
+    "-Wundef"
     "-Wunused-local-typedefs"
     "-Wunused-result"
     "-Wvarargs"
     "-Wvla"
     "-Wwrite-strings"
     "-Wno-missing-field-initializers"
-    "-Wno-sign-compare"
+    "-DNOMINMAX"
 )
 
 list(APPEND ABSL_GCC_TEST_FLAGS
@@ -115,7 +115,6 @@ list(APPEND ABSL_LLVM_FLAGS
     "-Wno-extra-semi-stmt"
     "-Wno-packed"
     "-Wno-padded"
-    "-Wno-sign-compare"
     "-Wno-float-conversion"
     "-Wno-float-equal"
     "-Wno-format-nonliteral"
@@ -145,6 +144,7 @@ list(APPEND ABSL_LLVM_FLAGS
     "-Wobjc-literal-conversion"
     "-Wno-sign-conversion"
     "-Wstring-conversion"
+    "-DNOMINMAX"
 )
 
 list(APPEND ABSL_LLVM_TEST_FLAGS

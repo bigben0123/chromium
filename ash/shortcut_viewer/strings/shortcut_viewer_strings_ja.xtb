@@ -47,6 +47,7 @@
 <translation id="2488661730534396940">左のデスクを有効にする</translation>
 <translation id="2515586267016047495">Alt</translation>
 <translation id="2530339807289914946">ウェブページを下にスクロールする</translation>
+<translation id="2530896289327917474">カーソル ブラウジングをオンまたはオフにする</translation>
 <translation id="2574014812750545982">ページのズームレベルをリセット</translation>
 <translation id="2596078834055697711">ウィンドウのスクリーンショットを撮影する</translation>
 <translation id="2685170433750953446"><ph name="SHIFT" /><ph name="SEPARATOR1" /><ph name="ALT" /><ph name="SEPARATOR2" /><ph name="L" /> キーを押した状態で <ph name="TAB" /> キーまたは<ph name="RIGHT" />キーを押す</translation>
@@ -186,6 +187,7 @@
 <translation id="8234414138295101081">画面を 90 度回転させる</translation>
 <translation id="8241665785394195545">右角かっこ</translation>
 <translation id="8264941229485248811">デベロッパー ツール インスペクタの表示と非表示を切り替える</translation>
+<translation id="8322502972606429618">最近クリップボードにコピーされた内容を表示します</translation>
 <translation id="836869401750819675">ダウンロード ページを開く</translation>
 <translation id="8388247778047144397">リンクをドラッグしてタブストリップの空白領域に移動する</translation>
 <translation id="8389638407792712197">新しいウィンドウを開く</translation>

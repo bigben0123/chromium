@@ -120,7 +120,7 @@ void WindowAndroid::AttachCompositor(WindowAndroidCompositor* compositor) {
 }
 
 void WindowAndroid::DetachCompositor() {
-  compositor_ = NULL;
+  compositor_ = nullptr;
   for (WindowAndroidObserver& observer : observer_list_)
     observer.OnDetachCompositor();
   observer_list_.Clear();
@@ -241,12 +241,6 @@ void WindowAndroid::Force60HzRefreshRateIfNeeded() {
 
   JNIEnv* env = AttachCurrentThread();
   Java_WindowAndroid_setPreferredRefreshRate(env, GetJavaObject(), 60.f);
-}
-
-bool WindowAndroid::ApplyDisableSurfaceControlWorkaround() {
-  JNIEnv* env = AttachCurrentThread();
-  return Java_WindowAndroid_applyDisableSurfaceControlWorkaround(
-      env, GetJavaObject());
 }
 
 bool WindowAndroid::HasPermission(const std::string& permission) {

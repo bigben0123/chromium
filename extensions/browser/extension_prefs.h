@@ -19,11 +19,12 @@
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/sync/model/string_ordinal.h"
-#include "extensions/browser/api/declarative_net_request/ruleset_checksum.h"
+#include "extensions/browser/api/declarative_net_request/ruleset_install_pref.h"
 #include "extensions/browser/blocklist_state.h"
 #include "extensions/browser/disable_reason.h"
 #include "extensions/browser/extension_prefs_scope.h"
 #include "extensions/browser/install_flag.h"
+#include "extensions/browser/pref_types.h"
 #include "extensions/common/api/declarative_net_request/constants.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
@@ -198,16 +199,16 @@ class ExtensionPrefs : public KeyedService {
   // Called when an extension is installed, so that prefs get created.
   // If |page_ordinal| is invalid then a page will be found for the App.
   // |install_flags| are a bitmask of extension::InstallFlags.
-  // |ruleset_checksums| are the checksum for the indexed static rulesets
-  // corresponding to the Declarative Net Request API.
-  void OnExtensionInstalled(
-      const Extension* extension,
-      Extension::State initial_state,
-      const syncer::StringOrdinal& page_ordinal,
-      int install_flags,
-      const std::string& install_parameter,
-      const declarative_net_request::RulesetChecksums& ruleset_checksums);
-  // OnExtensionInstalled with no install flags and |ruleset_checksums|.
+  // |ruleset_install_prefs| contains install prefs needed for the Declarative
+  // Net Request API.
+  void OnExtensionInstalled(const Extension* extension,
+                            Extension::State initial_state,
+                            const syncer::StringOrdinal& page_ordinal,
+                            int install_flags,
+                            const std::string& install_parameter,
+                            const declarative_net_request::RulesetInstallPrefs&
+                                ruleset_install_prefs);
+  // OnExtensionInstalled with no install flags and |ruleset_install_prefs|.
   void OnExtensionInstalled(const Extension* extension,
                             Extension::State initial_state,
                             const syncer::StringOrdinal& page_ordinal,
@@ -238,14 +239,72 @@ class ExtensionPrefs : public KeyedService {
   BlocklistState GetExtensionBlocklistState(
       const std::string& extension_id) const;
 
+  // Gets or sets profile wide ExtensionPrefs.
+  void SetIntegerPref(const PrefMap& pref, int value);
+  void SetBooleanPref(const PrefMap& pref, bool value);
+  void SetStringPref(const PrefMap& pref, const std::string& value);
+  void SetTimePref(const PrefMap& pref, base::Time value);
+  void SetGURLPref(const PrefMap& pref, const GURL& value);
+  void SetDictionaryPref(const PrefMap& pref,
+                         std::unique_ptr<base::DictionaryValue> value);
+
+  int GetPrefAsInteger(const PrefMap& pref) const;
+  bool GetPrefAsBoolean(const PrefMap& pref) const;
+  std::string GetPrefAsString(const PrefMap& pref) const;
+  base::Time GetPrefAsTime(const PrefMap& pref) const;
+  GURL GetPrefAsGURL(const PrefMap& pref) const;
+  const base::DictionaryValue* GetPrefAsDictionary(const PrefMap& pref) const;
+
+  // Increments/decrements an ExtensionPref with a PrefType::kInteger.
+  void IncrementPref(const PrefMap& pref);
+  void DecrementPref(const PrefMap& pref);
+
   // Populates |out| with the ids of all installed extensions.
   void GetExtensions(ExtensionIdList* out) const;
+
+  void SetIntegerPref(const std::string& id, const PrefMap& pref, int value);
+  void SetBooleanPref(const std::string& id, const PrefMap& pref, bool value);
+  void SetStringPref(const std::string& id,
+                     const PrefMap& pref,
+                     const std::string value);
+  void SetListPref(const std::string& id,
+                   const PrefMap& pref,
+                   base::Value value);
+  void SetDictionaryPref(const std::string& id,
+                         const PrefMap& pref,
+                         std::unique_ptr<base::DictionaryValue> value);
+  void SetTimePref(const std::string& id,
+                   const PrefMap& pref,
+                   const base::Time value);
 
   void UpdateExtensionPref(const std::string& id,
                            base::StringPiece key,
                            std::unique_ptr<base::Value> value);
 
   void DeleteExtensionPrefs(const std::string& id);
+
+  bool ReadPrefAsBoolean(const std::string& extension_id,
+                         const PrefMap& pref,
+                         bool* out_value) const;
+
+  bool ReadPrefAsInteger(const std::string& extension_id,
+                         const PrefMap& pref,
+                         int* out_value) const;
+
+  bool ReadPrefAsString(const std::string& extension_id,
+                        const PrefMap& pref,
+                        std::string* out_value) const;
+
+  bool ReadPrefAsList(const std::string& extension_id,
+                      const PrefMap& pref,
+                      const base::ListValue** out_value) const;
+
+  bool ReadPrefAsDictionary(const std::string& extension_id,
+                            const PrefMap& pref,
+                            const base::DictionaryValue** out_value) const;
+
+  base::Time ReadPrefAsTime(const std::string& extension_id,
+                            const PrefMap& pref) const;
 
   bool ReadPrefAsBoolean(const std::string& extension_id,
                          base::StringPiece pref_key,
@@ -475,14 +534,14 @@ class ExtensionPrefs : public KeyedService {
   // to install it.
   //
   // |install_flags| are a bitmask of extension::InstallFlags.
-  void SetDelayedInstallInfo(
-      const Extension* extension,
-      Extension::State initial_state,
-      int install_flags,
-      DelayReason delay_reason,
-      const syncer::StringOrdinal& page_ordinal,
-      const std::string& install_parameter,
-      const declarative_net_request::RulesetChecksums& ruleset_checksums = {});
+  void SetDelayedInstallInfo(const Extension* extension,
+                             Extension::State initial_state,
+                             int install_flags,
+                             DelayReason delay_reason,
+                             const syncer::StringOrdinal& page_ordinal,
+                             const std::string& install_parameter,
+                             const declarative_net_request::RulesetInstallPrefs&
+                                 ruleset_install_prefs = {});
 
   // Removes any delayed install information we have for the given
   // |extension_id|. Returns true if there was info to remove; false otherwise.
@@ -575,11 +634,6 @@ class ExtensionPrefs : public KeyedService {
   void SetInstallParam(const std::string& extension_id,
                        const std::string& install_parameter);
 
-  // The total number of times we've disabled an extension due to corrupted
-  // contents.
-  int GetCorruptedDisableCount() const;
-  void IncrementCorruptedDisableCount();
-
   // Whether the extension with the given |extension_id| needs to be synced.
   // This is set when the state (such as enabled/disabled or allowed in
   // incognito) is changed before Sync is ready.
@@ -617,10 +671,23 @@ class ExtensionPrefs : public KeyedService {
 
   // Whether the extension with the given |extension_id| is using its ruleset's
   // matched action count for the badge text. This is set via the
-  // setActionCountAsBadgeText API call.
+  // setExtensionActionOptions API call.
   bool GetDNRUseActionCountAsBadgeText(const ExtensionId& extension_id) const;
   void SetDNRUseActionCountAsBadgeText(const ExtensionId& extension_id,
                                        bool use_action_count_as_badge_text);
+
+  // Whether the ruleset for the given |extension_id| and |ruleset_id| should be
+  // ignored while loading the extension.
+  bool ShouldIgnoreDNRRuleset(
+      const ExtensionId& extension_id,
+      declarative_net_request::RulesetID ruleset_id) const;
+
+  // Returns the global rule allocation for the given |extension_id|. If no
+  // rules are allocated to the extension, false is returned.
+  bool GetDNRAllocatedGlobalRuleCount(const ExtensionId& extension_id,
+                                      size_t* rule_count) const;
+  void SetDNRAllocatedGlobalRuleCount(const ExtensionId& extension_id,
+                                      size_t rule_count);
 
   // Migrates the disable reasons extension pref for extensions that were
   // disabled due to a deprecated reason.
@@ -648,6 +715,18 @@ class ExtensionPrefs : public KeyedService {
   // dictionary).
   // TODO(devlin): Remove this once clients are migrated over, around M84.
   void MigrateToNewExternalUninstallPref();
+
+  // Returns true if the given component extension should be installed, even
+  // though it has been obsoleted. Installing it allows us to ensure it is
+  // cleaned/deleted up properly. After that cleanup is done, this will return
+  // false.
+  bool ShouldInstallObsoleteComponentExtension(const std::string& extension_id);
+
+  // Mark the given component extension as deleted. It should not be installed /
+  // loaded again after this.
+  void MarkObsoleteComponentExtensionAsRemoved(
+      const std::string& extension_id,
+      const Manifest::Location& location);
 
   // When called before the ExtensionService is created, alerts that are
   // normally suppressed in first run will still trigger.
@@ -685,6 +764,15 @@ class ExtensionPrefs : public KeyedService {
       base::Clock* clock,
       bool extensions_disabled,
       const std::vector<EarlyExtensionPrefsObserver*>& early_observers);
+
+  // Gets or sets profile wide ExtensionPrefs.
+  const base::Value* GetPref(const PrefMap& pref) const;
+  void SetPref(const PrefMap& pref, std::unique_ptr<base::Value> value);
+
+  // Updates ExtensionPrefs for a specific extension.
+  void UpdateExtensionPref(const std::string& id,
+                           const PrefMap& pref,
+                           std::unique_ptr<base::Value> value);
 
   // Converts absolute paths in the pref to paths relative to the
   // install_directory_.
@@ -794,7 +882,7 @@ class ExtensionPrefs : public KeyedService {
       Extension::State initial_state,
       int install_flags,
       const std::string& install_parameter,
-      const declarative_net_request::RulesetChecksums& ruleset_checksums,
+      const declarative_net_request::RulesetInstallPrefs& ruleset_install_prefs,
       prefs::DictionaryValueUpdate* extension_dict) const;
 
   void InitExtensionControlledPrefs(const ExtensionsInfo& extensions_info);

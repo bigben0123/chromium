@@ -287,8 +287,12 @@ void DriverGL::InitializeDynamicBindings(const GLVersionInfo* ver,
       gfx::HasExtension(extensions, "GL_ANGLE_framebuffer_blit");
   ext.b_GL_ANGLE_framebuffer_multisample =
       gfx::HasExtension(extensions, "GL_ANGLE_framebuffer_multisample");
+  ext.b_GL_ANGLE_get_tex_level_parameter =
+      gfx::HasExtension(extensions, "GL_ANGLE_get_tex_level_parameter");
   ext.b_GL_ANGLE_instanced_arrays =
       gfx::HasExtension(extensions, "GL_ANGLE_instanced_arrays");
+  ext.b_GL_ANGLE_memory_object_flags =
+      gfx::HasExtension(extensions, "GL_ANGLE_memory_object_flags");
   ext.b_GL_ANGLE_memory_object_fuchsia =
       gfx::HasExtension(extensions, "GL_ANGLE_memory_object_fuchsia");
   ext.b_GL_ANGLE_multi_draw =
@@ -297,6 +301,8 @@ void DriverGL::InitializeDynamicBindings(const GLVersionInfo* ver,
       gfx::HasExtension(extensions, "GL_ANGLE_request_extension");
   ext.b_GL_ANGLE_robust_client_memory =
       gfx::HasExtension(extensions, "GL_ANGLE_robust_client_memory");
+  ext.b_GL_ANGLE_robust_resource_initialization =
+      gfx::HasExtension(extensions, "GL_ANGLE_robust_resource_initialization");
   ext.b_GL_ANGLE_semaphore_fuchsia =
       gfx::HasExtension(extensions, "GL_ANGLE_semaphore_fuchsia");
   ext.b_GL_ANGLE_texture_external_update =
@@ -339,6 +345,8 @@ void DriverGL::InitializeDynamicBindings(const GLVersionInfo* ver,
   ext.b_GL_ARB_shader_image_load_store =
       gfx::HasExtension(extensions, "GL_ARB_shader_image_load_store");
   ext.b_GL_ARB_sync = gfx::HasExtension(extensions, "GL_ARB_sync");
+  ext.b_GL_ARB_tessellation_shader =
+      gfx::HasExtension(extensions, "GL_ARB_tessellation_shader");
   ext.b_GL_ARB_texture_multisample =
       gfx::HasExtension(extensions, "GL_ARB_texture_multisample");
   ext.b_GL_ARB_texture_storage =
@@ -452,6 +460,8 @@ void DriverGL::InitializeDynamicBindings(const GLVersionInfo* ver,
   ext.b_GL_OES_get_program_binary =
       gfx::HasExtension(extensions, "GL_OES_get_program_binary");
   ext.b_GL_OES_mapbuffer = gfx::HasExtension(extensions, "GL_OES_mapbuffer");
+  ext.b_GL_OES_tessellation_shader =
+      gfx::HasExtension(extensions, "GL_OES_tessellation_shader");
   ext.b_GL_OES_texture_buffer =
       gfx::HasExtension(extensions, "GL_OES_texture_buffer");
   ext.b_GL_OES_vertex_array_object =
@@ -1779,6 +1789,10 @@ void DriverGL::InitializeDynamicBindings(const GLVersionInfo* ver,
     fn.glGetTexLevelParameterfvFn =
         reinterpret_cast<glGetTexLevelParameterfvProc>(
             GetGLProcAddress("glGetTexLevelParameterfv"));
+  } else if (ext.b_GL_ANGLE_get_tex_level_parameter) {
+    fn.glGetTexLevelParameterfvFn =
+        reinterpret_cast<glGetTexLevelParameterfvProc>(
+            GetGLProcAddress("glGetTexLevelParameterfvANGLE"));
   }
 
   if (ext.b_GL_ANGLE_robust_client_memory) {
@@ -1791,6 +1805,10 @@ void DriverGL::InitializeDynamicBindings(const GLVersionInfo* ver,
     fn.glGetTexLevelParameterivFn =
         reinterpret_cast<glGetTexLevelParameterivProc>(
             GetGLProcAddress("glGetTexLevelParameteriv"));
+  } else if (ext.b_GL_ANGLE_get_tex_level_parameter) {
+    fn.glGetTexLevelParameterivFn =
+        reinterpret_cast<glGetTexLevelParameterivProc>(
+            GetGLProcAddress("glGetTexLevelParameterivANGLE"));
   }
 
   if (ext.b_GL_ANGLE_robust_client_memory) {
@@ -2173,9 +2191,13 @@ void DriverGL::InitializeDynamicBindings(const GLVersionInfo* ver,
         GetGLProcAddress("glObjectPtrLabelKHR"));
   }
 
-  if (ver->IsAtLeastGLES(3u, 2u) || ver->IsAtLeastGL(4u, 0u)) {
+  if (ver->IsAtLeastGLES(3u, 2u) || ver->IsAtLeastGL(4u, 0u) ||
+      ext.b_GL_ARB_tessellation_shader) {
     fn.glPatchParameteriFn = reinterpret_cast<glPatchParameteriProc>(
         GetGLProcAddress("glPatchParameteri"));
+  } else if (ext.b_GL_OES_tessellation_shader) {
+    fn.glPatchParameteriFn = reinterpret_cast<glPatchParameteriProc>(
+        GetGLProcAddress("glPatchParameteriOES"));
   }
 
   if (ext.b_GL_NV_path_rendering) {
@@ -2801,6 +2823,12 @@ void DriverGL::InitializeDynamicBindings(const GLVersionInfo* ver,
   if (ext.b_GL_EXT_memory_object) {
     fn.glTexStorageMem2DEXTFn = reinterpret_cast<glTexStorageMem2DEXTProc>(
         GetGLProcAddress("glTexStorageMem2DEXT"));
+  }
+
+  if (ext.b_GL_ANGLE_memory_object_flags) {
+    fn.glTexStorageMemFlags2DANGLEFn =
+        reinterpret_cast<glTexStorageMemFlags2DANGLEProc>(
+            GetGLProcAddress("glTexStorageMemFlags2DANGLE"));
   }
 
   if (ext.b_GL_ANGLE_robust_client_memory) {
@@ -5930,6 +5958,20 @@ void GLApiBase::glTexStorageMem2DEXTFn(GLenum target,
                                        GLuint64 offset) {
   driver_->fn.glTexStorageMem2DEXTFn(target, levels, internalFormat, width,
                                      height, memory, offset);
+}
+
+void GLApiBase::glTexStorageMemFlags2DANGLEFn(GLenum target,
+                                              GLsizei levels,
+                                              GLenum internalFormat,
+                                              GLsizei width,
+                                              GLsizei height,
+                                              GLuint memory,
+                                              GLuint64 offset,
+                                              GLbitfield createFlags,
+                                              GLbitfield usageFlags) {
+  driver_->fn.glTexStorageMemFlags2DANGLEFn(target, levels, internalFormat,
+                                            width, height, memory, offset,
+                                            createFlags, usageFlags);
 }
 
 void GLApiBase::glTexSubImage2DFn(GLenum target,
@@ -9797,6 +9839,22 @@ void TraceGLApi::glTexStorageMem2DEXTFn(GLenum target,
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glTexStorageMem2DEXT")
   gl_api_->glTexStorageMem2DEXTFn(target, levels, internalFormat, width, height,
                                   memory, offset);
+}
+
+void TraceGLApi::glTexStorageMemFlags2DANGLEFn(GLenum target,
+                                               GLsizei levels,
+                                               GLenum internalFormat,
+                                               GLsizei width,
+                                               GLsizei height,
+                                               GLuint memory,
+                                               GLuint64 offset,
+                                               GLbitfield createFlags,
+                                               GLbitfield usageFlags) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glTexStorageMemFlags2DANGLE")
+  gl_api_->glTexStorageMemFlags2DANGLEFn(target, levels, internalFormat, width,
+                                         height, memory, offset, createFlags,
+                                         usageFlags);
 }
 
 void TraceGLApi::glTexSubImage2DFn(GLenum target,
@@ -14815,6 +14873,25 @@ void LogGLApi::glTexStorageMem2DEXTFn(GLenum target,
                                   memory, offset);
 }
 
+void LogGLApi::glTexStorageMemFlags2DANGLEFn(GLenum target,
+                                             GLsizei levels,
+                                             GLenum internalFormat,
+                                             GLsizei width,
+                                             GLsizei height,
+                                             GLuint memory,
+                                             GLuint64 offset,
+                                             GLbitfield createFlags,
+                                             GLbitfield usageFlags) {
+  GL_SERVICE_LOG("glTexStorageMemFlags2DANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", " << levels
+                 << ", " << GLEnums::GetStringEnum(internalFormat) << ", "
+                 << width << ", " << height << ", " << memory << ", " << offset
+                 << ", " << createFlags << ", " << usageFlags << ")");
+  gl_api_->glTexStorageMemFlags2DANGLEFn(target, levels, internalFormat, width,
+                                         height, memory, offset, createFlags,
+                                         usageFlags);
+}
+
 void LogGLApi::glTexSubImage2DFn(GLenum target,
                                  GLint level,
                                  GLint xoffset,
@@ -18319,6 +18396,18 @@ void NoContextGLApi::glTexStorageMem2DEXTFn(GLenum target,
                                             GLuint memory,
                                             GLuint64 offset) {
   NoContextHelper("glTexStorageMem2DEXT");
+}
+
+void NoContextGLApi::glTexStorageMemFlags2DANGLEFn(GLenum target,
+                                                   GLsizei levels,
+                                                   GLenum internalFormat,
+                                                   GLsizei width,
+                                                   GLsizei height,
+                                                   GLuint memory,
+                                                   GLuint64 offset,
+                                                   GLbitfield createFlags,
+                                                   GLbitfield usageFlags) {
+  NoContextHelper("glTexStorageMemFlags2DANGLE");
 }
 
 void NoContextGLApi::glTexSubImage2DFn(GLenum target,

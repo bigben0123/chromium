@@ -7,6 +7,11 @@
 
 #import <Foundation/Foundation.h>
 
+#include <memory>
+#include <vector>
+
+#include "components/password_manager/core/browser/password_form_forward.h"
+
 // Enum with all possible UI states of password check.
 typedef NS_ENUM(NSInteger, PasswordCheckUIState) {
   // When no compromised passwords were detected.
@@ -19,13 +24,20 @@ typedef NS_ENUM(NSInteger, PasswordCheckUIState) {
   PasswordCheckStateRunning,
   // When user has no passwords and check can't be performed.
   PasswordCheckStateDisabled,
+  // When password check failed due to network issues, quota limit or others.
+  PasswordCheckStateError,
 };
 
 // Consumer for the Passwords Screen.
 @protocol PasswordsConsumer <NSObject>
 
 // Displays current password check UI state on screen.
-- (void)setPasswordCheckUIState:(PasswordCheckUIState)state;
+- (void)setPasswordCheckUIState:(PasswordCheckUIState)state
+      compromisedPasswordsCount:(NSInteger)count;
+
+// Displays password and blocked forms.
+- (void)setPasswordsForms:
+    (std::vector<std::unique_ptr<password_manager::PasswordForm>>)forms;
 
 @end
 

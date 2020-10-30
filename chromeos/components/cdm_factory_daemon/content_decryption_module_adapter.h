@@ -12,12 +12,15 @@
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "chromeos/components/cdm_factory_daemon/cdm_storage_adapter.h"
+#include "chromeos/components/cdm_factory_daemon/chromeos_cdm_context.h"
 #include "chromeos/components/cdm_factory_daemon/mojom/content_decryption_module.mojom.h"
+#include "media/base/callback_registry.h"
 #include "media/base/cdm_context.h"
 #include "media/base/cdm_key_information.h"
 #include "media/base/cdm_promise_adapter.h"
 #include "media/base/cdm_session_tracker.h"
 #include "media/base/content_decryption_module.h"
+#include "media/base/decrypt_config.h"
 #include "media/base/decryptor.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
@@ -33,12 +36,13 @@ namespace chromeos {
 // clear and not decoding.
 //
 // This implementation runs in the GPU process and expects all calls to be
-// executed on the mojo thread.  Decrypt, RegisteryNewKeyCB and CancelDecrypt
+// executed on the mojo thread.  Decrypt, RegisterEventCB and CancelDecrypt
 // are exceptions, and can be called from any thread.
 class COMPONENT_EXPORT(CDM_FACTORY_DAEMON) ContentDecryptionModuleAdapter
     : public cdm::mojom::ContentDecryptionModuleClient,
       public media::ContentDecryptionModule,
       public media::CdmContext,
+      public chromeos::ChromeOsCdmContext,
       public media::Decryptor {
  public:
   ContentDecryptionModuleAdapter(
@@ -85,7 +89,15 @@ class COMPONENT_EXPORT(CDM_FACTORY_DAEMON) ContentDecryptionModuleAdapter
   media::CdmContext* GetCdmContext() override;
 
   // media::CdmContext:
+  std::unique_ptr<media::CallbackRegistration> RegisterEventCB(
+      EventCB event_cb) override;
   Decryptor* GetDecryptor() override;
+  ChromeOsCdmContext* GetChromeOsCdmContext() override;
+
+  // chromeos::ChromeOsCdmContext:
+  void GetHwKeyData(const media::DecryptConfig* decrypt_config,
+                    const std::vector<uint8_t>& hw_identifier,
+                    GetHwKeyDataCB callback) override;
 
   // cdm::mojom::ContentDecryptionModuleClient:
   void OnSessionMessage(const std::string& session_id,
@@ -101,7 +113,6 @@ class COMPONENT_EXPORT(CDM_FACTORY_DAEMON) ContentDecryptionModuleAdapter
                                  double new_expiry_time_sec) override;
 
   // media::Decryptor:
-  void RegisterNewKeyCB(StreamType stream_type, NewKeyCB key_added_cb) override;
   void Decrypt(StreamType stream_type,
                scoped_refptr<media::DecoderBuffer> encrypted,
                DecryptCB decrypt_cb) override;
@@ -165,11 +176,7 @@ class COMPONENT_EXPORT(CDM_FACTORY_DAEMON) ContentDecryptionModuleAdapter
   // Keep track of outstanding promises.
   media::CdmPromiseAdapter cdm_promise_adapter_;
 
-  // Protect |new_audio_key_cb_| and |new_video_key_cb_| as they are set on the
-  // decoder thread but called on the mojo thread.
-  mutable base::Lock new_key_cb_lock_;
-  NewKeyCB new_audio_key_cb_ GUARDED_BY(new_key_cb_lock_);
-  NewKeyCB new_video_key_cb_ GUARDED_BY(new_key_cb_lock_);
+  media::CallbackRegistry<EventCB::RunType> event_callbacks_;
 
   // WeakPtrFactory to use for callbacks.
   base::WeakPtrFactory<ContentDecryptionModuleAdapter> weak_factory_{this};

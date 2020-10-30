@@ -55,7 +55,7 @@ class WebRequestProxyingURLLoaderFactory
         int32_t routing_id,
         int32_t network_service_request_id,
         uint32_t options,
-        ukm::SourceId ukm_source_id,
+        ukm::SourceIdObj ukm_source_id,
         const network::ResourceRequest& request,
         const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
         mojo::PendingReceiver<network::mojom::URLLoader> loader_receiver,
@@ -173,7 +173,7 @@ class WebRequestProxyingURLLoaderFactory
     const int32_t network_service_request_id_ = 0;
     const int32_t routing_id_ = 0;
     const uint32_t options_ = 0;
-    const ukm::SourceId ukm_source_id_;
+    const ukm::SourceIdObj ukm_source_id_;
     const net::MutableNetworkTrafficAnnotationTag traffic_annotation_;
     mojo::Receiver<network::mojom::URLLoader> proxied_loader_receiver_;
     mojo::Remote<network::mojom::URLLoaderClient> target_client_;
@@ -241,14 +241,14 @@ class WebRequestProxyingURLLoaderFactory
       WebRequestAPI::RequestIDGenerator* request_id_generator,
       std::unique_ptr<ExtensionNavigationUIData> navigation_ui_data,
       base::Optional<int64_t> navigation_id,
+      ukm::SourceIdObj ukm_source_id,
       mojo::PendingReceiver<network::mojom::URLLoaderFactory> loader_receiver,
       mojo::PendingRemote<network::mojom::URLLoaderFactory>
           target_factory_remote,
       mojo::PendingReceiver<network::mojom::TrustedURLLoaderHeaderClient>
           header_client_receiver,
       WebRequestAPI::ProxySet* proxies,
-      content::ContentBrowserClient::URLLoaderFactoryType loader_factory_type,
-      ukm::SourceId ukm_source_id);
+      content::ContentBrowserClient::URLLoaderFactoryType loader_factory_type);
 
   ~WebRequestProxyingURLLoaderFactory() override;
 
@@ -258,14 +258,14 @@ class WebRequestProxyingURLLoaderFactory
       WebRequestAPI::RequestIDGenerator* request_id_generator,
       std::unique_ptr<ExtensionNavigationUIData> navigation_ui_data,
       base::Optional<int64_t> navigation_id,
+      ukm::SourceIdObj ukm_source_id,
       mojo::PendingReceiver<network::mojom::URLLoaderFactory> loader_receiver,
       mojo::PendingRemote<network::mojom::URLLoaderFactory>
           target_factory_remote,
       mojo::PendingReceiver<network::mojom::TrustedURLLoaderHeaderClient>
           header_client_receiver,
       WebRequestAPI::ProxySet* proxies,
-      content::ContentBrowserClient::URLLoaderFactoryType loader_factory_type,
-      ukm::SourceId ukm_source_id);
+      content::ContentBrowserClient::URLLoaderFactoryType loader_factory_type);
 
   // network::mojom::URLLoaderFactory:
   void CreateLoaderAndStart(
@@ -325,9 +325,8 @@ class WebRequestProxyingURLLoaderFactory
 
   const content::ContentBrowserClient::URLLoaderFactoryType
       loader_factory_type_;
-  // A UKM source ID associated with the content::WebContents of the initiator
-  // frame.
-  const ukm::SourceId ukm_source_id_;
+  // A UKM source ID to attribute activity to.
+  ukm::SourceIdObj ukm_source_id_;
 
   // Mapping from our own internally generated request ID to an
   // InProgressRequest instance.

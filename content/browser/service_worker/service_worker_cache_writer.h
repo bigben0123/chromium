@@ -22,8 +22,6 @@
 
 namespace content {
 
-class ServiceWorkerResponseWriter;
-
 // This class is responsible for possibly updating the ServiceWorker script
 // cache for an installed ServiceWorker main script. If there is no existing
 // cache entry, this class always writes supplied data back to the cache; if
@@ -36,12 +34,6 @@ class ServiceWorkerResponseWriter;
 //
 // This class's behavior is modelled as a state machine; see the DoLoop function
 // for comments about this.
-//
-// Note that currently we have two types of interfaces to create an instance of
-// ServiceWorkerCacheWriter: storage service and non storage service.
-// After storage service is shipped, we use Mojo connection to read and write
-// the resource.
-// See https://crbug.com/1055677 for more info.
 class CONTENT_EXPORT ServiceWorkerCacheWriter {
  public:
   using OnWriteCompleteCallback = base::OnceCallback<void(net::Error)>;
@@ -72,12 +64,14 @@ class CONTENT_EXPORT ServiceWorkerCacheWriter {
   // script is read by |copy_reader|.
   static std::unique_ptr<ServiceWorkerCacheWriter> CreateForCopy(
       mojo::Remote<storage::mojom::ServiceWorkerResourceReader> copy_reader,
-      std::unique_ptr<ServiceWorkerResponseWriter> writer);
+      mojo::Remote<storage::mojom::ServiceWorkerResourceWriter> writer,
+      int64_t writer_resource_id);
 
   // Create a cache writer instance that unconditionally write back data
   // supplied to |MaybeWriteHeaders| and |MaybeWriteData| to storage.
   static std::unique_ptr<ServiceWorkerCacheWriter> CreateForWriteBack(
-      std::unique_ptr<ServiceWorkerResponseWriter> writer);
+      mojo::Remote<storage::mojom::ServiceWorkerResourceWriter> writer,
+      int64_t writer_resource_id);
 
   // Create a cache writer that compares between a script in storage and data
   // from network (supplied with |MaybeWriteHeaders| and |MaybeWriteData|).
@@ -92,7 +86,8 @@ class CONTENT_EXPORT ServiceWorkerCacheWriter {
   static std::unique_ptr<ServiceWorkerCacheWriter> CreateForComparison(
       mojo::Remote<storage::mojom::ServiceWorkerResourceReader> compare_reader,
       mojo::Remote<storage::mojom::ServiceWorkerResourceReader> copy_reader,
-      std::unique_ptr<ServiceWorkerResponseWriter> writer,
+      mojo::Remote<storage::mojom::ServiceWorkerResourceWriter> writer,
+      int64_t writer_resource_id,
       bool pause_when_not_identical);
 
   ~ServiceWorkerCacheWriter();
@@ -139,7 +134,7 @@ class CONTENT_EXPORT ServiceWorkerCacheWriter {
   bool IsCopying() const;
 
   // Returns the resource ID being written to storage.
-  int64_t WriterResourceId() const;
+  int64_t writer_resource_id() const;
 
   void set_write_observer(WriteObserver* write_observer) {
     write_observer_ = write_observer;
@@ -211,7 +206,8 @@ class CONTENT_EXPORT ServiceWorkerCacheWriter {
   ServiceWorkerCacheWriter(
       mojo::Remote<storage::mojom::ServiceWorkerResourceReader> compare_reader,
       mojo::Remote<storage::mojom::ServiceWorkerResourceReader> copy_reader,
-      std::unique_ptr<ServiceWorkerResponseWriter> writer,
+      mojo::Remote<storage::mojom::ServiceWorkerResourceWriter> writer,
+      int64_t writer_resource_id,
       bool pause_when_not_identical);
 
   // Drives this class's state machine. This function steps the state machine
@@ -263,11 +259,10 @@ class CONTENT_EXPORT ServiceWorkerCacheWriter {
   // If observer is set, the argument |response_info| or |data| is first sent
   // to observer then WriteResponseHeadToResponseWriter() or
   // WriteDataToResponseWriter() is called.
-  int WriteResponseHead(const network::mojom::URLResponseHead& response_head);
+  int WriteResponseHead(network::mojom::URLResponseHeadPtr response_head);
   int WriteData(scoped_refptr<net::IOBuffer> data, int length);
   int WriteResponseHeadToResponseWriter(
-      const network::mojom::URLResponseHead& response_head,
-      int response_data_size);
+      network::mojom::URLResponseHeadPtr response_head);
   int WriteDataToResponseWriter(scoped_refptr<net::IOBuffer> data, int length);
 
   // Called when |write_observer_| finishes its WillWriteData() operation.
@@ -310,6 +305,10 @@ class CONTENT_EXPORT ServiceWorkerCacheWriter {
   // fragments of the buffered network data.
   size_t bytes_compared_;
 
+  // The total size of the body for copying. Used only when IsCopying() returns
+  // true.
+  size_t bytes_to_copy_ = 0;
+
   // Count of bytes copied from |copy_reader_| to |writer_|.
   size_t bytes_copied_;
 
@@ -330,7 +329,10 @@ class CONTENT_EXPORT ServiceWorkerCacheWriter {
   mojo::Remote<storage::mojom::ServiceWorkerResourceReader> copy_reader_;
   std::unique_ptr<DataPipeReader> copy_data_pipe_reader_;
 
-  std::unique_ptr<ServiceWorkerResponseWriter> writer_;
+  mojo::Remote<storage::mojom::ServiceWorkerResourceWriter> writer_;
+  const int64_t writer_resource_id_ =
+      blink::mojom::kInvalidServiceWorkerResourceId;
+
   base::WeakPtrFactory<ServiceWorkerCacheWriter> weak_factory_{this};
 };
 

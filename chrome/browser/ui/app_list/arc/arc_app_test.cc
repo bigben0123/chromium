@@ -20,7 +20,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs_factory.h"
-#include "chrome/common/chrome_features.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/arc/arc_service_manager.h"
 #include "components/arc/arc_util.h"
@@ -166,6 +165,12 @@ void ArcAppTest::CreateFakeAppsAndPackages() {
   app.name = "TestApp2";
   app.package_name = "test.app2";
   app.activity = "test.app2.activity";
+  app.sticky = true;
+  fake_default_apps_.push_back(app);
+
+  app.name = "TestApp3";
+  app.package_name = "test.app3";
+  app.activity = "test.app3.activity";
   app.sticky = true;
   fake_default_apps_.push_back(app);
 

@@ -27,8 +27,6 @@ class GamepadSharedMemoryReader;
 class GamepadDispatcher final : public GarbageCollected<GamepadDispatcher>,
                                 public PlatformEventDispatcher,
                                 public GamepadListener {
-  USING_GARBAGE_COLLECTED_MIXIN(GamepadDispatcher);
-
  public:
   explicit GamepadDispatcher(ExecutionContext& context);
   ~GamepadDispatcher() override;
@@ -55,7 +53,7 @@ class GamepadDispatcher final : public GarbageCollected<GamepadDispatcher>,
   void ButtonOrAxisDidChange(uint32_t index, const device::Gamepad&) override;
 
   // PlatformEventDispatcher
-  void StartListening(LocalFrame* frame) override;
+  void StartListening(LocalDOMWindow*) override;
   void StopListening() override;
 
   void DispatchDidConnectOrDisconnectGamepad(uint32_t index,

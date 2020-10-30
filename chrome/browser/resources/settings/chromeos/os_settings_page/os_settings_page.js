@@ -87,6 +87,16 @@ Polymer({
       computed: 'computeShowSecondaryUserBanner_(hasExpandedSection_)',
     },
 
+    /**
+     * Whether to show banner indicating the user to return this device as an
+     * update is required as per policy but the device has reached end of life.
+     * @private
+     */
+    showUpdateRequiredEolBanner_: {
+      type: Boolean,
+      value: !!loadTimeData.getString('updateRequiredEolBannerText'),
+    },
+
     /** @private {!settings.Route|undefined} */
     currentRoute_: Object,
   },
@@ -132,7 +142,7 @@ Polymer({
     if (oldRoute && oldRoute.isSubpage()) {
       // If the new route isn't the same expanded section, reset
       // hasExpandedSection_ for the next transition.
-      if (!newRoute.isSubpage() || newRoute.section != oldRoute.section) {
+      if (!newRoute.isSubpage() || newRoute.section !== oldRoute.section) {
         this.hasExpandedSection_ = false;
       }
     } else {
@@ -201,11 +211,28 @@ Polymer({
   },
 
   /**
+   * @return {boolean}
+   * @private
+   */
+  computeShowUpdateRequiredEolBanner_() {
+    return !this.hasExpandedSection_ && this.showUpdateRequiredEolBanner_;
+  },
+
+  /**
    * @param {!AndroidAppsInfo} info
    * @private
    */
   androidAppsInfoUpdate_(info) {
     this.androidAppsInfo = info;
+  },
+
+  /**
+   * Hides the update required EOL banner. It is shown again when Settings is
+   * re-opened.
+   * @private
+   */
+  onCloseEolBannerClicked_() {
+    this.showUpdateRequiredEolBanner_ = false;
   },
 
   /**

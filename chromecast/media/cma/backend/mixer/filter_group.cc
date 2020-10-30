@@ -11,6 +11,7 @@
 #include "base/numerics/ranges.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "chromecast/media/audio/audio_log.h"
 #include "chromecast/media/audio/interleaved_channel_mixer.h"
 #include "chromecast/media/cma/backend/mixer/channel_layout.h"
 #include "chromecast/media/cma/backend/mixer/mixer_input.h"
@@ -111,7 +112,7 @@ void FilterGroup::Initialize(const AudioPostProcessor2::Config& output_config) {
   // Run a buffer of 0's to initialize rendering delay.
   std::fill_n(interleaved_.data(), interleaved_.size(), 0.0f);
   delay_seconds_ = post_processing_pipeline_->ProcessFrames(
-      interleaved_.data(), input_frames_per_write_, last_volume_,
+      interleaved_.data(), input_frames_per_write_, last_volume_, last_volume_,
       true /* is_silence */);
 }
 
@@ -124,15 +125,16 @@ void FilterGroup::ParseVolumeLimits(const base::Value* volume_limits) {
   // Get default limits.
   if (ParseVolumeLimit(volume_limits, &default_volume_min_,
                        &default_volume_max_)) {
-    LOG(INFO) << "Default volume limits for '" << name_ << "' group: ["
-              << default_volume_min_ << ", " << default_volume_max_ << "]";
+    AUDIO_LOG(INFO) << "Default volume limits for '" << name_ << "' group: ["
+                    << default_volume_min_ << ", " << default_volume_max_
+                    << "]";
   }
 
   float min, max;
   for (const auto& item : volume_limits->DictItems()) {
     if (ParseVolumeLimit(&item.second, &min, &max)) {
-      LOG(INFO) << "Volume limits for device ID '" << item.first << "' = ["
-                << min << ", " << max << "]";
+      AUDIO_LOG(INFO) << "Volume limits for device ID '" << item.first
+                      << "' = [" << min << ", " << max << "]";
       volume_limits_.insert({item.first, {min, max}});
     }
   }
@@ -161,6 +163,7 @@ float FilterGroup::MixAndFilter(
   DCHECK_EQ(num_output_frames, output_config_.output_frames_per_write);
 
   float volume = 0.0f;
+  float target_volume = 0.0f;
   AudioContentType content_type = static_cast<AudioContentType>(-1);
 
   rendering_delay.delay_microseconds += GetRenderingDelayMicroseconds();
@@ -170,6 +173,8 @@ float FilterGroup::MixAndFilter(
   for (const auto& filter_group : mixed_inputs_) {
     volume = std::max(volume, filter_group.group->MixAndFilter(
                                   input_frames_per_write_, rendering_delay));
+    target_volume =
+        std::max(target_volume, filter_group.group->target_volume());
     content_type = std::max(content_type, filter_group.group->content_type());
   }
 
@@ -201,6 +206,7 @@ float FilterGroup::MixAndFilter(
       }
 
       volume = std::max(volume, input->InstantaneousVolume());
+      target_volume = std::max(volume, input->TargetVolume());
       content_type = std::max(content_type, input->content_type());
     }
   }
@@ -231,6 +237,7 @@ float FilterGroup::MixAndFilter(
   bool is_silence = (volume == 0.0f);
   if (!is_silence) {
     last_volume_ = volume;
+    target_volume_ = target_volume;
     DCHECK_NE(-1, static_cast<int>(content_type))
         << "Got frames without content type.";
     if (content_type != content_type_) {
@@ -240,7 +247,8 @@ float FilterGroup::MixAndFilter(
   }
 
   delay_seconds_ = post_processing_pipeline_->ProcessFrames(
-      interleaved_.data(), input_frames_per_write_, last_volume_, is_silence);
+      interleaved_.data(), input_frames_per_write_, last_volume_,
+      target_volume_, is_silence);
   return last_volume_;
 }
 
@@ -290,8 +298,8 @@ void FilterGroup::SetPostProcessorConfig(const std::string& name,
 
 void FilterGroup::UpdatePlayoutChannel(int playout_channel) {
   if (playout_channel >= num_channels_) {
-    LOG(ERROR) << "only " << num_channels_ << " present, wanted channel #"
-               << playout_channel;
+    AUDIO_LOG(ERROR) << "only " << num_channels_ << " present, wanted channel #"
+                     << playout_channel;
     return;
   }
   post_processing_pipeline_->UpdatePlayoutChannel(playout_channel);

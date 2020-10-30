@@ -20,7 +20,6 @@
 #error "This file requires ARC support."
 #endif
 
-#if defined(CHROME_EARL_GREY_2)
 // TODO(crbug.com/1015113): The EG2 macro is breaking indexing for some reason
 // without the trailing semicolon.  For now, disable the extra semi warning
 // so Xcode indexing works for the egtest.
@@ -28,9 +27,9 @@
 #pragma clang diagnostic ignored "-Wc++98-compat-extra-semi"
 GREY_STUB_CLASS_IN_APP_MAIN_QUEUE(KeyboardObserverHelperAppInterface);
 #pragma clang diagnostic pop
-#endif  // defined(CHROME_EARL_GREY_2)
 
 using base::TimeDelta;
+using base::test::ios::kWaitForUIElementTimeout;
 using base::test::ios::SpinRunLoopWithMinDelay;
 using base::test::ios::WaitUntilConditionOrTimeout;
 using chrome_test_util::TapWebElementWithId;
@@ -100,16 +99,12 @@ void TapOnWebElementWithID(const std::string& elementID) {
 
 // Tests that when the keyboard actually dismiss the right callback is done.
 - (void)testKeyboardHideState {
-  // TODO(crbug.com/1099435): Test fails on iOS 13 when rolling EG2 version.
-  if ([ChromeEarlGrey isIPadIdiom] && base::ios::IsRunningOnOrLater(13, 0, 0)) {
-    EARL_GREY_TEST_DISABLED(@"Fails in iOS 13 on iPads.");
-  }
   // Opening the keyboard from a webview blocks EarlGrey's synchronization.
   ScopedSynchronizationDisabler disabler;
 
   // Brings up the keyboard by tapping on one of the form's field.
   TapOnWebElementWithID(kFormElementID1);
-  SpinRunLoopWithMinDelay(TimeDelta::FromSeconds(1));
+  SpinRunLoopWithMinDelay(TimeDelta::FromSeconds(kWaitForUIElementTimeout));
 
   // Verifies that the taped element is focused.
   AssertElementIsFocused(kFormElementID1);
@@ -121,7 +116,7 @@ void TapOnWebElementWithID(const std::string& elementID) {
 
   // Tap the "Submit" button, and let the run loop spin.
   TapOnWebElementWithID(kFormElementSubmit);
-  SpinRunLoopWithMinDelay(TimeDelta::FromSeconds(1));
+  SpinRunLoopWithMinDelay(TimeDelta::FromSeconds(kWaitForUIElementTimeout));
 
   // Verify the state changed.
   GREYAssertFalse(observer.keyboardState.isVisible,

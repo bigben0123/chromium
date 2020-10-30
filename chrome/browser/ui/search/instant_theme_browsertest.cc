@@ -11,7 +11,6 @@
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/search/instant_service_observer.h"
-#include "chrome/browser/search/ntp_features.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -24,6 +23,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/search/ntp_features.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
@@ -272,7 +272,7 @@ IN_PROC_BROWSER_TEST_F(InstantThemeTest, ThemeAppliedToNewTab) {
 }
 
 // The test is flaky on linux asan. crbug.com/1045708.
-#if defined(OS_LINUX) && defined(ADDRESS_SANITIZER)
+#if (defined(OS_LINUX) || defined(OS_CHROMEOS)) && defined(ADDRESS_SANITIZER)
 #define MAYBE_ThemeChangedWhenApplyingNewTheme \
   DISABLED_ThemeChangedWhenApplyingNewTheme
 #else

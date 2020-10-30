@@ -6,7 +6,7 @@ for the Chromium project. This checklist is designed to be streamlined. See
 [contributing to Chromium][contributing] for a more thorough reference. The
 intended audience is software engineers who are unfamiliar with contributing to
 the Chromium project. Feel free to skip steps that are not applicable to the
-patch set you're currently uploading.
+patchset you're currently uploading.
 
 According to the Checklist Manifesto by Atul Gawande, checklists are a marvelous
 tool for ensuring consistent quality in the work you produce. Checklists also
@@ -48,6 +48,9 @@ your downstream branch, you need to:
 *   Run `git rebase -i @{u}` again to rebase the downstream changes onto the
     upstream branch.
 
+Expect to fix numerous merge conflicts. Use `git rebase --continue` once you're
+done.
+
 ## 3. Make your changes
 
 Do your thing. There's no further advice here about how to write or fix code.
@@ -60,6 +63,9 @@ After making your changes, check that common targets build correctly:
 *   unit_tests
 *   browser_tests
 
+You can find [instructions here][build-instructions] for building various
+targets.
+
 It's easy to inadvertently break one of the other builds you're not currently
 working on without realizing it. Even though the Commit Queue should catch any
 build errors, checking locally first can save you some time since the CQ Dry Run
@@ -67,10 +73,18 @@ can take a while to run, on the order of a few hours sometimes.
 
 ## 5. Test your changes
 
-Test your changes manually by running the X11 simulator or deploying your
-changes to a test device. Follow the [Simple Chrome][simple-chrome] instructions
-to deploy your changes to a test device. Make sure you hit every code path you
-changed.
+Test your changes manually by running the Chrome binary or deploying your
+changes to a test device. If you're testing Chrome for ChromeOS, follow the
+[Simple Chrome][simple-chrome] instructions to deploy your changes to a test
+device. Make sure you hit every code path you changed.
+
+Think about testing any edge cases that could break your code. Some common edge
+cases to consider:
+
+*   Guest mode
+*   Enterprise/EDU/Supervised users
+*   Accessibility
+*   Official Chrome-branded build (for Googlers)
 
 ## 6. Write unit or browser tests for any new code
 
@@ -98,7 +112,7 @@ to specifically `git add` the files you want to commit before calling
 
 Run `git commit`. Be sure to write a useful commit message. Here are some
 [tips for writing good commit messages][uploading-a-change-for-review]. A
-shortcut for combining steps the previous step and this one is `git commit -a -m
+shortcut for combining the previous step and this one is `git commit -a -m
 <commit_message>`.
 
 ## 11. Squash your commits
@@ -127,23 +141,36 @@ with that branch has been merged. In summary, `git rebase-update` cleans up your
 local branches.
 
 You may run into rebase conflicts. Fix them manually before proceeding with
-`git rebase --continue`. Note that rebasing has the potential to break your
-build, so you might want to try re-building afterwards.
+`git rebase --continue`.
+
+Note that rebasing has the potential to break your build, so you might want to
+try re-building afterwards. You need to run `gclient sync -D` before trying to
+build again after a rebase-update, to update third-party dependencies.
 
 ## 13. Upload the CL to Gerrit
 
 Run `git cl upload`. Some useful options include:
 
-*   `--cq-dry-run` (or `-d`) will set the patchset to do a CQ Dry Run.
+*   `--cq-dry-run` (or `-d`) will set the patchset to do a CQ Dry Run. It is a
+    good idea to run try jobs for each new patchset with significant changes.
 *   `-r <chromium_username>` will add reviewers.
 *   `-b <bug_number>` automatically populates the bug reference line of the
-    commit message.
-*   `--edit-description` will let you update the commit message.
+    commit message. Use `-b None` is there is no relevant crbug.
+*   `--edit-description` will let you update the commit message. Using square
+    brackets in the commit message title, like [hashtag], will add a hashtag to
+    your CL. This feature is useful for grouping related CLs together.
+
+To help guide your reviewers, it is also recommended to provide a title for each
+patchset summarizing the changes and indicating whose comments the patchset
+addresses. Running `git cl upload` will upload a new patchset and prompt you for
+a brief patchset title. The title defaults to your most recent commit summary,
+so if you tend to squash all your commits into one, try to enter a new summary
+each time you upload. You can also modify the patchset title directly in Gerrit.
 
 ## 14. Check the CL again in Gerrit
 
 Run `git cl web` to go to the Gerrit URL associated with the current branch.
-Open the latest patch set and verify that all of the uploaded files are correct.
+Open the latest patchset and verify that all of the uploaded files are correct.
 Click `Expand All` to check over all of the individual line-by-line changes
 again. Basically do a self-review before asking your reviewers for a review.
 
@@ -172,14 +199,28 @@ receive a notification. Doing this signals that your CL is ready for review
 again, since the assumption is that your CL is not ready for review until you
 hit reply.
 
+If your change is simple and you feel confident that your reviewer will approve
+your CL on the next iteration, you can set Auto-Submit +1. The CL will proceed
+to the next step automatically after approval. This feature is useful if your
+reviewer is in a different time zone and you want to land the CL sooner. Setting
+this flag also puts the onus on your reviewer to land the CL.
+
 ## 18. Land your CL
 
 Once you have obtained a Looks Good To Me (LGTM), which is reflected by a
 Code-Review+1 in Gerrit, from at least one owner for each file, then you have
 the minimum prerequisite to land your changes. It may be helpful to wait for all
 of your reviewers to approve your changes as well, even if they're not owners.
-Click `Submit to CQ` to try your change in the commit queue (CQ), which will
-land it if successful.
+Don't use `chrome/OWNERS` as a blanket stamp if your CL makes significant
+changes to subsystems. Click `Submit to CQ` to try your change in the commit
+queue (CQ), which will land it if successful.
+
+Just because your CL made it through the CQ doesn't mean you're in the clear
+yet. There might be internal non-public try job failures, or bugs that went
+unnoticed during the code review process. Consider monitoring the
+[Chromium tree][chromium-tree] for about a day after your CL lands. If
+the Sheriff or anyone else brings any failures to your attention, revert the CL
+first and ask questions later. Gerrit can automatically generate revert CLs.
 
 ## 19. Cleanup
 
@@ -188,6 +229,8 @@ clean up your local branches. These commands will automatically delete merged
 branches. Mark the associated crbug as "fixed".
 
 [//]: # (the reference link section should be alphabetically sorted)
+[build-instructions]: https://chromium.googlesource.com/chromium/src.git/+/master/docs/#Checking-Out-and-Building
+[chromium-tree]: https://ci.chromium.org/p/chromium/g/main/console
 [contributing]: contributing.md
 [simple-chrome]: https://chromium.googlesource.com/chromiumos/docs/+/master/simple_chrome_workflow.md
 [uploading-a-change-for-review]: contributing.md#Uploading-a-change-for-review

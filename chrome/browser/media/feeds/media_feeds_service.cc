@@ -9,6 +9,7 @@
 #include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/optional.h"
+#include "base/task/post_task.h"
 #include "base/task/task_traits.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/clock.h"
@@ -22,6 +23,7 @@
 #include "chrome/browser/media/feeds/media_feeds_store.mojom.h"
 #include "chrome/browser/media/history/media_history_keyed_service.h"
 #include "chrome/browser/media/history/media_history_keyed_service_factory.h"
+#include "chrome/browser/media/kaleidoscope/kaleidoscope_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -77,6 +79,7 @@ class CookieChangeListener : public network::mojom::CookieChangeListener {
     DCHECK(profile);
     DCHECK(!profile->IsOffTheRecord());
     DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
     MaybeStartListening();
   }
 
@@ -135,6 +138,9 @@ class CookieChangeListener : public network::mojom::CookieChangeListener {
 
 }  // namespace
 
+const char MediaFeedsService::kAggregateWatchtimeHistogramName[] =
+    "Media.Feeds.AggregateWatchtime";
+
 const char MediaFeedsService::kSafeSearchResultHistogramName[] =
     "Media.Feeds.SafeSearch.Result";
 
@@ -154,12 +160,7 @@ constexpr base::TimeDelta kTopFeedsMinWatchTime =
     base::TimeDelta::FromMinutes(30);
 
 MediaFeedsService::MediaFeedsService(Profile* profile)
-    : cookie_change_listener_(std::make_unique<CookieChangeListener>(
-          profile,
-          base::BindRepeating(&MediaFeedsService::OnResetOriginFromCookie,
-                              base::Unretained(this)))),
-      profile_(profile),
-      clock_(base::DefaultClock::GetInstance()) {
+    : profile_(profile), clock_(base::DefaultClock::GetInstance()) {
   DCHECK(!profile->IsOffTheRecord());
 
   pref_change_registrar_.Init(profile_->GetPrefs());
@@ -178,6 +179,20 @@ MediaFeedsService::MediaFeedsService(Profile* profile)
         base::BindOnce(&MediaFeedsService::FetchTopMediaFeeds,
                        weak_factory_.GetWeakPtr(), base::OnceClosure()));
   }
+
+  // Wrapping in PostTask is needed to avoid a crash in the tests.
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                 base::BindOnce(&MediaFeedsService::RecordFeedWatchtimes,
+                                weak_factory_.GetWeakPtr()));
+}
+
+void MediaFeedsService::RecordFeedWatchtimes() {
+  GetMediaHistoryService()->GetMediaFeeds(
+      media_history::MediaHistoryKeyedService::GetMediaFeedsRequest::
+          CreateTopFeedsForFetch(std::numeric_limits<unsigned>::max(),
+                                 base::TimeDelta()),
+      base::BindOnce(&MediaFeedsService::OnGotFeedsForMetrics,
+                     weak_factory_.GetWeakPtr()));
 }
 
 // static
@@ -358,11 +373,23 @@ void MediaFeedsService::FetchTopMediaFeeds(base::OnceClosure callback) {
   if (!IsBackgroundFetchingEnabled())
     return;
 
-  GetMediaHistoryService()->GetMediaFeeds(
-      media_history::MediaHistoryKeyedService::GetMediaFeedsRequest::
-          CreateTopFeedsForFetch(kMaxTopFeedsToFetch, kTopFeedsMinWatchTime),
-      base::BindOnce(&MediaFeedsService::OnGotTopFeeds,
-                     weak_factory_.GetWeakPtr(), std::move(callback)));
+  // If the user has opted into auto selection of media feeds then we should get
+  // the top media feeds based on heuristics. Otherwise, we should fallback to
+  // feeds the user has opted into.
+  if (profile_->GetPrefs()->GetBoolean(
+          kaleidoscope::prefs::kKaleidoscopeAutoSelectMediaFeeds)) {
+    GetMediaHistoryService()->GetMediaFeeds(
+        media_history::MediaHistoryKeyedService::GetMediaFeedsRequest::
+            CreateTopFeedsForFetch(kMaxTopFeedsToFetch, kTopFeedsMinWatchTime),
+        base::BindOnce(&MediaFeedsService::OnGotTopFeeds,
+                       weak_factory_.GetWeakPtr(), std::move(callback)));
+  } else {
+    GetMediaHistoryService()->GetMediaFeeds(
+        media_history::MediaHistoryKeyedService::GetMediaFeedsRequest::
+            CreateSelectedFeedsForFetch(),
+        base::BindOnce(&MediaFeedsService::OnGotTopFeeds,
+                       weak_factory_.GetWeakPtr(), std::move(callback)));
+  }
 }
 
 void MediaFeedsService::OnGotTopFeeds(
@@ -657,6 +684,24 @@ void MediaFeedsService::OnDiscoveredFeed() {
   GetMediaHistoryService()->GetPendingSafeSearchCheckMediaFeedItems(
       base::BindOnce(&MediaFeedsService::CheckItemsAgainstSafeSearch,
                      weak_factory_.GetWeakPtr()));
+}
+
+void MediaFeedsService::EnsureCookieObserver() {
+  if (cookie_change_listener_)
+    return;
+
+  cookie_change_listener_ = std::make_unique<CookieChangeListener>(
+      profile_, base::BindRepeating(&MediaFeedsService::OnResetOriginFromCookie,
+                                    base::Unretained(this)));
+}
+
+void MediaFeedsService::OnGotFeedsForMetrics(
+    std::vector<media_feeds::mojom::MediaFeedPtr> feeds) {
+  for (const auto& feed : feeds) {
+    base::UmaHistogramCustomTimes(kAggregateWatchtimeHistogramName,
+                                  *feed->aggregate_watchtime, base::TimeDelta(),
+                                  base::TimeDelta::FromHours(1), 60);
+  }
 }
 
 }  // namespace media_feeds

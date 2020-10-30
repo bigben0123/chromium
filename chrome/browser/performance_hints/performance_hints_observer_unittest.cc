@@ -14,6 +14,7 @@
 #include "base/test/scoped_feature_list.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
+#include "chrome/browser/performance_hints/performance_hints_features.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/optimization_guide/optimization_guide_features.h"
@@ -31,6 +32,7 @@ using testing::NotNull;
 using testing::Return;
 using testing::SetArgPointee;
 
+namespace performance_hints {
 namespace {
 const char kTestUrl[] = "http://www.test.com/";
 }  // namespace
@@ -60,7 +62,7 @@ class PerformanceHintsObserverTest : public ChromeRenderViewHostTestHarness {
  public:
   PerformanceHintsObserverTest() {
     scoped_feature_list_.InitWithFeatures(
-        {kPerformanceHintsObserver,
+        {features::kPerformanceHintsObserver,
          // Need to enable kOptimizationHints or GetForProfile will return
          // nullptr.
          optimization_guide::features::kOptimizationHints},
@@ -367,7 +369,8 @@ class FastHostHintsDisabledPerformanceHintsObserverTest
  public:
   FastHostHintsDisabledPerformanceHintsObserverTest() {
     scoped_feature_list_.InitWithFeaturesAndParameters(
-        {{kPerformanceHintsObserver, {{"use_fast_host_hints", "false"}}},
+        {{features::kPerformanceHintsObserver,
+          {{"use_fast_host_hints", "false"}}},
          // Need to enable kOptimizationHints or GetForProfile will return
          // nullptr.
          {optimization_guide::features::kOptimizationHints, {}}},
@@ -512,11 +515,11 @@ class RewritesDisabledPerformanceHintsObserverTest
  public:
   RewritesDisabledPerformanceHintsObserverTest() {
     scoped_feature_list_.InitWithFeatures(
-        {kPerformanceHintsObserver,
+        {features::kPerformanceHintsObserver,
          // Need to enable kOptimizationHints or GetForProfile will return
          // nullptr.
          optimization_guide::features::kOptimizationHints},
-        {kPerformanceHintsHandleRewrites});
+        {features::kPerformanceHintsHandleRewrites});
   }
 
   base::test::ScopedFeatureList scoped_feature_list_;
@@ -771,7 +774,8 @@ class OverrideUnknownPerformanceHintsObserverTest
  public:
   OverrideUnknownPerformanceHintsObserverTest() {
     scoped_feature_list_.InitWithFeatures(
-        {kPerformanceHintsObserver, kPerformanceHintsTreatUnknownAsFast,
+        {features::kPerformanceHintsObserver,
+         features::kPerformanceHintsTreatUnknownAsFast,
          // Need to enable kOptimizationHints or GetForProfile will return
          // nullptr.
          optimization_guide::features::kOptimizationHints},
@@ -850,3 +854,5 @@ TEST_F(OverrideUnknownPerformanceHintsObserverTest, HintFetchingNotEnabled) {
                   /*record_metrics=*/true),
               Eq(optimization_guide::proto::PERFORMANCE_UNKNOWN));
 }
+
+}  // namespace performance_hints

@@ -32,14 +32,18 @@ public class ContextualSearchTranslationImpl implements ContextualSearchTranslat
 
     @Override
     public void forceTranslateIfNeeded(
-            ContextualSearchRequest searchRequest, String sourceLanguage) {
+            ContextualSearchRequest searchRequest, String sourceLanguage, boolean isTapSelection) {
         if (needsTranslation(sourceLanguage)) {
+            ContextualSearchUma.logTranslationNeeded(isTapSelection);
             searchRequest.forceTranslation(sourceLanguage, getTranslateServiceTargetLanguage());
         }
     }
 
     @Override
     public void forceAutoDetectTranslateUnlessDisabled(ContextualSearchRequest searchRequest) {
+        // TODO(donnd): Consider only forcing the auto-detect translation when we've detected a
+        // language mismatch. Due to probable poor language recognition on the selection (without
+        // any page content) we currently enable which relies on the server and search to decide.
         searchRequest.forceAutoDetectTranslation(getTranslateServiceTargetLanguage());
     }
 

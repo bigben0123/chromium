@@ -108,7 +108,7 @@ if (use_aura) {
 aggregate_vector_icons("media_controls_vector_icons") {
   icon_directory = "vector_icons"
 
-  icons = [
+  sources = [
     "back30.icon",
     "forward30.icon",
     "next.icon",

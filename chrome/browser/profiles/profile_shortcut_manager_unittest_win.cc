@@ -126,7 +126,7 @@ class ProfileShortcutManagerTest : public testing::Test {
     ShellUtil::AddDefaultShortcutProperties(chrome_exe, &properties);
 
     properties.set_app_id(
-        shell_integration::win::GetChromiumModelIdForProfile(profile_1_path_));
+        shell_integration::win::GetAppUserModelIdForBrowser(profile_1_path_));
 
     const base::FilePath shortcut_path(
         profiles::internal::GetShortcutFilenameForProfile(L""));
@@ -192,7 +192,7 @@ class ProfileShortcutManagerTest : public testing::Test {
 
     base::win::ShortcutProperties expected_properties;
     expected_properties.set_app_id(
-        shell_integration::win::GetChromiumModelIdForProfile(profile_path));
+        shell_integration::win::GetAppUserModelIdForBrowser(profile_path));
     expected_properties.set_target(GetExePath());
     expected_properties.set_description(InstallUtil::GetAppDescription());
     expected_properties.set_dual_mode(false);
@@ -395,6 +395,21 @@ TEST_F(ProfileShortcutManagerTest, ShortcutFlags) {
       profile_manager_->profiles_dir().Append(kProfileName);
   EXPECT_EQ(L"--profile-directory=\"" + kProfileName + L"\"",
             profiles::internal::CreateProfileShortcutFlags(profile_path));
+}
+
+// Test ensures that the incognito switch and parent profile are added when
+// creating profile shortcut flags for incognito mode.
+TEST_F(ProfileShortcutManagerTest, IncognitoShortcutFlags) {
+  const base::string16 kProfileName = L"MyProfileX";
+  const base::FilePath profile_path =
+      profile_manager_->profiles_dir().Append(kProfileName);
+  const base::string16 shortcut_flags =
+      profiles::internal::CreateProfileShortcutFlags(profile_path,
+                                                     /*incognito=*/true);
+  EXPECT_NE(
+      shortcut_flags.find(L"--profile-directory=\"" + kProfileName + L"\""),
+      shortcut_flags.size());
+  EXPECT_NE(shortcut_flags.find(L"--incognito"), shortcut_flags.size());
 }
 
 TEST_F(ProfileShortcutManagerTest, DesktopShortcutsCreate) {

@@ -5,6 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_WIDGET_INPUT_MAIN_THREAD_EVENT_QUEUE_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WIDGET_INPUT_MAIN_THREAD_EVENT_QUEUE_H_
 
+#include <memory>
+
 #include "base/feature_list.h"
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
@@ -19,6 +21,10 @@
 #include "third_party/blink/renderer/platform/widget/input/main_thread_event_queue_task_list.h"
 #include "ui/latency/latency_info.h"
 
+namespace cc {
+class EventMetrics;
+}
+
 namespace blink {
 
 using HandledEventCallback =
@@ -31,10 +37,13 @@ using HandledEventCallback =
 // on the main thread.
 class PLATFORM_EXPORT MainThreadEventQueueClient {
  public:
-  // Handle an |event| that was previously queued (possibly coalesced with
-  // another event). Returns false if the event will not be handled, and the
-  // |handled_callback| will not be run.
+  // Handle an `event` that was previously queued (possibly coalesced with
+  // another event). `metrics` contains information that would be useful in
+  // reporting latency metrics in case the event causes an update. Returns false
+  // if the event will not be handled in which case the `handled_callback` will
+  // not be run.
   virtual bool HandleInputEvent(const WebCoalescedInputEvent& event,
+                                std::unique_ptr<cc::EventMetrics> metrics,
                                 HandledEventCallback handled_callback) = 0;
   // Requests a BeginMainFrame callback from the compositor.
   virtual void SetNeedsMainFrame() = 0;
@@ -94,6 +103,7 @@ class PLATFORM_EXPORT MainThreadEventQueue
                    DispatchType dispatch_type,
                    mojom::blink::InputEventResultState ack_result,
                    const WebInputEventAttribution& attribution,
+                   std::unique_ptr<cc::EventMetrics> metrics,
                    HandledEventCallback handled_callback);
   void DispatchRafAlignedInput(base::TimeTicks frame_time);
   void QueueClosure(base::OnceClosure closure);
@@ -131,6 +141,7 @@ class PLATFORM_EXPORT MainThreadEventQueue
   // will not be run.
   bool HandleEventOnMainThread(const WebCoalescedInputEvent& event,
                                const WebInputEventAttribution& attribution,
+                               std::unique_ptr<cc::EventMetrics> metrics,
                                HandledEventCallback handled_callback);
 
   bool IsRawUpdateEvent(
@@ -141,9 +152,7 @@ class PLATFORM_EXPORT MainThreadEventQueue
       const std::unique_ptr<MainThreadEventQueueTask>& item) const;
   void RafFallbackTimerFired();
 
-  void set_use_raf_fallback_timer(bool use_timer) {
-    use_raf_fallback_timer_ = use_timer;
-  }
+  void ClearRafFallbackTimerForTesting();
 
   friend class QueuedWebInputEvent;
   friend class MainThreadEventQueueTest;
@@ -175,8 +184,10 @@ class PLATFORM_EXPORT MainThreadEventQueue
 
   scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
   scheduler::WebThreadScheduler* main_thread_scheduler_;
-  base::OneShotTimer raf_fallback_timer_;
-  bool use_raf_fallback_timer_;
+
+  // A safe guard timer to ensure input is always processed. A BeginMainFrame
+  // signal might not always occur if our visibility changed.
+  std::unique_ptr<base::OneShotTimer> raf_fallback_timer_;
 
   std::unique_ptr<InputEventPrediction> event_predictor_;
 

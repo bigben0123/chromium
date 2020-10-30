@@ -21,13 +21,13 @@ import org.hamcrest.Matchers;
 import org.junit.Assert;
 
 import org.chromium.base.test.util.CallbackHelper;
+import org.chromium.base.test.util.CriteriaNotSatisfiedException;
 import org.chromium.content.browser.ViewEventSinkImpl;
 import org.chromium.content.browser.selection.SelectionPopupControllerImpl;
 import org.chromium.content.browser.webcontents.WebContentsImpl;
 import org.chromium.content_public.browser.ImeAdapter;
 import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
-import org.chromium.content_public.browser.test.util.CriteriaNotSatisfiedException;
 import org.chromium.content_public.browser.test.util.DOMUtils;
 import org.chromium.content_public.browser.test.util.JavaScriptUtils;
 import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer;
@@ -56,6 +56,8 @@ class ImeActivityTestRule extends ContentShellActivityTestRule {
     static final String PASSWORD_FORM_HTML = "content/test/data/android/input/password_form.html";
     static final String INPUT_MODE_HTML = "content/test/data/android/input/input_mode.html";
     static final String INPUT_ACTION_HTML = "content/test/data/android/input/input_action.html";
+    static final String INPUT_VK_API_HTML =
+            "content/test/data/android/input/virtual_keyboard_api.html";
 
     private SelectionPopupControllerImpl mSelectionPopupController;
     private TestCallbackHelperContainer mCallbackContainer;
@@ -251,6 +253,10 @@ class ImeActivityTestRule extends ContentShellActivityTestRule {
                 + ", input action history: " + Arrays.deepToString(inputActionHistory);
     }
 
+    String[] getLastTextHistory() {
+        return mConnectionFactory.getTextInputLastTextHistory();
+    }
+
     void waitForEditorAction(final int expectedAction) {
         CriteriaHelper.pollUiThread(() -> {
             EditorInfo editorInfo = mConnectionFactory.getOutAttrs();
@@ -304,6 +310,11 @@ class ImeActivityTestRule extends ContentShellActivityTestRule {
             Criteria.checkThat(
                     mSelectionPopupController.isSelectActionBarShowing(), Matchers.is(show));
         });
+    }
+
+    void verifyNoUpdateSelection() {
+        final List<Pair<Range, Range>> states = mInputMethodManagerWrapper.getUpdateSelectionList();
+        Assert.assertEquals(0, states.size());
     }
 
     void waitAndVerifyUpdateSelection(final int index, final int selectionStart,
@@ -590,6 +601,7 @@ class ImeActivityTestRule extends ContentShellActivityTestRule {
         private final List<Integer> mTextInputTypeList = new ArrayList<>();
         private final List<Integer> mTextInputModeList = new ArrayList<>();
         private final List<Integer> mTextInputActionList = new ArrayList<>();
+        private final List<String> mTextInputLastTextList = new ArrayList<>();
         private EditorInfo mOutAttrs;
 
         public TestInputConnectionFactory(ChromiumBaseInputConnection.Factory factory) {
@@ -599,13 +611,14 @@ class ImeActivityTestRule extends ContentShellActivityTestRule {
         @Override
         public ChromiumBaseInputConnection initializeAndGet(View view, ImeAdapterImpl imeAdapter,
                 int inputType, int inputFlags, int inputMode, int inputAction, int selectionStart,
-                int selectionEnd, EditorInfo outAttrs) {
+                int selectionEnd, String lastText, EditorInfo outAttrs) {
             mTextInputTypeList.add(inputType);
             mTextInputModeList.add(inputMode);
             mTextInputActionList.add(inputAction);
+            mTextInputLastTextList.add(lastText);
             mOutAttrs = outAttrs;
             return mFactory.initializeAndGet(view, imeAdapter, inputType, inputFlags, inputMode,
-                    inputAction, selectionStart, selectionEnd, outAttrs);
+                    inputAction, selectionStart, selectionEnd, lastText, outAttrs);
         }
 
         @Override
@@ -623,6 +636,7 @@ class ImeActivityTestRule extends ContentShellActivityTestRule {
             mTextInputTypeList.clear();
             mTextInputModeList.clear();
             mTextInputActionList.clear();
+            mTextInputLastTextList.clear();
         }
 
         public Integer[] getTextInputModeHistory() {
@@ -634,6 +648,12 @@ class ImeActivityTestRule extends ContentShellActivityTestRule {
         public Integer[] getTextInputActionHistory() {
             Integer[] result = new Integer[mTextInputActionList.size()];
             mTextInputActionList.toArray(result);
+            return result;
+        }
+
+        public String[] getTextInputLastTextHistory() {
+            String[] result = new String[mTextInputLastTextList.size()];
+            mTextInputLastTextList.toArray(result);
             return result;
         }
 

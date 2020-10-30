@@ -7,8 +7,8 @@
 #include "base/bind_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "build/buildflag.h"
 #include "chromeos/services/ime/constants.h"
+#include "chromeos/services/ime/ime_decoder.h"
 #include "chromeos/services/ime/public/cpp/buildflags.h"
 
 namespace chromeos {
@@ -16,19 +16,12 @@ namespace ime {
 
 namespace {
 
-// Whether to create a fake main entry.
-bool g_fake_main_entry_for_testing = false;
-
-#if BUILDFLAG(ENABLE_CROS_IME_SANITY_TEST_SO)
-// This is for development purposes only.
-const char kDecoderLibName[] = "imesanitytest";
-#else
-const char kDecoderLibName[] = "imedecoder";
-#endif
-
-// A client delegate that makes calls on client side.
+// A client delegate passed to the shared library in order for the
+// shared library to send replies back to the engine.
 class ClientDelegate : public ImeClientDelegate {
  public:
+  // All replies from the shared library will be sent to both |remote| and
+  // |callback|.
   ClientDelegate(const std::string& ime_spec,
                  mojo::PendingRemote<mojom::InputChannel> remote)
       : ime_spec_(ime_spec), client_remote_(std::move(remote)) {
@@ -64,17 +57,9 @@ class ClientDelegate : public ImeClientDelegate {
 
 }  // namespace
 
-void FakeEngineMainEntryForTesting() {
-  g_fake_main_entry_for_testing = true;
-}
-
 DecoderEngine::DecoderEngine(ImeCrosPlatform* platform) : platform_(platform) {
-  if (g_fake_main_entry_for_testing) {
-    // TODO(b/156897880): Impl the fake main entry.
-  } else {
-    if (!TryLoadDecoder()) {
-      LOG(ERROR) << "DecoderEngine INIT FAILED!";
-    }
+  if (!TryLoadDecoder()) {
+    LOG(WARNING) << "DecoderEngine INIT INCOMPLETED.";
   }
 }
 
@@ -84,25 +69,12 @@ bool DecoderEngine::TryLoadDecoder() {
   if (engine_main_entry_)
     return true;
 
-  // Load the decoder library.
-  base::FilePath lib_path(base::GetNativeLibraryName(kDecoderLibName));
-  library_ = base::ScopedNativeLibrary(lib_path);
-
-  if (!library_.is_valid()) {
-    LOG(ERROR) << "Failed to load decoder shared library from: " << lib_path
-               << ", error: " << library_.GetError()->ToString();
-    return false;
+  auto* decoder = ImeDecoder::GetInstance();
+  if (decoder->GetStatus() == ImeDecoder::Status::kSuccess) {
+    engine_main_entry_ = decoder->CreateMainEntry(platform_);
+    return true;
   }
-
-  // Prepare the decoder data directory before initialization.
-  base::FilePath data_dir(platform_->GetImeUserHomeDir());
-  base::CreateDirectory(data_dir.Append(kLanguageDataDirName));
-
-  ImeMainEntryCreateFn createMainEntryFn =
-      reinterpret_cast<ImeMainEntryCreateFn>(
-          library_.GetFunctionPointer(IME_MAIN_ENTRY_CREATE_FN_NAME));
-  engine_main_entry_ = createMainEntryFn(platform_);
-  return true;
+  return false;
 }
 
 bool DecoderEngine::BindRequest(

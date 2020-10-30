@@ -5,7 +5,10 @@
 import 'chrome://resources/cr_elements/cr_tabs/cr_tabs.m.js';
 import 'chrome://resources/polymer/v3_0/iron-location/iron-location.js';
 import 'chrome://resources/polymer/v3_0/iron-pages/iron-pages.js';
+import './http_tab.js';
 import './logging_tab.js';
+import './contact_tab.js';
+import './ui_trigger_tab.js';
 import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 Polymer({
@@ -31,9 +34,10 @@ Polymer({
     /** @private */
     tabNames_: {
       type: Array,
-      value: () => ['Logs'],
+      value: () => ['Logs', 'HTTP Messages', 'Contacts', 'UI Triggers'],
       readonly: true,
     },
+
   },
 
   /**
@@ -46,9 +50,10 @@ Polymer({
     if (!oldValue) {
       return;
     }
+    const defaultTab = this.tabNames_[0].toLowerCase();
     const lowerCaseTabName = this.tabNames_[newValue].toLowerCase();
-    this.path_ = '/' + lowerCaseTabName.replace(/\s+/g, '');
-    this.selectedTabFromPath_(this.path_);
+    this.path_ =
+        '/' + (lowerCaseTabName === defaultTab ? '' : lowerCaseTabName);
   },
 
   /**

@@ -34,6 +34,7 @@
 #include <memory>
 
 #include "base/stl_util.h"
+#include "cc/base/features.h"
 #include "cc/base/region.h"
 #include "cc/layers/picture_layer.h"
 #include "cc/trees/layer_tree_host.h"
@@ -126,12 +127,22 @@ BuildScrollRectsForLayer(const cc::Layer* layer, bool report_wheel_scrollers) {
         IntRect(rect),
         protocol::LayerTree::ScrollRect::TypeEnum::TouchEventHandler));
   }
-  if (report_wheel_scrollers) {
-    scroll_rects->emplace_back(BuildScrollRect(
-        // TODO(pdr): Use the correct region for wheel event handlers, see
-        // https://crbug.com/841364.
-        gfx::Rect(0, 0, layer->bounds().width(), layer->bounds().height()),
-        protocol::LayerTree::ScrollRect::TypeEnum::WheelEventHandler));
+
+  if (base::FeatureList::IsEnabled(::features::kWheelEventRegions)) {
+    const cc::Region& wheel_event_handler_region = layer->wheel_event_region();
+    for (const gfx::Rect& rect : wheel_event_handler_region) {
+      scroll_rects->emplace_back(BuildScrollRect(
+          IntRect(rect),
+          protocol::LayerTree::ScrollRect::TypeEnum::WheelEventHandler));
+    }
+  } else {
+    if (report_wheel_scrollers) {
+      scroll_rects->emplace_back(BuildScrollRect(
+          // TODO(pdr): Use the correct region for wheel event handlers, see
+          // https://crbug.com/841364.
+          gfx::Rect(0, 0, layer->bounds().width(), layer->bounds().height()),
+          protocol::LayerTree::ScrollRect::TypeEnum::WheelEventHandler));
+    }
   }
   return scroll_rects->empty() ? nullptr : std::move(scroll_rects);
 }
@@ -280,6 +291,8 @@ Response InspectorLayerTreeAgent::enable() {
 
   inspected_frames_->Root()->View()->UpdateAllLifecyclePhases(
       DocumentUpdateReason::kInspector);
+  if (auto* root_layer = RootLayer())
+    root_layer->layer_tree_host()->UpdateLayers();
 
   LayerTreePainted();
   LayerTreeDidChange();
@@ -348,6 +361,8 @@ const cc::Layer* InspectorLayerTreeAgent::RootLayer() {
 }
 
 static const cc::Layer* FindLayerById(const cc::Layer* root, int layer_id) {
+  if (!root)
+    return nullptr;
   if (root->id() == layer_id)
     return root;
   for (auto child : root->children()) {

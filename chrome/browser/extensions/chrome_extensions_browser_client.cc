@@ -21,6 +21,7 @@
 #include "chrome/browser/extensions/api/chrome_extensions_api_client.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_service.h"
 #include "chrome/browser/extensions/api/runtime/chrome_runtime_api_delegate.h"
+#include "chrome/browser/extensions/api/tabs/tabs_util.h"
 #include "chrome/browser/extensions/chrome_component_extension_resource_manager.h"
 #include "chrome/browser/extensions/chrome_extension_host_delegate.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
@@ -45,7 +46,6 @@
 #include "chrome/browser/ui/bluetooth/chrome_extension_bluetooth_chooser.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "chrome/common/channel_info.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -549,21 +549,6 @@ bool ChromeExtensionsBrowserClient::ShouldSchemeBypassNavigationChecks(
   return ExtensionsBrowserClient::ShouldSchemeBypassNavigationChecks(scheme);
 }
 
-bool ChromeExtensionsBrowserClient::ShouldForceWebRequestExtraHeaders(
-    content::BrowserContext* context) const {
-  // If OOR-CORS is disabled, we never apply this enforcement.
-  if (!context->ShouldEnableOutOfBlinkCors())
-    return false;
-
-  // Enables the enforcement if the prefs is managed by the enterprise policy.
-  bool apply_cors_mitigation_list =
-      !base::FeatureList::IsEnabled(
-          features::kHideCorsMitigationListPolicySupport) &&
-      Profile::FromBrowserContext(context)->GetPrefs()->IsManagedPreference(
-          prefs::kCorsMitigationList);
-  return apply_cors_mitigation_list;
-}
-
 base::FilePath ChromeExtensionsBrowserClient::GetSaveFilePath(
     content::BrowserContext* context) {
   DownloadPrefs* download_prefs = DownloadPrefs::FromBrowserContext(context);
@@ -582,6 +567,17 @@ ChromeExtensionsBrowserClient::GetMediaRouterAccessLogger() const {
   return g_media_router_access_logger_for_testing
              ? g_media_router_access_logger_for_testing
              : &media_router_access_logger_;
+}
+
+bool ChromeExtensionsBrowserClient::HasIsolatedStorage(
+    const std::string& extension_id,
+    content::BrowserContext* context) {
+  return extensions::util::HasIsolatedStorage(extension_id, context);
+}
+
+bool ChromeExtensionsBrowserClient::IsScreenshotRestricted(
+    content::WebContents* web_contents) const {
+  return tabs_util::IsScreenshotRestricted(web_contents);
 }
 
 // static

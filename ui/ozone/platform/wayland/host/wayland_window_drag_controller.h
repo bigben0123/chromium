@@ -58,7 +58,12 @@ class WaylandWindowDragController : public WaylandDataDevice::DragDelegate,
       delete;
   ~WaylandWindowDragController() override;
 
-  bool Drag(WaylandToplevelWindow* surface, const gfx::Vector2d& offset);
+  // Starts a new Wayland DND session for window dragging, if not done yet. A
+  // new data source is setup and the focused window is used as the origin
+  // surface.
+  bool StartDragSession();
+
+  bool Drag(WaylandToplevelWindow* window, const gfx::Vector2d& offset);
   void StopDragging();
 
   State state() const { return state_; }
@@ -87,9 +92,6 @@ class WaylandWindowDragController : public WaylandDataDevice::DragDelegate,
   // WaylandWindowObserver:
   void OnWindowRemoved(WaylandWindow* window) override;
 
-  // Offers the focused window as available to be dragged. A new data source is
-  // setup and the underlying DnD session is started, if not done yet.
-  bool OfferWindow();
   // Handles drag/move mouse |event|, while in |kDetached| mode, forwarding it
   // as a bounds change event to the upper layer handlers.
   void HandleMotionEvent(MouseEvent* event);
@@ -111,12 +113,18 @@ class WaylandWindowDragController : public WaylandDataDevice::DragDelegate,
   State state_ = State::kIdle;
   gfx::Vector2d drag_offset_;
 
+  // The last known pointer location in DIP.
+  gfx::PointF pointer_location_;
+
   std::unique_ptr<WaylandDataSource> data_source_;
   std::unique_ptr<WaylandDataOffer> data_offer_;
-  wl::Object<wl_surface> icon_surface_;
 
   // The current toplevel window being dragged, when in detached mode.
   WaylandToplevelWindow* dragged_window_ = nullptr;
+
+  // Keeps track of the window that holds the pointer grab. i.e: the owner of
+  // the surface that must receive the mouse release event upon drop.
+  WaylandWindow* pointer_grab_owner_ = nullptr;
 
   // The window where the DND session originated from. i.e: which had the
   // pointer focus when the session was initiated.

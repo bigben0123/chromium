@@ -33,7 +33,7 @@ import org.chromium.components.browser_ui.styles.ChromeColors;
 public class HeaderView extends SimpleHorizontalLayoutView {
     private final TextView mHeaderText;
     private final ImageView mHeaderIcon;
-    private boolean mIsExpanded;
+    private boolean mIsCollapsed;
     private Runnable mOnSelectListener;
 
     /**
@@ -60,6 +60,7 @@ public class HeaderView extends SimpleHorizontalLayoutView {
         mHeaderText.setMinHeight(context.getResources().getDimensionPixelSize(
                 R.dimen.omnibox_suggestion_header_height));
         mHeaderText.setGravity(Gravity.CENTER_VERTICAL);
+        mHeaderText.setTextAlignment(TextView.TEXT_ALIGNMENT_VIEW_START);
         mHeaderText.setPaddingRelative(context.getResources().getDimensionPixelSize(
                                                R.dimen.omnibox_suggestion_header_margin_start),
                 0, 0, 0);
@@ -78,9 +79,9 @@ public class HeaderView extends SimpleHorizontalLayoutView {
             public void onInitializeAccessibilityNodeInfo(
                     View host, AccessibilityNodeInfoCompat info) {
                 super.onInitializeAccessibilityNodeInfo(host, info);
-                AccessibilityActionCompat action = mIsExpanded
-                        ? AccessibilityActionCompat.ACTION_COLLAPSE
-                        : AccessibilityActionCompat.ACTION_EXPAND;
+                AccessibilityActionCompat action = mIsCollapsed
+                        ? AccessibilityActionCompat.ACTION_EXPAND
+                        : AccessibilityActionCompat.ACTION_COLLAPSE;
 
                 info.addAction(new AccessibilityActionCompat(
                         AccessibilityEvent.TYPE_VIEW_CLICKED, action.getLabel()));
@@ -99,22 +100,22 @@ public class HeaderView extends SimpleHorizontalLayoutView {
     }
 
     /** Return ImageView used to present group header chevron. */
-    ImageView getIconView() {
+    public ImageView getIconView() {
         return mHeaderIcon;
     }
 
     /** Return TextView used to present group header text. */
-    TextView getTextView() {
+    public TextView getTextView() {
         return mHeaderText;
     }
 
     /**
      * Specifies whether view should be announced as expanded or collapsed.
      *
-     * @param isExpanded true, if view should be announced as expanded.
+     * @param isCollapsed true, if view should be announced as collapsed.
      */
-    void setExpandedStateForAccessibility(boolean isExpanded) {
-        mIsExpanded = isExpanded;
+    void setCollapsedStateForAccessibility(boolean isCollapsed) {
+        mIsCollapsed = isCollapsed;
     }
 
     /**

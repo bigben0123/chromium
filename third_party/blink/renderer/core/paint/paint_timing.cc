@@ -23,6 +23,7 @@
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/resource_coordinator/document_resource_coordinator.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
@@ -182,6 +183,8 @@ void PaintTiming::SetFirstPaint(base::TimeTicks stamp) {
   if (frame && frame->GetDocument()) {
     Document* document = frame->GetDocument();
     document->MarkFirstPaint();
+    if (frame->IsMainFrame())
+      document->Fetcher()->MarkFirstPaint();
   }
 
   first_paint_ = stamp;
@@ -201,6 +204,9 @@ void PaintTiming::SetFirstContentfulPaint(base::TimeTicks stamp) {
     return;
   frame->View()->OnFirstContentfulPaint();
 
+  if (frame->GetDocument() && frame->GetDocument()->Fetcher())
+    frame->GetDocument()->Fetcher()->MarkFirstContentfulPaint();
+
   if (frame->GetFrameScheduler())
     frame->GetFrameScheduler()->OnFirstContentfulPaint();
 }
@@ -209,6 +215,13 @@ void PaintTiming::RegisterNotifySwapTime(PaintEvent event) {
   RegisterNotifySwapTime(
       CrossThreadBindOnce(&PaintTiming::ReportSwapTime,
                           WrapCrossThreadWeakPersistent(this), event));
+}
+
+void PaintTiming::RegisterNotifyFirstPaintAfterBackForwardCacheRestoreSwapTime(
+    size_t index) {
+  RegisterNotifySwapTime(CrossThreadBindOnce(
+      &PaintTiming::ReportFirstPaintAfterBackForwardCacheRestoreSwapTime,
+      WrapCrossThreadWeakPersistent(this), index));
 }
 
 void PaintTiming::RegisterNotifySwapTime(ReportTimeCallback callback) {
@@ -242,9 +255,6 @@ void PaintTiming::ReportSwapTime(PaintEvent event,
     case PaintEvent::kFirstPaint:
       SetFirstPaintSwap(timestamp);
       return;
-    case PaintEvent::kFirstPaintAfterBackForwardCacheRestore:
-      SetFirstPaintAfterBackForwardCacheRestoreSwap(timestamp);
-      return;
     case PaintEvent::kFirstContentfulPaint:
       SetFirstContentfulPaintSwap(timestamp);
       return;
@@ -257,6 +267,15 @@ void PaintTiming::ReportSwapTime(PaintEvent event,
     default:
       NOTREACHED();
   }
+}
+
+void PaintTiming::ReportFirstPaintAfterBackForwardCacheRestoreSwapTime(
+    size_t index,
+    WebSwapResult result,
+    base::TimeTicks timestamp) {
+  DCHECK(IsMainThread());
+  ReportSwapResultHistogram(result);
+  SetFirstPaintAfterBackForwardCacheRestoreSwap(timestamp, index);
 }
 
 void PaintTiming::SetFirstPaintSwap(base::TimeTicks stamp) {
@@ -306,12 +325,12 @@ void PaintTiming::SetFirstImagePaintSwap(base::TimeTicks stamp) {
 }
 
 void PaintTiming::SetFirstPaintAfterBackForwardCacheRestoreSwap(
-    base::TimeTicks stamp) {
-  // The last element is already allocated when the page is restored from the
-  // cache.
-  DCHECK(!first_paints_after_back_forward_cache_restore_swap_.IsEmpty());
-  DCHECK(first_paints_after_back_forward_cache_restore_swap_.back().is_null());
-  first_paints_after_back_forward_cache_restore_swap_.back() = stamp;
+    base::TimeTicks stamp,
+    size_t index) {
+  // The elements are allocated when the page is restored from the cache.
+  DCHECK_GE(first_paints_after_back_forward_cache_restore_swap_.size(), index);
+  DCHECK(first_paints_after_back_forward_cache_restore_swap_[index].is_null());
+  first_paints_after_back_forward_cache_restore_swap_[index] = stamp;
   NotifyPaintTimingChanged();
 }
 
@@ -326,9 +345,10 @@ void PaintTiming::ReportSwapResultHistogram(WebSwapResult result) {
 void PaintTiming::OnRestoredFromBackForwardCache() {
   // Allocate the last element with 0, which indicates that the first paint
   // after this navigation doesn't happen yet.
+  size_t index = first_paints_after_back_forward_cache_restore_swap_.size();
   first_paints_after_back_forward_cache_restore_swap_.push_back(
       base::TimeTicks());
-  RegisterNotifySwapTime(PaintEvent::kFirstPaintAfterBackForwardCacheRestore);
+  RegisterNotifyFirstPaintAfterBackForwardCacheRestoreSwapTime(index);
 }
 
 }  // namespace blink

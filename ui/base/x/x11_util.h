@@ -15,6 +15,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "base/component_export.h"
@@ -22,23 +23,31 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_refptr.h"
-#include "ui/base/cursor/mojom/cursor_type.mojom-forward.h"
+#include "base/synchronization/lock.h"
+#include "base/values.h"
+#include "build/build_config.h"
+#include "ui/base/x/x11_cursor.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/events/platform_event.h"
 #include "ui/gfx/icc_profile.h"
+#include "ui/gfx/x/connection.h"
 #include "ui/gfx/x/event.h"
-#include "ui/gfx/x/x11_types.h"
 #include "ui/gfx/x/xproto_types.h"
 
 typedef unsigned long Cursor;
+class SkPixmap;
+
+namespace base {
+template <typename T>
+struct DefaultSingletonTraits;
+}
 
 namespace gfx {
 class Insets;
 class Point;
 class Rect;
 }  // namespace gfx
-class SkBitmap;
 
 namespace ui {
 
@@ -134,11 +143,11 @@ bool GetArrayProperty(x11::Window window,
   using lentype = decltype(x11::GetPropertyRequest::long_length);
   auto response =
       x11::Connection::Get()
-          ->GetProperty(
-              {.window = static_cast<x11::Window>(window),
-               .property = name,
-               .long_length =
-                   amount ? length : std::numeric_limits<lentype>::max()})
+          ->GetProperty(x11::GetPropertyRequest{
+              .window = static_cast<x11::Window>(window),
+              .property = name,
+              .long_length =
+                  amount ? length : std::numeric_limits<lentype>::max()})
           .Sync();
   if (!response || response->format != CHAR_BIT * sizeof(T))
     return false;
@@ -169,13 +178,13 @@ void SetArrayProperty(x11::Window window,
   static_assert(sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4, "");
   std::vector<uint8_t> data(sizeof(T) * values.size());
   memcpy(data.data(), values.data(), sizeof(T) * values.size());
-  x11::Connection::Get()->ChangeProperty(
-      {.window = static_cast<x11::Window>(window),
-       .property = name,
-       .type = type,
-       .format = CHAR_BIT * sizeof(T),
-       .data_len = values.size(),
-       .data = base::RefCountedBytes::TakeVector(&data)});
+  x11::Connection::Get()->ChangeProperty(x11::ChangePropertyRequest{
+      .window = static_cast<x11::Window>(window),
+      .property = name,
+      .type = type,
+      .format = CHAR_BIT * sizeof(T),
+      .data_len = values.size(),
+      .data = base::RefCountedBytes::TakeVector(&data)});
 }
 
 template <typename T>
@@ -184,23 +193,6 @@ void SetProperty(x11::Window window,
                  x11::Atom type,
                  const T& value) {
   SetArrayProperty(window, name, type, std::vector<T>{value});
-}
-
-template <typename T>
-x11::Future<void> SendEvent(const T& event,
-                            x11::Window target,
-                            x11::EventMask mask) {
-  static_assert(T::type_id > 0, "T must be an x11::*Event type");
-  auto write_buffer = x11::Write(event);
-  DCHECK_EQ(write_buffer.GetBuffers().size(), 1ul);
-  auto& first_buffer = write_buffer.GetBuffers()[0];
-  DCHECK_LE(first_buffer->size(), 32ul);
-  std::vector<uint8_t> event_bytes(32);
-  memcpy(event_bytes.data(), first_buffer->data(), first_buffer->size());
-
-  x11::SendEventRequest send_event{false, target, mask};
-  std::copy(event_bytes.begin(), event_bytes.end(), send_event.event.begin());
-  return x11::Connection::Get()->SendEvent(send_event);
 }
 
 COMPONENT_EXPORT(UI_BASE_X)
@@ -233,57 +225,34 @@ void DefineCursor(x11::Window window, x11::Cursor cursor);
 COMPONENT_EXPORT(UI_BASE_X)
 x11::Window CreateDummyWindow(const std::string& name = "");
 
+// Draws an SkPixmap on |drawable| using the given |gc|, converting to the
+// server side visual as needed.
 COMPONENT_EXPORT(UI_BASE_X)
-x11::KeyCode KeysymToKeycode(x11::Connection* connection, x11::KeySym keysym);
+void DrawPixmap(x11::Connection* connection,
+                x11::VisualId visual,
+                x11::Drawable drawable,
+                x11::GraphicsContext gc,
+                const SkPixmap& skia_pixmap,
+                int src_x,
+                int src_y,
+                int dst_x,
+                int dst_y,
+                int width,
+                int height);
 
 // These functions cache their results ---------------------------------
 
 // Returns true if the system supports XINPUT2.
 COMPONENT_EXPORT(UI_BASE_X) bool IsXInput2Available();
 
-// Return true iff the display supports Xrender
-COMPONENT_EXPORT(UI_BASE_X) bool QueryRenderSupport(XDisplay* dpy);
-
 // Return true iff the display supports MIT-SHM.
 COMPONENT_EXPORT(UI_BASE_X) bool QueryShmSupport();
-
-// Returns the first event ID for the MIT-SHM extension, if available.
-COMPONENT_EXPORT(UI_BASE_X) int ShmEventBase();
-
-// Creates a custom X cursor from the image. This takes ownership of image. The
-// caller must not free/modify the image. The refcount of the newly created
-// cursor is set to 1.
-COMPONENT_EXPORT(UI_BASE_X)::Cursor
-    CreateReffedCustomXCursor(XcursorImage* image);
-
-// Increases the refcount of the custom cursor.
-COMPONENT_EXPORT(UI_BASE_X) void RefCustomXCursor(::Cursor cursor);
-
-// Decreases the refcount of the custom cursor, and destroys it if it reaches 0.
-COMPONENT_EXPORT(UI_BASE_X) void UnrefCustomXCursor(::Cursor cursor);
-
-// Creates a XcursorImage and copies the SkBitmap |bitmap| on it. Caller owns
-// the returned object.
-COMPONENT_EXPORT(UI_BASE_X)
-XcursorImage* SkBitmapToXcursorImage(const SkBitmap& bitmap,
-                                     const gfx::Point& hotspot);
-
-// Loads and returns an X11 cursor, trying to find one that matches |type|. If
-// unavailable, x11::None is returned.
-COMPONENT_EXPORT(UI_BASE_X)
-::Cursor LoadCursorFromType(mojom::CursorType type);
 
 // Coalesce all pending motion events (touch or mouse) that are at the top of
 // the queue, and return the number eliminated, storing the last one in
 // |last_event|.
 COMPONENT_EXPORT(UI_BASE_X)
 int CoalescePendingMotionEvents(const x11::Event* xev, x11::Event* last_event);
-
-// Hides the host cursor.
-COMPONENT_EXPORT(UI_BASE_X) void HideHostCursor();
-
-// Returns an invisible cursor.
-COMPONENT_EXPORT(UI_BASE_X)::Cursor CreateInvisibleCursor();
 
 // Sets whether |window| should use the OS window frame.
 COMPONENT_EXPORT(UI_BASE_X)
@@ -308,9 +277,6 @@ enum HideTitlebarWhenMaximized : uint32_t {
 COMPONENT_EXPORT(UI_BASE_X)
 void SetHideTitlebarWhenMaximizedProperty(x11::Window window,
                                           HideTitlebarWhenMaximized property);
-
-// Clears all regions of X11's default root window by filling black pixels.
-COMPONENT_EXPORT(UI_BASE_X) void ClearX11DefaultRootWindow();
 
 // Returns true if |window| is visible.
 COMPONENT_EXPORT(UI_BASE_X) bool IsWindowVisible(x11::Window window);
@@ -440,10 +406,6 @@ static const int kAllDesktops = -1;
 COMPONENT_EXPORT(UI_BASE_X)
 bool GetWindowDesktop(x11::Window window, int* desktop);
 
-// Translates an X11 error code into a printable string.
-COMPONENT_EXPORT(UI_BASE_X)
-std::string GetX11ErrorString(XDisplay* display, int err);
-
 // Implementers of this interface receive a notification for every X window of
 // the main display.
 class EnumerateWindowsDelegate {
@@ -506,6 +468,42 @@ COMPONENT_EXPORT(UI_BASE_X) WindowManagerName GuessWindowManager();
 // can't determine it, return "Unknown".
 COMPONENT_EXPORT(UI_BASE_X) std::string GuessWindowManagerName();
 
+// These values are persisted to logs.  Entries should not be renumbered and
+// numeric values should never be reused.
+//
+// Append new window managers before kMaxValue and update LinuxWindowManagerName
+// in tools/metrics/histograms/enums.xml accordingly.
+//
+// See also tools/metrics/histograms/README.md#enum-histograms
+enum class UMALinuxWindowManager {
+  kOther = 0,
+  kBlackbox = 1,
+  kChromeOS = 2,  // Deprecated.
+  kCompiz = 3,
+  kEnlightenment = 4,
+  kIceWM = 5,
+  kKWin = 6,
+  kMetacity = 7,
+  kMuffin = 8,
+  kMutter = 9,
+  kOpenbox = 10,
+  kXfwm4 = 11,
+  kAwesome = 12,
+  kI3 = 13,
+  kIon3 = 14,
+  kMatchbox = 15,
+  kNotion = 16,
+  kQtile = 17,
+  kRatpoison = 18,
+  kStumpWM = 19,
+  kWmii = 20,
+  kFluxbox = 21,
+  kXmonad = 22,
+  kUnnamed = 23,
+  kMaxValue = kUnnamed
+};
+COMPONENT_EXPORT(UI_BASE_X) UMALinuxWindowManager GetWindowManagerUMA();
+
 // Returns a buest-effort guess as to whether |window_manager| is tiling (true)
 // or stacking (false).
 COMPONENT_EXPORT(UI_BASE_X) bool IsWmTiling(WindowManagerName window_manager);
@@ -513,13 +511,17 @@ COMPONENT_EXPORT(UI_BASE_X) bool IsWmTiling(WindowManagerName window_manager);
 // Returns true if a compositing manager is present.
 COMPONENT_EXPORT(UI_BASE_X) bool IsCompositingManagerPresent();
 
-// Enable the default X error handlers. These will log the error and abort
-// the process if called. Use SetX11ErrorHandlers() from x11_util_internal.h
-// to set your own error handlers.
-COMPONENT_EXPORT(UI_BASE_X) void SetDefaultX11ErrorHandlers();
-
 // Returns true if a given window is in full-screen mode.
 COMPONENT_EXPORT(UI_BASE_X) bool IsX11WindowFullScreen(x11::Window window);
+
+// Suspends or resumes the X screen saver.  Must be called on the UI thread.
+COMPONENT_EXPORT(UI_BASE_X) void SuspendX11ScreenSaver(bool suspend);
+
+// Returns human readable description of the window manager, desktop, and
+// other system properties related to the compositing.
+COMPONENT_EXPORT(UI_BASE_X)
+base::Value GpuExtraInfoAsListValue(unsigned long system_visual,
+                                    unsigned long rgba_visual);
 
 // Returns true if the window manager supports the given hint.
 COMPONENT_EXPORT(UI_BASE_X) bool WmSupportsHint(x11::Atom atom);
@@ -531,10 +533,10 @@ gfx::ICCProfile GetICCProfileForMonitor(int monitor);
 // Return true if the display supports SYNC extension.
 COMPONENT_EXPORT(UI_BASE_X) bool IsSyncExtensionAvailable();
 
-// Returns the preferred Skia colortype for an X11 visual.  LOG(FATAL)'s if
-// there isn't a suitable colortype.
+// Returns the preferred Skia colortype for an X11 visual.  Returns
+// kUnknown_SkColorType if there isn't a suitable colortype.
 COMPONENT_EXPORT(UI_BASE_X)
-SkColorType ColorTypeForVisual(void* visual);
+SkColorType ColorTypeForVisual(x11::VisualId visual_id);
 
 COMPONENT_EXPORT(UI_BASE_X)
 x11::Future<void> SendClientMessage(
@@ -545,57 +547,96 @@ x11::Future<void> SendClientMessage(
     x11::EventMask event_mask = x11::EventMask::SubstructureNotify |
                                 x11::EventMask::SubstructureRedirect);
 
-// Manages a piece of X11 allocated memory as a RefCountedMemory segment. This
-// object takes ownership over the passed in memory and will free it with the
-// X11 allocator when done.
-class COMPONENT_EXPORT(UI_BASE_X) XRefcountedMemory
-    : public base::RefCountedMemory {
- public:
-  XRefcountedMemory(unsigned char* x11_data, size_t length);
+// Return true if VulkanSurface is supported.
+COMPONENT_EXPORT(UI_BASE_X) bool IsVulkanSurfaceSupported();
 
-  // Overridden from RefCountedMemory:
-  const unsigned char* front() const override;
-  size_t size() const override;
+// --------------------------------------------------------------------------
+// Selects a visual with a preference for alpha support on compositing window
+// managers.
+class COMPONENT_EXPORT(UI_BASE_X) XVisualManager {
+ public:
+  static XVisualManager* GetInstance();
+
+  // Picks the best argb or opaque visual given |want_argb_visual|.
+  void ChooseVisualForWindow(bool want_argb_visual,
+                             x11::VisualId* visual_id,
+                             uint8_t* depth,
+                             x11::ColorMap* colormap,
+                             bool* visual_has_alpha);
+
+  bool GetVisualInfo(x11::VisualId visual_id,
+                     uint8_t* depth,
+                     x11::ColorMap* colormap,
+                     bool* visual_has_alpha);
+
+  // Called by GpuDataManagerImplPrivate when GPUInfo becomes available.  It is
+  // necessary for the GPU process to find out which visuals are best for GL
+  // because we don't want to load GL in the browser process.  Returns false iff
+  // |default_visual_id| or |transparent_visual_id| are invalid.
+  bool OnGPUInfoChanged(bool software_rendering,
+                        x11::VisualId default_visual_id,
+                        x11::VisualId transparent_visual_id);
+
+  // Are all of the system requirements met for using transparent visuals?
+  bool ArgbVisualAvailable() const;
+
+  ~XVisualManager();
 
  private:
-  ~XRefcountedMemory() override;
+  friend struct base::DefaultSingletonTraits<XVisualManager>;
 
-  gfx::XScopedPtr<unsigned char> x11_data_;
-  size_t length_;
+  class XVisualData {
+   public:
+    XVisualData(x11::Connection* connection,
+                uint8_t depth,
+                const x11::VisualType* info);
+    ~XVisualData();
 
-  DISALLOW_COPY_AND_ASSIGN(XRefcountedMemory);
+    x11::ColorMap GetColormap();
+
+    const uint8_t depth;
+    const x11::VisualType* const info;
+
+   private:
+    x11::ColorMap colormap_{};
+    x11::Connection* const connection_;
+  };
+
+  XVisualManager();
+
+  bool GetVisualInfoImpl(x11::VisualId visual_id,
+                         uint8_t* depth,
+                         x11::ColorMap* colormap,
+                         bool* visual_has_alpha);
+
+  mutable base::Lock lock_;
+
+  std::unordered_map<x11::VisualId, std::unique_ptr<XVisualData>> visuals_;
+
+  x11::Connection* const connection_;
+
+  x11::VisualId default_visual_id_{};
+
+  // The system visual is usually the same as the default visual, but
+  // may not be in general.
+  x11::VisualId system_visual_id_{};
+  x11::VisualId transparent_visual_id_{};
+
+  bool using_software_rendering_ = false;
+  bool have_gpu_argb_visual_ = false;
+
+  DISALLOW_COPY_AND_ASSIGN(XVisualManager);
 };
 
-// Keeps track of a cursor returned by an X function and makes sure it's
-// XFreeCursor'd.
-class COMPONENT_EXPORT(UI_BASE_X) XScopedCursor {
+class COMPONENT_EXPORT(UI_BASE_X) ScopedUnsetDisplay {
  public:
-  // Keeps track of |cursor| created with |display|.
-  XScopedCursor(::Cursor cursor, XDisplay* display);
-  ~XScopedCursor();
-
-  ::Cursor get() const;
-  void reset(::Cursor cursor);
+  ScopedUnsetDisplay();
+  ~ScopedUnsetDisplay();
 
  private:
-  ::Cursor cursor_;
-  XDisplay* display_;
-
-  DISALLOW_COPY_AND_ASSIGN(XScopedCursor);
+  base::Optional<std::string> display_;
+  DISALLOW_COPY_AND_ASSIGN(ScopedUnsetDisplay);
 };
-
-struct COMPONENT_EXPORT(UI_BASE_X) XImageDeleter {
-  void operator()(XImage* image) const;
-};
-using XScopedImage = std::unique_ptr<XImage, XImageDeleter>;
-
-namespace test {
-
-// Returns the cached XcursorImage for |cursor|.
-COMPONENT_EXPORT(UI_BASE_X)
-const XcursorImage* GetCachedXcursorImage(::Cursor cursor);
-
-}  // namespace test
 
 }  // namespace ui
 

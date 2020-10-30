@@ -7,7 +7,7 @@
 
 #include "base/optional.h"
 #include "base/time/time.h"
-#include "components/page_load_metrics/browser/observers/largest_contentful_paint_handler.h"
+#include "components/page_load_metrics/browser/observers/core/largest_contentful_paint_handler.h"
 #include "components/page_load_metrics/browser/resource_tracker.h"
 #include "components/page_load_metrics/common/page_end_reason.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
@@ -16,6 +16,10 @@
 namespace content {
 class WebContents;
 }  // namespace content
+
+namespace blink {
+struct MobileFriendliness;
+}  // namespace blink
 
 namespace page_load_metrics {
 
@@ -119,6 +123,7 @@ class PageLoadMetricsObserverDelegate {
   virtual const PageRenderData& GetPageRenderData() const = 0;
   // InputTiming data accumulated across all frames.
   virtual const mojom::InputTiming& GetPageInputTiming() const = 0;
+  virtual const blink::MobileFriendliness& GetMobileFriendliness() const = 0;
   virtual const PageRenderData& GetMainFrameRenderData() const = 0;
   virtual const ui::ScopedVisibilityTracker& GetVisibilityTracker() const = 0;
   virtual const ResourceTracker& GetResourceTracker() const = 0;
@@ -127,12 +132,13 @@ class PageLoadMetricsObserverDelegate {
   virtual const LargestContentfulPaintHandler&
   GetLargestContentfulPaintHandler() const = 0;
   // Returns a LargestContentfulPaintHandler for the experimental version of
-  // LCP.
+  // LCP. Note that currently this 'experimental version' is the version that is
+  // being deprecated.
   virtual const LargestContentfulPaintHandler&
   GetExperimentalLargestContentfulPaintHandler() const = 0;
 
-  // UKM SourceId for the current page load.
-  virtual ukm::SourceId GetSourceId() const = 0;
+  // UKM source ID for the current page load.
+  virtual ukm::SourceId GetPageUkmSourceId() const = 0;
 
   // Whether the associated navigation is the first navigation in its associated
   // WebContents. Note that, for newly opened tabs that display the New Tab

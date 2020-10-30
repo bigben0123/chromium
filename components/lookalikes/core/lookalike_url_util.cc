@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/feature_list.h"
+#include "base/i18n/char_iterator.h"
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/singleton.h"
@@ -21,7 +22,9 @@
 #include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/time/default_clock.h"
+#include "base/values.h"
 #include "components/lookalikes/core/features.h"
+#include "components/security_interstitials/core/pref_names.h"
 #include "components/security_state/core/features.h"
 #include "components/url_formatter/spoof_checks/top_domains/top500_domains.h"
 #include "components/url_formatter/spoof_checks/top_domains/top_domain_util.h"
@@ -31,7 +34,11 @@
 
 namespace lookalikes {
 
-const char kHistogramName[] = "NavigationSuggestion.Event";
+const char kHistogramName[] = "NavigationSuggestion.Event2";
+
+void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
+  registry->RegisterListPref(prefs::kLookalikeWarningAllowlistDomains);
+}
 
 }  // namespace lookalikes
 
@@ -58,6 +65,10 @@ const char* kCommonWords[] = {"shop",  "jobs",     "live",   "info",  "study",
                               "asahi", "weather",  "health", "forum", "radio",
                               "ideal", "research", "france", "free",  "mobile",
                               "sky",   "ask"};
+
+// What separators can be used to separate tokens in target embedding spoofs?
+// e.g. www-google.com.example.com uses "-" (www-google) and "." (google.com).
+const char kTargetEmbeddingSeparators[] = "-.";
 
 bool SkeletonsMatch(const url_formatter::Skeletons& skeletons1,
                     const url_formatter::Skeletons& skeletons2) {
@@ -171,11 +182,12 @@ void RecordEvent(NavigationSuggestionEvent event) {
 // Returns the parts of the domain that are separated by "." or "-", not
 // including the eTLD.
 //
-// |host_without_etld| must outlive the return value since the vector contains
+// |hostname| must outlive the return value since the vector contains
 // StringPieces.
-std::vector<base::StringPiece> SplitDomainWithouteTLDIntoTokens(
-    const std::string& host_without_etld) {
-  return base::SplitStringPiece(host_without_etld, "-.", base::TRIM_WHITESPACE,
+std::vector<base::StringPiece> SplitDomainIntoTokens(
+    const std::string& hostname) {
+  return base::SplitStringPiece(hostname, kTargetEmbeddingSeparators,
+                                base::TRIM_WHITESPACE,
                                 base::SPLIT_WANT_NONEMPTY);
 }
 
@@ -263,14 +275,37 @@ bool UsesCommonWord(const DomainInfo& domain) {
   return false;
 }
 
-// A domain is allowed to be embedded if its e2LD is a common word or any
-// valid partial subdomain is allowlisted.
+// Returns whether |domain_labels| is in the same domain as embedding_domain.
+// e.g. IsEmbeddingItself(["foo", "example", "com"], "example.com") -> true
+//  since foo.example.com is in the same domain as example.com.
+bool IsEmbeddingItself(const base::span<const base::StringPiece>& domain_labels,
+                       const std::string& embedding_domain) {
+  DCHECK(domain_labels.size() >= 2);
+  std::string potential_hostname =
+      domain_labels[domain_labels.size() - 1].as_string();
+  // Attach each token from the end to the embedded target to check if that
+  // subdomain is the embedding domain. (e.g. using the earlier example, check
+  // each ["com", "example.com", "foo.example.com"] against "example.com".
+  for (int i = domain_labels.size() - 2; i >= 0; i--) {
+    potential_hostname =
+        domain_labels[i].as_string() + "." + potential_hostname;
+    if (embedding_domain == potential_hostname) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// A domain is allowed to be embedded if is embedding itself, if its e2LD is a
+// common word or any valid partial subdomain is allowlisted.
 bool IsAllowedToBeEmbedded(
     const DomainInfo& embedded_target,
     const base::span<const base::StringPiece>& subdomain_span,
-    const LookalikeTargetAllowlistChecker& in_target_allowlist) {
+    const LookalikeTargetAllowlistChecker& in_target_allowlist,
+    const std::string& embedding_domain) {
   return UsesCommonWord(embedded_target) ||
-         ASubdomainIsAllowlisted(subdomain_span, in_target_allowlist);
+         ASubdomainIsAllowlisted(subdomain_span, in_target_allowlist) ||
+         IsEmbeddingItself(subdomain_span, embedding_domain);
 }
 
 }  // namespace
@@ -440,14 +475,18 @@ bool IsTopDomain(const DomainInfo& domain_info) {
   return false;
 }
 
-bool ShouldBlockLookalikeUrlNavigation(LookalikeUrlMatchType match_type,
-                                       const DomainInfo& navigated_domain) {
+bool ShouldBlockLookalikeUrlNavigation(LookalikeUrlMatchType match_type) {
   if (match_type == LookalikeUrlMatchType::kSiteEngagement) {
     return true;
   }
   if (match_type == LookalikeUrlMatchType::kTargetEmbedding &&
       base::FeatureList::IsEnabled(
           lookalikes::features::kDetectTargetEmbeddingLookalikes)) {
+    return true;
+  }
+  if (match_type == LookalikeUrlMatchType::kFailedSpoofChecks &&
+      base::FeatureList::IsEnabled(
+          lookalikes::features::kLookalikeInterstitialForPunycode)) {
     return true;
   }
   return match_type == LookalikeUrlMatchType::kSkeletonMatchTop500;
@@ -567,10 +606,9 @@ TargetEmbeddingType GetTargetEmbeddingType(
     const std::vector<DomainInfo>& engaged_sites,
     const LookalikeTargetAllowlistChecker& in_target_allowlist,
     std::string* safe_hostname) {
-  const std::string host_without_etld =
-      url_formatter::top_domains::HostnameWithoutRegistry(hostname);
-  const std::vector<base::StringPiece> hostname_tokens_without_etld =
-      SplitDomainWithouteTLDIntoTokens(host_without_etld);
+  const std::string embedding_domain = GetETLDPlusOne(hostname);
+  const std::vector<base::StringPiece> hostname_tokens =
+      SplitDomainIntoTokens(hostname);
 
   // There are O(n^2) potential target embeddings in a domain name. We want to
   // be comprehensive, but optimize so that usually we needn't check all of
@@ -578,21 +616,38 @@ TargetEmbeddingType GetTargetEmbeddingType(
   // the front, checking for a valid eTLD. If we find one, then we consider the
   // possible embedded domains that end in that eTLD (i.e. all possible start
   // points from the beginning of the string onward).
-  for (int end = hostname_tokens_without_etld.size(); end > 0; --end) {
-    base::span<const base::StringPiece> etld_check_span(
-        hostname_tokens_without_etld.data(), end);
+  for (int end = hostname_tokens.size(); end > 0; --end) {
+    base::span<const base::StringPiece> etld_check_span(hostname_tokens.data(),
+                                                        end);
     std::string etld_check_host = base::JoinString(etld_check_span, ".");
     auto etld_check_dominfo = GetDomainInfo(etld_check_host);
 
     // Check if the final token is a no-separator target (e.g. "googlecom").
     // This check happens first so that we can exclude invalid eTLD+1s next.
-    std::string embedded_target = GetMatchingTopDomainWithoutSeparators(
-        hostname_tokens_without_etld[end - 1]);
-    if (!embedded_target.empty() &&
-        !IsAllowedToBeEmbedded(etld_check_dominfo, etld_check_span,
-                               in_target_allowlist)) {
-      *safe_hostname = embedded_target;
-      return TargetEmbeddingType::kInterstitial;
+    std::string embedded_target =
+        GetMatchingTopDomainWithoutSeparators(hostname_tokens[end - 1]);
+    if (!embedded_target.empty()) {
+      // Extract the full possibly-spoofed domain. To get this, we take the
+      // hostname up until this point, strip off the no-separator bit (e.g.
+      // googlecom) and then re-add the the separated version (e.g. google.com).
+      auto spoofed_domain =
+          etld_check_host.substr(
+              0, etld_check_host.length() - hostname_tokens[end - 1].length()) +
+          embedded_target;
+      const auto no_separator_tokens = base::SplitStringPiece(
+          spoofed_domain, kTargetEmbeddingSeparators, base::TRIM_WHITESPACE,
+          base::SPLIT_WANT_NONEMPTY);
+      auto no_separator_dominfo = GetDomainInfo(embedded_target);
+
+      // Only flag on domains that are long enough, don't use common words, and
+      // aren't target-allowlisted.
+      if (no_separator_dominfo.domain_without_registry.length() >
+              kMinE2LDLengthForTargetEmbedding &&
+          !IsAllowedToBeEmbedded(no_separator_dominfo, no_separator_tokens,
+                                 in_target_allowlist, embedding_domain)) {
+        *safe_hostname = embedded_target;
+        return TargetEmbeddingType::kInterstitial;
+      }
     }
 
     // Exclude otherwise-invalid eTLDs.
@@ -611,14 +666,14 @@ TargetEmbeddingType GetTargetEmbeddingType(
     // subdomains ending at |end|.
     for (int start = 0; start < end - 1; ++start) {
       const base::span<const base::StringPiece> span(
-          (hostname_tokens_without_etld.data() + start), end - start);
+          hostname_tokens.data() + start, end - start);
       auto embedded_hostname = base::JoinString(span, ".");
       auto embedded_dominfo = GetDomainInfo(embedded_hostname);
 
       for (auto& engaged_site : engaged_sites) {
         if (engaged_site.hostname == embedded_dominfo.hostname &&
-            !IsAllowedToBeEmbedded(embedded_dominfo, span,
-                                   in_target_allowlist)) {
+            !IsAllowedToBeEmbedded(embedded_dominfo, span, in_target_allowlist,
+                                   embedding_domain)) {
           *safe_hostname = engaged_site.hostname;
           return TargetEmbeddingType::kInterstitial;
         }
@@ -630,9 +685,94 @@ TargetEmbeddingType GetTargetEmbeddingType(
     if (DoesETLDPlus1MatchTopDomainOrEngagedSite(
             etld_check_dominfo, engaged_sites, safe_hostname) &&
         !IsAllowedToBeEmbedded(etld_check_dominfo, etld_check_span,
-                               in_target_allowlist)) {
+                               in_target_allowlist, embedding_domain)) {
       return TargetEmbeddingType::kInterstitial;
     }
   }
   return TargetEmbeddingType::kNone;
+}
+
+bool IsASCII(UChar32 codepoint) {
+  return !(codepoint & ~0x7F);
+}
+
+// Returns true if |codepoint| has emoji related properties.
+bool IsEmojiRelatedCodepoint(UChar32 codepoint) {
+  return u_hasBinaryProperty(codepoint, UCHAR_EMOJI) ||
+         // Characters that have emoji presentation by default (e.g. hourglass)
+         u_hasBinaryProperty(codepoint, UCHAR_EMOJI_PRESENTATION) ||
+         // Characters displayed as country flags when used as a valid pair.
+         // E.g. Regional Indicator Symbol Letter B used once in a string
+         // is rendered as 🇧, used twice is rendered as the flag of Barbados
+         // (with country code BB). It's therefore possible to come up with
+         // a spoof using regional indicator characters as text, but these
+         // domain names will be readily punycoded and detecting pairs isn't
+         // easy so we keep the code simple here.
+         u_hasBinaryProperty(codepoint, UCHAR_REGIONAL_INDICATOR) ||
+         // Pictographs such as Black Cross On Shield (U+26E8).
+         u_hasBinaryProperty(codepoint, UCHAR_EXTENDED_PICTOGRAPHIC);
+}
+
+// Returns true if |text| contains only ASCII characters, pictographs
+// or emojis. This check is only used to determine if a domain that already
+// failed spoof checks should be blocked by an interstitial. Ideally, we would
+// check this for non-ASCII scripts as well (e.g. Cyrillic + emoji), but such
+// usage isn't common.
+bool IsASCIIAndEmojiOnly(const base::StringPiece16& text) {
+  for (base::i18n::UTF16CharIterator iter(text); !iter.end(); iter.Advance()) {
+    const UChar32 codepoint = iter.get();
+    if (!IsASCII(codepoint) && !IsEmojiRelatedCodepoint(codepoint)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool ShouldBlockBySpoofCheckResult(const DomainInfo& navigated_domain) {
+  // Here, only a subset of spoof checks that cause an IDN to fallback to
+  // punycode are configured to show an interstitial.
+  switch (navigated_domain.idn_result.spoof_check_result) {
+    case url_formatter::IDNSpoofChecker::Result::kNone:
+    case url_formatter::IDNSpoofChecker::Result::kSafe:
+      return false;
+
+    case url_formatter::IDNSpoofChecker::Result::kICUSpoofChecks:
+      // If the eTLD+1 contains only a mix of ASCII + Emoji, allow.
+      return !IsASCIIAndEmojiOnly(navigated_domain.idn_result.result);
+
+    case url_formatter::IDNSpoofChecker::Result::kDeviationCharacters:
+      // Failures because of deviation characters, especially ß, is common.
+      return false;
+
+    case url_formatter::IDNSpoofChecker::Result::kTLDSpecificCharacters:
+    case url_formatter::IDNSpoofChecker::Result::kUnsafeMiddleDot:
+    case url_formatter::IDNSpoofChecker::Result::kWholeScriptConfusable:
+    case url_formatter::IDNSpoofChecker::Result::kDigitLookalikes:
+    case url_formatter::IDNSpoofChecker::Result::
+        kNonAsciiLatinCharMixedWithNonLatin:
+    case url_formatter::IDNSpoofChecker::Result::kDangerousPattern:
+      return true;
+  }
+}
+
+bool IsAllowedByEnterprisePolicy(const PrefService* pref_service,
+                                 const GURL& url) {
+  const auto* list =
+      pref_service->GetList(prefs::kLookalikeWarningAllowlistDomains);
+  for (const auto& domain_val : *list) {
+    auto domain = domain_val.GetString();
+    if (url.DomainIs(domain)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void SetEnterpriseAllowlistForTesting(PrefService* pref_service,
+                                      const std::vector<std::string>& hosts) {
+  base::Value list(base::Value::Type::LIST);
+  for (const auto& host : hosts) {
+    list.Append(host);
+  }
+  pref_service->Set(prefs::kLookalikeWarningAllowlistDomains, std::move(list));
 }

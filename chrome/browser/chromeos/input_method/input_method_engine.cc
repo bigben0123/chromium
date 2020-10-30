@@ -137,9 +137,10 @@ void InputMethodEngine::OnSuggestionsChanged(
   observer_->OnSuggestionsChanged(suggestions);
 }
 
-bool InputMethodEngine::ShowMultipleSuggestions(
+bool InputMethodEngine::SetButtonHighlighted(
     int context_id,
-    const std::vector<base::string16>& suggestions,
+    const ui::ime::AssistiveWindowButton& button,
+    bool highlighted,
     std::string* error) {
   if (!IsActive()) {
     *error = kErrorNotActive;
@@ -152,26 +153,13 @@ bool InputMethodEngine::ShowMultipleSuggestions(
   IMEAssistiveWindowHandlerInterface* aw_handler =
       ui::IMEBridge::Get()->GetAssistiveWindowHandler();
   if (aw_handler)
-    aw_handler->ShowMultipleSuggestions(suggestions);
+    aw_handler->SetButtonHighlighted(button, highlighted);
   return true;
 }
 
-bool InputMethodEngine::HighlightSuggestionCandidate(int context_id,
-                                                     int index,
-                                                     std::string* error) {
-  if (!IsActive()) {
-    *error = kErrorNotActive;
-    return false;
-  }
-  if (context_id != context_id_ || context_id_ == -1) {
-    *error = kErrorWrongContext;
-    return false;
-  }
-  IMEAssistiveWindowHandlerInterface* aw_handler =
-      ui::IMEBridge::Get()->GetAssistiveWindowHandler();
-  if (aw_handler)
-    aw_handler->HighlightSuggestionCandidate(index);
-  return true;
+void InputMethodEngine::ClickButton(
+    const ui::ime::AssistiveWindowButton& button) {
+  observer_->OnAssistiveWindowButtonClicked(button);
 }
 
 bool InputMethodEngine::AcceptSuggestionCandidate(
@@ -462,6 +450,33 @@ bool InputMethodEngine::SetCompositionRange(
   if (!input_context)
     return false;
   return input_context->SetCompositionRange(before, after, text_spans);
+}
+
+bool InputMethodEngine::SetComposingRange(
+    uint32_t start,
+    uint32_t end,
+    const std::vector<ui::ImeTextSpan>& text_spans) {
+  ui::IMEInputContextHandlerInterface* input_context =
+      ui::IMEBridge::Get()->GetInputContextHandler();
+  if (!input_context)
+    return false;
+  return input_context->SetComposingRange(start, end, text_spans);
+}
+
+gfx::Range InputMethodEngine::GetAutocorrectRange() {
+  ui::IMEInputContextHandlerInterface* input_context =
+      ui::IMEBridge::Get()->GetInputContextHandler();
+  if (!input_context)
+    return gfx::Range();
+  return input_context->GetAutocorrectRange();
+}
+
+gfx::Rect InputMethodEngine::GetAutocorrectCharacterBounds() {
+  ui::IMEInputContextHandlerInterface* input_context =
+      ui::IMEBridge::Get()->GetInputContextHandler();
+  if (!input_context)
+    return gfx::Rect();
+  return input_context->GetAutocorrectCharacterBounds();
 }
 
 bool InputMethodEngine::SetAutocorrectRange(

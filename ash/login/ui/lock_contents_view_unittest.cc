@@ -9,10 +9,10 @@
 #include <unordered_set>
 #include <utility>
 
+#include "ash/child_accounts/parent_access_controller_impl.h"
 #include "ash/detachable_base/detachable_base_pairing_status.h"
 #include "ash/login/login_screen_controller.h"
 #include "ash/login/mock_login_screen_client.h"
-#include "ash/login/parent_access_controller.h"
 #include "ash/login/ui/arrow_button_view.h"
 #include "ash/login/ui/fake_login_detachable_base_model.h"
 #include "ash/login/ui/lock_screen.h"
@@ -837,8 +837,8 @@ class LockContentsViewUnitTestWithDeviceDisclosureEnabled
 TEST_F(LockContentsViewUnitTestWithDeviceDisclosureEnabled,
        ShowStatusIndicatorIfEnrolledDevice) {
   // If the device is enrolled, bottom_status_indicator should be visible.
-  Shell::Get()->system_tray_model()->SetEnterpriseDisplayDomain(
-      "BestCompanyEver", false);
+  Shell::Get()->system_tray_model()->SetEnterpriseDomainInfo("BestCompanyEver",
+                                                             false);
 
   auto* contents = new LockContentsView(
       mojom::TrayActionState::kAvailable, LockScreen::ScreenType::kLock,
@@ -857,6 +857,80 @@ TEST_F(LockContentsViewUnitTestWithDeviceDisclosureEnabled,
   EXPECT_FALSE(test_api.bottom_status_indicator()->GetVisible());
   DataDispatcher()->NotifyOobeDialogState(OobeDialogState::HIDDEN);
   EXPECT_TRUE(test_api.bottom_status_indicator()->GetVisible());
+}
+
+// Show bottom status indicator if device is enrolled
+TEST_F(LockContentsViewUnitTestWithDeviceDisclosureEnabled,
+       ShowManagementBubbleOnClickIfEnrolledDevice) {
+  // If the device is enrolled, bottom_status_indicator should be visible.
+  Shell::Get()->system_tray_model()->SetEnterpriseDomainInfo("BestCompanyEver",
+                                                             false);
+
+  auto* contents = new LockContentsView(
+      mojom::TrayActionState::kAvailable, LockScreen::ScreenType::kLock,
+      DataDispatcher(),
+      std::make_unique<FakeLoginDetachableBaseModel>(DataDispatcher()));
+  SetUserCount(1);
+
+  std::unique_ptr<views::Widget> widget = CreateWidgetWithContent(contents);
+  LockContentsView::TestApi test_api(contents);
+
+  EXPECT_TRUE(test_api.bottom_status_indicator()->GetVisible());
+  EXPECT_FALSE(test_api.management_bubble()->GetVisible());
+
+  // Make the management bubble appear on click.
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->MoveMouseTo(
+      test_api.bottom_status_indicator()->GetBoundsInScreen().CenterPoint());
+  generator->ClickLeftButton();
+  EXPECT_TRUE(test_api.management_bubble()->GetVisible());
+
+  // Click somewhere else to make the management bubble disappear.
+  generator->MoveMouseTo(test_api.primary_big_view()
+                             ->GetUserView()
+                             ->GetBoundsInScreen()
+                             .CenterPoint());
+  generator->ClickLeftButton();
+  EXPECT_FALSE(test_api.management_bubble()->GetVisible());
+}
+
+// Do not show the management bubble on click if ADB sideloading is enabled and
+// device is enrolled.
+TEST_F(LockContentsViewUnitTestWithDeviceDisclosureEnabled,
+       DoNotShowManagementBubbleOnClickIfAdb) {
+  // If the device is enrolled, bottom_status_indicator should be visible.
+  Shell::Get()->system_tray_model()->SetEnterpriseDomainInfo("BestCompanyEver",
+                                                             false);
+
+  auto* contents = new LockContentsView(
+      mojom::TrayActionState::kAvailable, LockScreen::ScreenType::kLock,
+      DataDispatcher(),
+      std::make_unique<FakeLoginDetachableBaseModel>(DataDispatcher()));
+  SetUserCount(1);
+
+  std::unique_ptr<views::Widget> widget = CreateWidgetWithContent(contents);
+  LockContentsView::TestApi test_api(contents);
+
+  // Before system info are set, bottom status indicator status should be set to
+  // managed device.
+  EXPECT_EQ(test_api.bottom_status_indicator_status(),
+            LockContentsView::BottomIndicatorState::kManagedDevice);
+
+  // If the system starts with ADB sideloading enabled and the device is
+  // enrolled, the bottom status indicator should show the ADB warning.
+  DataDispatcher()->SetSystemInfo(
+      false /*show*/, false /*enforced*/, "Best version ever", "Asset ID: 6666",
+      "Bluetooth adapter", true /*adb_sideloading_enabled*/);
+  EXPECT_TRUE(test_api.bottom_status_indicator()->GetVisible());
+  EXPECT_EQ(test_api.bottom_status_indicator_status(),
+            LockContentsView::BottomIndicatorState::kAdbSideLoadingEnabled);
+
+  // The management bubble should not appear on click.
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->MoveMouseTo(
+      test_api.bottom_status_indicator()->GetBoundsInScreen().CenterPoint());
+  generator->ClickLeftButton();
+  EXPECT_FALSE(test_api.management_bubble()->GetVisible());
 }
 
 // Verifies the easy unlock tooltip is automatically displayed when requested.
@@ -2368,7 +2442,8 @@ TEST_F(LockContentsViewUnitTest, PowerwashShortcutSendsMojoCall) {
   SetWidget(CreateWidgetWithContent(contents));
 
   auto client = std::make_unique<MockLoginScreenClient>();
-  EXPECT_CALL(*client, ShowResetScreen());
+  EXPECT_CALL(*client,
+              HandleAccelerator(ash::LoginAcceleratorAction::kShowResetScreen));
 
   ui::test::EventGenerator* generator = GetEventGenerator();
   generator->PressKey(ui::KeyboardCode::VKEY_R, ui::EF_CONTROL_DOWN |

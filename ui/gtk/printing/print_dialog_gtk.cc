@@ -190,7 +190,7 @@ PrintDialogGtk::~PrintDialogGtk() {
     aura::Window* parent = gtk::GetAuraTransientParent(dialog_);
     if (parent) {
       parent->RemoveObserver(this);
-      gtk::ClearAuraTransientParent(dialog_);
+      gtk::ClearAuraTransientParent(dialog_, parent);
     }
     gtk_widget_destroy(dialog_);
     dialog_ = nullptr;
@@ -239,6 +239,42 @@ void PrintDialogGtk::UpdateSettings(
 
   gtk_print_settings_set_n_copies(gtk_settings_, settings->copies());
   gtk_print_settings_set_collate(gtk_settings_, settings->collate());
+  if (settings->dpi_horizontal() > 0 && settings->dpi_vertical() > 0) {
+    gtk_print_settings_set_resolution_xy(
+        gtk_settings_, settings->dpi_horizontal(), settings->dpi_vertical());
+#if defined(USE_CUPS)
+    std::string dpi = base::NumberToString(settings->dpi_horizontal());
+    if (settings->dpi_horizontal() != settings->dpi_vertical())
+      dpi += "x" + base::NumberToString(settings->dpi_vertical());
+    dpi += "dpi";
+
+    // The resolution attribute (case-insensitive) has decent coverage
+    // in the CUPS PPD API (Resolution, SetResolution, JCLResolution,
+    // CNRes_PGP). See
+    // https://chromium.googlesource.com/chromiumos/third_party/cups/+/49a182a4c42d/cups/mark.c#266
+    // for more information.
+    //
+    // Many PPDs use pdftopdf directly to generate the print data and pdftopdf
+    // uses the CUPS PPD API internally to handle resolution selection.
+    //
+    // Many third-party filters such as the Brother print filter that
+    // do not use the CUPS PPD API are case sensitive and tend to support
+    // the Resolution PPD attribute. For this reason "cups-Resolution"
+    // makes the most sense here.
+    //
+    // TODO(crbug.com/1119956): Since PrintBackendCUPS parses the PPD file in
+    // Chromium, it should be possible to store the resolution attribute name
+    // as well as a map from the gfx::Size resolution to the std::string
+    // serialized value (in case a non-standard value such as 500x500dpi is
+    // present) in the PrinterCapsAndDefaults object. This object then needs to
+    // be passed over here (there are a couple ways this can be done) where it
+    // can be used to lookup the CUPS PPD resolution name and serialized DPI
+    // value to use. The main benefit of the approach would be full support
+    // for the HPPrintQuality and LXResolution PPD attributes which some PPD
+    // files use.
+    gtk_print_settings_set(gtk_settings_, "cups-Resolution", dpi.c_str());
+#endif
+  }
 
 #if defined(USE_CUPS)
   // Set advanced settings first so they can be overridden by user applied
@@ -254,8 +290,8 @@ void PrintDialogGtk::UpdateSettings(
 
   std::string color_value;
   std::string color_setting_name;
-  printing::GetColorModelForMode(settings->color(), &color_setting_name,
-                                 &color_value);
+  printing::GetColorModelForModel(settings->color(), &color_setting_name,
+                                  &color_value);
   gtk_print_settings_set(gtk_settings_, color_setting_name.c_str(),
                          color_value.c_str());
 
@@ -389,7 +425,7 @@ void PrintDialogGtk::PrintDocument(const printing::MetafilePlayer& metafile,
     success = metafile.SaveTo(&file);
     file.Close();
     if (!success)
-      base::DeleteFile(path_to_pdf_, false);
+      base::DeleteFile(path_to_pdf_);
   }
 
   if (!success) {
@@ -544,7 +580,7 @@ void PrintDialogGtk::InitPrintSettings(
 void PrintDialogGtk::OnWindowDestroying(aura::Window* window) {
   DCHECK_EQ(gtk::GetAuraTransientParent(dialog_), window);
 
-  gtk::ClearAuraTransientParent(dialog_);
+  gtk::ClearAuraTransientParent(dialog_, window);
   window->RemoveObserver(this);
   if (callback_)
     std::move(callback_).Run(PrintingContextLinux::CANCEL);

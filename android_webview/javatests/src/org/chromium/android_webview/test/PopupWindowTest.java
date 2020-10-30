@@ -11,6 +11,7 @@ import android.webkit.JavascriptInterface;
 
 import androidx.test.filters.SmallTest;
 
+import org.hamcrest.Matchers;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -25,6 +26,7 @@ import org.chromium.android_webview.test.AwActivityTestRule.PopupInfo;
 import org.chromium.android_webview.test.TestAwContentsClient.ShouldInterceptRequestHelper;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.CriteriaNotSatisfiedException;
 import org.chromium.base.test.util.Feature;
 import org.chromium.content_public.browser.MessagePort;
 import org.chromium.content_public.browser.SelectionPopupController;
@@ -203,8 +205,14 @@ public class PopupWindowTest {
                     }
                 });
 
-        CriteriaHelper.pollUiThread(Criteria.equals(
-                myUserAgentString, () -> mActivityTestRule.getTitleOnUiThread(popupContents)));
+        CriteriaHelper.pollUiThread(() -> {
+            try {
+                Criteria.checkThat(mActivityTestRule.getTitleOnUiThread(popupContents),
+                        Matchers.is(myUserAgentString));
+            } catch (Exception e) {
+                throw new CriteriaNotSatisfiedException(e);
+            }
+        });
     }
 
     @Test
@@ -222,7 +230,7 @@ public class PopupWindowTest {
                         + "}</script>");
 
         mActivityTestRule.triggerPopup(mParentContents, mParentContentsClient, mWebServer,
-                parentPageHtml, null /* 204 response */, popupPath, "tryOpenWindow()");
+                parentPageHtml, "<html></html>", popupPath, "tryOpenWindow()");
         PopupInfo popupInfo = mActivityTestRule.createPopupContents(mParentContents);
         TestCallbackHelperContainer.OnPageFinishedHelper onPageFinishedHelper =
                 popupInfo.popupContentsClient.getOnPageFinishedHelper();
@@ -526,8 +534,9 @@ public class PopupWindowTest {
     // Copied from imeTest.java.
     private void assertWaitForSelectActionBarStatus(
             boolean show, final SelectionPopupController controller) {
-        CriteriaHelper.pollUiThread(
-                Criteria.equals(show, () -> controller.isSelectActionBarShowing()));
+        CriteriaHelper.pollUiThread(() -> {
+            Criteria.checkThat(controller.isSelectActionBarShowing(), Matchers.is(show));
+        });
     }
 
     private void hideSelectActionMode(final SelectionPopupController controller) {

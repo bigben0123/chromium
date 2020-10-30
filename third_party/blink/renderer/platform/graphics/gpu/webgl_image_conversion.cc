@@ -3733,7 +3733,8 @@ void WebGLImageConversion::ImageExtractor::ExtractImage(
   if (!image_)
     return;
 
-  sk_sp<SkImage> skia_image = image_->PaintImageForCurrentFrame().GetSkImage();
+  sk_sp<SkImage> skia_image =
+      image_->PaintImageForCurrentFrame().GetSwSkImage();
   SkImageInfo info =
       skia_image ? SkImageInfo::MakeN32Premul(image_->width(), image_->height())
                  : SkImageInfo::MakeUnknown();
@@ -3753,8 +3754,7 @@ void WebGLImageConversion::ImageExtractor::ExtractImage(
         image_->Data(), data_complete, ImageDecoder::kAlphaNotPremultiplied,
         ImageDecoder::kDefaultBitDepth,
         ignore_color_space ? ColorBehavior::Ignore()
-                           : ColorBehavior::TransformToSRGB(),
-        ImageDecoder::OverrideAllowDecodeToYuv::kDeny));
+                           : ColorBehavior::TransformToSRGB()));
     if (!decoder || !decoder->FrameCount())
       return;
     ImageFrame* frame = decoder->DecodeFrameBufferAtIndex(0);

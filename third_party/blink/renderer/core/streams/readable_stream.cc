@@ -18,7 +18,9 @@
 #include "third_party/blink/renderer/core/streams/promise_handler.h"
 #include "third_party/blink/renderer/core/streams/readable_stream_default_controller.h"
 #include "third_party/blink/renderer/core/streams/readable_stream_reader.h"
+#include "third_party/blink/renderer/core/streams/readable_writable_pair.h"
 #include "third_party/blink/renderer/core/streams/stream_algorithms.h"
+#include "third_party/blink/renderer/core/streams/stream_pipe_options.h"
 #include "third_party/blink/renderer/core/streams/stream_promise_resolver.h"
 #include "third_party/blink/renderer/core/streams/transferable_streams.h"
 #include "third_party/blink/renderer/core/streams/underlying_source_base.h"
@@ -42,62 +44,14 @@ namespace blink {
 ReadableStream::PipeOptions::PipeOptions()
     : prevent_close_(false), prevent_abort_(false), prevent_cancel_(false) {}
 
-ReadableStream::PipeOptions::PipeOptions(ScriptState* script_state,
-                                         ScriptValue options,
-                                         ExceptionState& exception_state) {
-  auto* isolate = script_state->GetIsolate();
-  v8::TryCatch block(isolate);
-  v8::Local<v8::Value> options_value = options.V8Value();
-  v8::Local<v8::Object> options_object;
-  if (options_value->IsUndefined()) {
-    options_object = v8::Object::New(isolate);
-  } else if (!options_value->ToObject(script_state->GetContext())
-                  .ToLocal(&options_object)) {
-    exception_state.RethrowV8Exception(block.Exception());
-    return;
-  }
-
-  // 4. Set preventClose to ! ToBoolean(preventClose), set preventAbort to !
-  // ToBoolean(preventAbort), and set preventCancel to !
-  // ToBoolean(preventCancel).
-  prevent_close_ =
-      GetBoolean(script_state, options_object, "preventClose", exception_state);
-  if (exception_state.HadException()) {
-    return;
-  }
-
-  prevent_abort_ =
-      GetBoolean(script_state, options_object, "preventAbort", exception_state);
-  if (exception_state.HadException()) {
-    return;
-  }
-
-  prevent_cancel_ = GetBoolean(script_state, options_object, "preventCancel",
-                               exception_state);
-  if (exception_state.HadException()) {
-    return;
-  }
-
-  v8::Local<v8::Value> signal_value;
-  if (!options_object
-           ->Get(script_state->GetContext(), V8AtomicString(isolate, "signal"))
-           .ToLocal(&signal_value)) {
-    exception_state.RethrowV8Exception(block.Exception());
-    return;
-  }
-
-  // 5. If signal is not undefined, and signal is not an instance of the
-  // AbortSignal interface, throw a TypeError exception.
-  if (signal_value->IsUndefined())
-    return;
-
-  signal_ = V8AbortSignal::ToImplWithTypeCheck(isolate, signal_value);
-  if (!signal_) {
-    exception_state.ThrowTypeError(
-        "'signal' must be an AbortSignal object or undefined");
-    return;
-  }
-}
+ReadableStream::PipeOptions::PipeOptions(const StreamPipeOptions* options)
+    : prevent_close_(options->hasPreventClose() ? options->preventClose()
+                                                : false),
+      prevent_abort_(options->hasPreventAbort() ? options->preventAbort()
+                                                : false),
+      prevent_cancel_(options->hasPreventCancel() ? options->preventCancel()
+                                                  : false),
+      signal_(options->hasSignal() ? options->signal() : nullptr) {}
 
 void ReadableStream::PipeOptions::Trace(Visitor* visitor) const {
   visitor->Trace(signal_);
@@ -860,6 +814,12 @@ class ReadableStream::TeeEngine::PullAlgorithm final : public StreamAlgorithm {
                 script_state, engine_->controller_[branch]);
           }
         }
+
+        // TODO(ricea): Implement https://github.com/whatwg/streams/pull/1045 so
+        // this step can be numbered correctly.
+        // Resolve |cancelPromise| with undefined.
+        engine_->cancel_promise_->ResolveWithUndefined(script_state);
+
         //    3. Set closed to true.
         engine_->closed_ = true;
 
@@ -1068,6 +1028,11 @@ void ReadableStream::TeeEngine::Start(ScriptState* script_state,
       //      [[readableStreamController]], r).
       ReadableStreamDefaultController::Error(GetScriptState(),
                                              engine_->controller_[1], r);
+
+      // TODO(ricea): Implement https://github.com/whatwg/streams/pull/1045 so
+      // this step can be numbered correctly.
+      // Resolve |cancelPromise| with undefined.
+      engine_->cancel_promise_->ResolveWithUndefined(GetScriptState());
     }
 
     void Trace(Visitor* visitor) const override {
@@ -1265,162 +1230,86 @@ ReadableStreamDefaultReader* ReadableStream::getReader(
   return getReader(script_state, exception_state);
 }
 
-ScriptValue ReadableStream::pipeThrough(ScriptState* script_state,
-                                        ScriptValue transform_stream,
-                                        ExceptionState& exception_state) {
-  return pipeThrough(script_state, transform_stream,
-                     ScriptValue(script_state->GetIsolate(),
-                                 v8::Undefined(script_state->GetIsolate())),
+ReadableStream* ReadableStream::pipeThrough(ScriptState* script_state,
+                                            ReadableWritablePair* transform,
+                                            ExceptionState& exception_state) {
+  return pipeThrough(script_state, transform, StreamPipeOptions::Create(),
                      exception_state);
 }
 
 // https://streams.spec.whatwg.org/#rs-pipe-through
-ScriptValue ReadableStream::pipeThrough(ScriptState* script_state,
-                                        ScriptValue transform_stream,
-                                        ScriptValue options,
-                                        ExceptionState& exception_state) {
+ReadableStream* ReadableStream::pipeThrough(ScriptState* script_state,
+                                            ReadableWritablePair* transform,
+                                            const StreamPipeOptions* options,
+                                            ExceptionState& exception_state) {
   // https://streams.spec.whatwg.org/#rs-pipe-through
-  // The first part of this function implements the unpacking of the {readable,
-  // writable} argument to the method.
-  v8::Local<v8::Value> pair_value = transform_stream.V8Value();
-  v8::Local<v8::Context> context = script_state->GetContext();
+  DCHECK(transform->hasReadable());
+  ReadableStream* readable_stream = transform->readable();
 
-  constexpr char kWritableIsNotWritableStream[] =
-      "parameter 1's 'writable' property is not a WritableStream.";
-  constexpr char kReadableIsNotReadableStream[] =
-      "parameter 1's 'readable' property is not a ReadableStream.";
-  constexpr char kWritableIsLocked[] = "parameter 1's 'writable' is locked.";
+  DCHECK(transform->hasWritable());
+  WritableStream* writable_stream = transform->writable();
 
-  v8::Local<v8::Object> pair;
-  if (!pair_value->ToObject(context).ToLocal(&pair)) {
-    exception_state.ThrowTypeError(kWritableIsNotWritableStream);
-    return ScriptValue();
-  }
-
-  v8::Isolate* isolate = script_state->GetIsolate();
-  v8::Local<v8::Value> writable, readable;
-  {
-    v8::TryCatch block(isolate);
-    if (!pair->Get(context, V8String(isolate, "writable")).ToLocal(&writable)) {
-      exception_state.RethrowV8Exception(block.Exception());
-      return ScriptValue();
-    }
-    DCHECK(!block.HasCaught());
-
-    if (!pair->Get(context, V8String(isolate, "readable")).ToLocal(&readable)) {
-      exception_state.RethrowV8Exception(block.Exception());
-      return ScriptValue();
-    }
-    DCHECK(!block.HasCaught());
-  }
-
-  // 2. If ! IsWritableStream(_writable_) is *false*, throw a *TypeError*
-  //    exception.
-  WritableStream* writable_stream =
-      V8WritableStream::ToImplWithTypeCheck(isolate, writable);
-  if (!writable_stream) {
-    exception_state.ThrowTypeError(kWritableIsNotWritableStream);
-    return ScriptValue();
-  }
-
-  // 3. If ! IsReadableStream(_readable_) is *false*, throw a *TypeError*
-  //    exception.
-  if (!V8ReadableStream::HasInstance(readable, isolate)) {
-    exception_state.ThrowTypeError(kReadableIsNotReadableStream);
-    return ScriptValue();
-  }
-
-  // 4. Set preventClose to ! ToBoolean(preventClose), set preventAbort to !
-  //    ToBoolean(preventAbort), and set preventCancel to !
-  //    ToBoolean(preventCancel).
-
-  // 5. If signal is not undefined, and signal is not an instance of the
-  //    AbortSignal interface, throw a TypeError exception.
-  auto* pipe_options =
-      MakeGarbageCollected<PipeOptions>(script_state, options, exception_state);
-  if (exception_state.HadException()) {
-    return ScriptValue();
-  }
-
-  // 6. If ! IsReadableStreamLocked(*this*) is *true*, throw a *TypeError*
-  //    exception.
+  // 1. If ! IsReadableStreamLocked(this) is true, throw a TypeError exception.
   if (IsLocked(this)) {
     exception_state.ThrowTypeError("Cannot pipe a locked stream");
-    return ScriptValue();
+    return nullptr;
   }
 
-  // 7. If ! IsWritableStreamLocked(_writable_) is *true*, throw a *TypeError*
-  //    exception.
+  // 2. If ! IsWritableStreamLocked(transform["writable"]) is true, throw a
+  //    TypeError exception.
   if (WritableStream::IsLocked(writable_stream)) {
-    exception_state.ThrowTypeError(kWritableIsLocked);
-    return ScriptValue();
+    exception_state.ThrowTypeError("parameter 1's 'writable' is locked");
+    return nullptr;
   }
 
-  // 8. Let _promise_ be ! ReadableStreamPipeTo(*this*, _writable_,
-  //    _preventClose_, _preventAbort_, _preventCancel_,
-  //   _signal_).
+  // 3. Let signal be options["signal"] if it exists, or undefined otherwise.
+  auto* pipe_options = MakeGarbageCollected<PipeOptions>(options);
 
+  // 4. Let promise be ! ReadableStreamPipeTo(this, transform["writable"],
+  //    options["preventClose"], options["preventAbort"],
+  //    options["preventCancel"], signal).
   ScriptPromise promise =
       PipeTo(script_state, this, writable_stream, pipe_options);
 
-  // 9. Set _promise_.[[PromiseIsHandled]] to *true*.
+  // 5. Set promise.[[PromiseIsHandled]] to true.
   promise.MarkAsHandled();
 
-  // 10. Return _readable_.
-  return ScriptValue(script_state->GetIsolate(), readable);
+  // 6. Return transform["readable"].
+  return readable_stream;
 }
 
 ScriptPromise ReadableStream::pipeTo(ScriptState* script_state,
-                                     ScriptValue destination,
+                                     WritableStream* destination,
                                      ExceptionState& exception_state) {
-  return pipeTo(script_state, destination,
-                ScriptValue(script_state->GetIsolate(),
-                            v8::Undefined(script_state->GetIsolate())),
+  return pipeTo(script_state, destination, StreamPipeOptions::Create(),
                 exception_state);
 }
 
 ScriptPromise ReadableStream::pipeTo(ScriptState* script_state,
-                                     ScriptValue destination_value,
-                                     ScriptValue options,
+                                     WritableStream* destination,
+                                     const StreamPipeOptions* options,
                                      ExceptionState& exception_state) {
   // https://streams.spec.whatwg.org/#rs-pipe-to
-  // 2. If ! IsWritableStream(dest) is false, return a promise rejected with a
-  //    TypeError exception.
-  // TODO(ricea): Do this in the IDL instead.
-  WritableStream* destination = V8WritableStream::ToImplWithTypeCheck(
-      script_state->GetIsolate(), destination_value.V8Value());
-
-  if (!destination) {
-    exception_state.ThrowTypeError("Illegal invocation");
-    return ScriptPromise();
-  }
-
-  // 3. Set preventClose to ! ToBoolean(preventClose), set preventAbort to !
-  //    ToBoolean(preventAbort), and set preventCancel to !
-  //    ToBoolean(preventCancel).
-  // 4. If signal is not undefined, and signal is not an instance of the
-  //    AbortSignal interface, return a promise rejected with a TypeError
-  //    exception.
-  auto* pipe_options =
-      MakeGarbageCollected<PipeOptions>(script_state, options, exception_state);
-  if (exception_state.HadException()) {
-    return ScriptPromise();
-  }
-
-  // 5. If ! IsReadableStreamLocked(this) is true, return a promise rejected
-  // with a TypeError exception.
+  // 1. If ! IsReadableStreamLocked(this) is true, return a promise rejected
+  //    with a TypeError exception.
   if (IsLocked(this)) {
     exception_state.ThrowTypeError("Cannot pipe a locked stream");
     return ScriptPromise();
   }
 
-  // 6. If ! IsWritableStreamLocked(dest) is true, return a promise rejected
-  // with a TypeError exception.
+  // 2. If ! IsWritableStreamLocked(destination) is true, return a promise
+  //    rejected with a TypeError exception.
   if (WritableStream::IsLocked(destination)) {
     exception_state.ThrowTypeError("Cannot pipe to a locked stream");
     return ScriptPromise();
   }
 
+  // 3. Let signal be options["signal"] if it exists, or undefined otherwise.
+  auto* pipe_options = MakeGarbageCollected<PipeOptions>(options);
+
+  // 4. Return ! ReadableStreamPipeTo(this, destination,
+  //    options["preventClose"], options["preventAbort"],
+  //    options["preventCancel"], signal).
   return PipeTo(script_state, this, destination, pipe_options);
 }
 
@@ -1581,19 +1470,13 @@ void ReadableStream::Tee(ScriptState* script_state,
   *branch2 = engine->Branch2();
 }
 
-void ReadableStream::LockAndDisturb(ScriptState* script_state,
-                                    ExceptionState& exception_state) {
-  ScriptState::Scope scope(script_state);
-
+void ReadableStream::LockAndDisturb(ScriptState* script_state) {
   if (reader_) {
     return;
   }
 
-  ReadableStreamReader* reader =
-      AcquireDefaultReader(script_state, this, false, exception_state);
-  if (!reader) {
-    return;
-  }
+  ReadableStreamReader* reader = GetReaderNotForAuthorCode(script_state);
+  DCHECK(reader);
 
   is_disturbed_ = true;
 }
@@ -1601,20 +1484,38 @@ void ReadableStream::LockAndDisturb(ScriptState* script_state,
 void ReadableStream::Serialize(ScriptState* script_state,
                                MessagePort* port,
                                ExceptionState& exception_state) {
+  // https://streams.spec.whatwg.org/#rs-transfer
+  // 1. If ! IsReadableStreamLocked(value) is true, throw a "DataCloneError"
+  //    DOMException.
   if (IsLocked(this)) {
     exception_state.ThrowTypeError("Cannot transfer a locked stream");
     return;
   }
 
+  // Done by SerializedScriptValue::TransferReadableStream():
+  // 2. Let port1 be a new MessagePort in the current Realm.
+  // 3. Let port2 be a new MessagePort in the current Realm.
+  // 4. Entangle port1 and port2.
+
+  // 5. Let writable be a new WritableStream in the current Realm.
+  // 6. Perform ! SetUpCrossRealmTransformWritable(writable, port1).
   auto* writable =
       CreateCrossRealmTransformWritable(script_state, port, exception_state);
   if (exception_state.HadException()) {
     return;
   }
 
+  // 7. Let promise be ! ReadableStreamPipeTo(value, writable, false, false,
+  //    false).
   auto promise =
       PipeTo(script_state, this, writable, MakeGarbageCollected<PipeOptions>());
+
+  // 8. Set promise.[[PromiseIsHandled]] to true.
   promise.MarkAsHandled();
+
+  // This step is done in a roundabout way by the caller:
+  // 9. Set dataHolder.[[port]] to ! StructuredSerializeWithTransfer(port2,
+  //    « port2 »).
 }
 
 ReadableStream* ReadableStream::Deserialize(ScriptState* script_state,
@@ -1624,6 +1525,17 @@ ReadableStream* ReadableStream::Deserialize(ScriptState* script_state,
   // run author code.
   v8::Isolate::AllowJavascriptExecutionScope allow_js(
       script_state->GetIsolate());
+
+  // https://streams.spec.whatwg.org/#rs-transfer
+  // These steps are done by V8ScriptValueDeserializer::ReadDOMObject().
+  // 1. Let deserializedRecord be !
+  //    StructuredDeserializeWithTransfer(dataHolder.[[port]], the current
+  //    Realm).
+  // 2. Let port be deserializedRecord.[[Deserialized]].
+
+  // 3. Perform ! SetUpCrossRealmTransformReadable(value, port).
+  // In the standard |value| contains an uninitialized ReadableStream. In the
+  // implementation, we create the stream here.
   auto* readable =
       CreateCrossRealmTransformReadable(script_state, port, exception_state);
   if (exception_state.HadException()) {
@@ -1633,8 +1545,11 @@ ReadableStream* ReadableStream::Deserialize(ScriptState* script_state,
 }
 
 ReadableStreamDefaultReader* ReadableStream::GetReaderNotForAuthorCode(
-    ScriptState* script_state,
-    ExceptionState& exception_state) {
+    ScriptState* script_state) {
+  DCHECK(!IsLocked(this));
+
+  // Since the stream is not locked, AcquireDefaultReader cannot fail.
+  NonThrowableExceptionState exception_state(__FILE__, __LINE__);
   return AcquireDefaultReader(script_state, this, false, exception_state);
 }
 

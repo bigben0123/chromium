@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <limits>
 
-#include "base/macros.h"
 #include "base/numerics/clamped_math.h"
 #include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_intersection_observer_callback.h"
@@ -48,6 +47,10 @@ class IntersectionObserverDelegateImpl final
       : context_(context),
         callback_(std::move(callback)),
         delivery_behavior_(delivery_behavior) {}
+  IntersectionObserverDelegateImpl(const IntersectionObserverDelegateImpl&) =
+      delete;
+  IntersectionObserverDelegateImpl& operator=(
+      const IntersectionObserverDelegateImpl&) = delete;
 
   IntersectionObserver::DeliveryBehavior GetDeliveryBehavior() const override {
     return delivery_behavior_;
@@ -69,7 +72,6 @@ class IntersectionObserverDelegateImpl final
   WeakMember<ExecutionContext> context_;
   IntersectionObserver::EventCallback callback_;
   IntersectionObserver::DeliveryBehavior delivery_behavior_;
-  DISALLOW_COPY_AND_ASSIGN(IntersectionObserverDelegateImpl);
 };
 
 void ParseMargin(String margin_parameter,
@@ -87,6 +89,7 @@ void ParseMargin(String margin_parameter,
   CSSTokenizer tokenizer(margin_parameter);
   const auto tokens = tokenizer.TokenizeToEOF();
   CSSParserTokenRange token_range(tokens);
+  token_range.ConsumeWhitespace();
   while (token_range.Peek().GetType() != kEOFToken &&
          !exception_state.HadException()) {
     if (margin.size() == 4) {
@@ -133,6 +136,9 @@ void ParseThresholds(const DoubleOrDoubleSequence& threshold_parameter,
     for (auto threshold_value : threshold_parameter.GetAsDoubleSequence())
       thresholds.push_back(base::MakeClampedNum<float>(threshold_value));
   }
+
+  if (thresholds.IsEmpty())
+    thresholds.push_back(0.f);
 
   for (auto threshold_value : thresholds) {
     if (std::isnan(threshold_value) || threshold_value < 0.0 ||
@@ -428,6 +434,14 @@ bool IntersectionObserver::ComputeIntersections(unsigned flags) {
   DCHECK(!RootIsImplicit());
   if (!RootIsValid() || !GetExecutionContext() || observations_.IsEmpty())
     return false;
+
+  // If we're processing post-layout deliveries only and we're not a post-layout
+  // delivery observer, then return early.
+  if (flags & IntersectionObservation::kPostLayoutDeliveryOnly) {
+    if (GetDeliveryBehavior() != kDeliverDuringPostLayoutSteps)
+      return false;
+  }
+
   IntersectionGeometry::RootGeometry root_geometry(
       IntersectionGeometry::GetRootLayoutObjectForTarget(root(), nullptr,
                                                          false),

@@ -56,11 +56,8 @@ const char* const kPersistentPrefNames[] = {
     ash::prefs::kAccessibilitySelectToSpeakEnabled,
     ash::prefs::kAccessibilitySwitchAccessEnabled,
     ash::prefs::kAccessibilitySwitchAccessSelectKeyCodes,
-    ash::prefs::kAccessibilitySwitchAccessSelectSetting,
     ash::prefs::kAccessibilitySwitchAccessNextKeyCodes,
-    ash::prefs::kAccessibilitySwitchAccessNextSetting,
     ash::prefs::kAccessibilitySwitchAccessPreviousKeyCodes,
-    ash::prefs::kAccessibilitySwitchAccessPreviousSetting,
     ash::prefs::kAccessibilitySwitchAccessAutoScanEnabled,
     ash::prefs::kAccessibilitySwitchAccessAutoScanSpeedMs,
     ash::prefs::kAccessibilitySwitchAccessAutoScanKeyboardSpeedMs,
@@ -131,7 +128,7 @@ const char* const kPersistentPrefNames[] = {
     prefs::kTabStatsWindowCountMax,
     prefs::kTabStatsDailySample,
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
     prefs::kShowFullscreenToolbar,
 #endif
 

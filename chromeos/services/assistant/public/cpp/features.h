@@ -58,6 +58,14 @@ extern const base::Feature kAssistantWaitScheduling;
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
 extern const base::Feature kEnableAmbientAssistant;
 
+// Enables Better Assistant.
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
+extern const base::Feature kEnableBetterAssistant;
+
+// Enables Bloom integration.
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
+extern const base::Feature kEnableBloom;
+
 // Enables DSP for hotword detection.
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
 extern const base::Feature kEnableDspHotword;
@@ -89,10 +97,17 @@ COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsAppSupportEnabled();
 
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsAudioEraserEnabled();
 
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsBetterAssistantEnabled();
+
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsBetterOnboardingEnabled();
+
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsBloomEnabled();
 
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
 bool IsConversationStartersV2Enabled();
+
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
+bool IsAssistantDebuggingEnabled();
 
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsDspHotwordEnabled();
 

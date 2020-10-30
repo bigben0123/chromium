@@ -13,9 +13,13 @@ function setCrostiniPrefs(enabled, optional = {}) {
     sharedPaths = {},
     sharedUsbDevices = [],
     forwardedPorts = [],
-    crostiniMicSharingEnabled = false
+    crostiniMicSharingEnabled = false,
+    arcEnabled = false,
   } = optional;
   crostiniPage.prefs = {
+    arc: {
+      enabled: {value: arcEnabled},
+    },
     crostini: {
       enabled: {value: enabled},
       port_forwarding: {ports: {value: forwardedPorts}},
@@ -49,9 +53,8 @@ suite('CrostiniPageTests', function() {
   });
 
   teardown(function() {
-    console.log('Teardown has begun.');
     crostiniPage.remove();
-    console.log('Teardown has ended.');
+    settings.Router.getInstance().resetRouteForTesting();
   });
 
   suite('MainPage', function() {
@@ -89,6 +92,22 @@ suite('CrostiniPageTests', function() {
       await test_util.flushTasks();
       assertFalse(button.disabled);
     });
+
+    test('Deep link to setup Crostini', async () => {
+      loadTimeData.overrideValues({isDeepLinkingEnabled: true});
+      assertTrue(loadTimeData.getBoolean('isDeepLinkingEnabled'));
+
+      const params = new URLSearchParams;
+      params.append('settingId', '800');
+      settings.Router.getInstance().navigateTo(
+          settings.routes.CROSTINI, params);
+
+      const deepLinkElement = crostiniPage.$$('#enable');
+      await test_util.waitAfterNextRender(deepLinkElement);
+      assertEquals(
+          deepLinkElement, getDeepActiveElement(),
+          'Enable Crostini button should be focused for settingId=800.');
+    });
   });
 
   suite('SubPageDetails', function() {
@@ -96,33 +115,21 @@ suite('CrostiniPageTests', function() {
     let subpage;
 
     setup(async function() {
-      setCrostiniPrefs(true);
+      setCrostiniPrefs(true, {arcEnabled: true});
       loadTimeData.overrideValues({
         showCrostiniExportImport: true,
         showCrostiniContainerUpgrade: true,
         showCrostiniPortForwarding: true,
-        showCrostiniMic: true,
         showCrostiniDiskResize: true,
-      });
-
-      const eventPromise = new Promise((resolve) => {
-                             const v = cr.addWebUIListener(
-                                 'crostini-installer-status-changed', () => {
-                                   resolve(v);
-                                 });
-                           }).then((v) => {
-        assertTrue(cr.removeWebUIListener(v));
+        arcAdbSideloadingSupported: true,
       });
 
       settings.Router.getInstance().navigateTo(settings.routes.CROSTINI);
       crostiniPage.$$('#crostini').click();
 
-      const pageLoadPromise = test_util.flushTasks().then(() => {
-        subpage = crostiniPage.$$('settings-crostini-subpage');
-        assertTrue(!!subpage);
-      });
-
-      await Promise.all([pageLoadPromise, eventPromise]);
+      await test_util.flushTasks();
+      subpage = crostiniPage.$$('settings-crostini-subpage');
+      assertTrue(!!subpage);
     });
 
     suite('SubPageDefault', function() {
@@ -130,6 +137,7 @@ suite('CrostiniPageTests', function() {
         assertTrue(!!subpage.$$('#crostini-shared-paths'));
         assertTrue(!!subpage.$$('#crostini-shared-usb-devices'));
         assertTrue(!!subpage.$$('#crostini-export-import'));
+        assertTrue(!!subpage.$$('#crostini-enable-arc-adb'));
         assertTrue(!!subpage.$$('#remove'));
         assertTrue(!!subpage.$$('#container-upgrade'));
         assertTrue(!!subpage.$$('#crostini-port-forwarding'));
@@ -187,6 +195,14 @@ suite('CrostiniPageTests', function() {
         assertFalse(button.disabled);
       });
 
+      test('InstallerStatusQueriedOnAttach', async function() {
+        // We navigated the page during setup, so this request should've been
+        // triggered by here.
+        assertTrue(
+            crostiniBrowserProxy.getCallCount(
+                'requestCrostiniInstallerStatus') >= 1);
+      });
+
       test('Export', async function() {
         assertTrue(!!subpage.$$('#crostini-export-import'));
         subpage.$$('#crostini-export-import').click();
@@ -197,6 +213,25 @@ suite('CrostiniPageTests', function() {
         subpage.$$('#export cr-button').click();
         assertEquals(
             1, crostiniBrowserProxy.getCallCount('exportCrostiniContainer'));
+      });
+
+      test('Deep link to backup linux', async () => {
+        loadTimeData.overrideValues({isDeepLinkingEnabled: true});
+        assertTrue(loadTimeData.getBoolean('isDeepLinkingEnabled'));
+
+        const params = new URLSearchParams;
+        params.append('settingId', '802');
+        settings.Router.getInstance().navigateTo(
+            settings.routes.CROSTINI_EXPORT_IMPORT, params);
+
+        Polymer.dom.flush();
+        subpage = crostiniPage.$$('settings-crostini-export-import');
+
+        const deepLinkElement = subpage.$$('#export cr-button');
+        await test_util.waitAfterNextRender(deepLinkElement);
+        assertEquals(
+            deepLinkElement, getDeepActiveElement(),
+            'Export button should be focused for settingId=802.');
       });
 
       test('Import', async function() {
@@ -380,6 +415,26 @@ suite('CrostiniPageTests', function() {
         await test_util.flushTasks();
         const dialog = subpage.$$('settings-crostini-disk-resize-dialog');
         assertTrue(!!dialog);
+      });
+
+      test('Deep link to resize disk', async () => {
+        loadTimeData.overrideValues({isDeepLinkingEnabled: true});
+        assertTrue(loadTimeData.getBoolean('isDeepLinkingEnabled'));
+        assertTrue(!!subpage.$$('#showDiskResizeButton'));
+        await crostiniBrowserProxy.resolvePromises(
+            'getCrostiniDiskInfo',
+            {succeeded: true, canResize: true, isUserChosenSize: true});
+
+        const params = new URLSearchParams;
+        params.append('settingId', '805');
+        settings.Router.getInstance().navigateTo(
+            settings.routes.CROSTINI_DETAILS, params);
+
+        const deepLinkElement = subpage.$$('#showDiskResizeButton');
+        await test_util.waitAfterNextRender(deepLinkElement);
+        assertEquals(
+            deepLinkElement, getDeepActiveElement(),
+            'Resize disk button should be focused for settingId=805.');
       });
     });
 
@@ -687,10 +742,6 @@ suite('CrostiniPageTests', function() {
       };
 
       async function clickShowDiskResize(userChosen) {
-        console.log('Running clickShowDiskResize');
-        console.log('Awaiting test_util.flushTasks');
-        await test_util.flushTasks();
-        console.log('Awaiting getDiskInfo');
         await crostiniBrowserProxy.resolvePromises('getCrostiniDiskInfo', {
           succeeded: true,
           canResize: true,
@@ -699,7 +750,6 @@ suite('CrostiniPageTests', function() {
           defaultIndex: 2
         });
         subpage.$$('#showDiskResizeButton').click();
-        console.log('Awaiting test_util.flushTasks');
         await test_util.flushTasks();
         dialog = subpage.$$('settings-crostini-disk-resize-dialog');
 
@@ -712,29 +762,20 @@ suite('CrostiniPageTests', function() {
       }
 
       setup(async function() {
-        console.log('Running setup');
         assertTrue(!!subpage.$$('#showDiskResizeButton'));
         const subtext = subpage.$$('#diskSizeDescription');
-        console.log('Awaiting test_util.flushTasks');
-        await test_util.flushTasks();
       });
 
       test('ResizeUnsupported', async function() {
-        console.log(`Starting test ${this.test.title}`);
         await crostiniBrowserProxy.resolvePromises(
             'getCrostiniDiskInfo', {succeeded: true, canResize: false});
         assertFalse(isVisible(subpage.$$('#showDiskResizeButton')));
         assertEquals(
             subpage.$$('#diskSizeDescription').innerText,
             loadTimeData.getString('crostiniDiskResizeNotSupportedSubtext'));
-        console.log('Rejecting promises.');
-        await crostiniBrowserProxy.rejectAllPromises(
-            ['getCrostiniDiskInfo', 'resizeCrostiniDisk']);
-        console.log(`Finished test ${this.test.title}`);
       });
 
       test('ResizeButtonAndSubtextCorrectlySet', async function() {
-        console.log(`Starting test ${this.test.title}`);
         await crostiniBrowserProxy.resolvePromises(
             'getCrostiniDiskInfo', resizeableData);
         const button = subpage.$$('#showDiskResizeButton');
@@ -744,14 +785,9 @@ suite('CrostiniPageTests', function() {
             button.innerText,
             loadTimeData.getString('crostiniDiskResizeShowButton'));
         assertEquals(subtext.innerText, 'label 100');
-        console.log('Rejecting promises.');
-        await crostiniBrowserProxy.rejectAllPromises(
-            ['getCrostiniDiskInfo', 'resizeCrostiniDisk']);
-        console.log(`Finished test ${this.test.title}`);
       });
 
       test('ReserveSizeButtonAndSubtextCorrectlySet', async function() {
-        console.log(`Starting test ${this.test.title}`);
         await crostiniBrowserProxy.resolvePromises(
             'getCrostiniDiskInfo', sparseDiskData);
         const button = subpage.$$('#showDiskResizeButton');
@@ -764,49 +800,31 @@ suite('CrostiniPageTests', function() {
             subtext.innerText,
             loadTimeData.getString(
                 'crostiniDiskResizeDynamicallyAllocatedSubtext'));
-        console.log('Rejecting promises.');
-        await crostiniBrowserProxy.rejectAllPromises(
-            ['getCrostiniDiskInfo', 'resizeCrostiniDisk']);
-        console.log(`Finished test ${this.test.title}`);
       });
 
       test('ResizeRecommendationShownCorrectly', async function() {
-        console.log(`Starting test ${this.test.title}`);
         await clickShowDiskResize(true);
         const diskInfo = resizeableData;
-        console.log('Awaiting getCrostiniDiskInfo');
         await crostiniBrowserProxy.resolvePromises(
             'getCrostiniDiskInfo', diskInfo);
 
         assertTrue(isVisible(dialog.$$('#recommended-size')));
         assertFalse(isVisible(dialog.$$('#recommended-size-warning')));
-        console.log('Rejecting promises.');
-        await crostiniBrowserProxy.rejectAllPromises(
-            ['getCrostiniDiskInfo', 'resizeCrostiniDisk']);
-        console.log(`Finished test ${this.test.title}`);
       });
 
       test('ResizeRecommendationWarningShownCorrectly', async function() {
-        console.log(`Starting test ${this.test.title}`);
         await clickShowDiskResize(true);
         const diskInfo = resizeableData;
         diskInfo.isLowSpaceAvailable = true;
-        console.log('Awaiting getCrostiniDiskInfo');
         await crostiniBrowserProxy.resolvePromises(
             'getCrostiniDiskInfo', diskInfo);
 
         assertFalse(isVisible(dialog.$$('#recommended-size')));
         assertTrue(isVisible(dialog.$$('#recommended-size-warning')));
-        console.log('Rejecting promises.');
-        await crostiniBrowserProxy.rejectAllPromises(
-            ['getCrostiniDiskInfo', 'resizeCrostiniDisk']);
-        console.log(`Finished test ${this.test.title}`);
       });
 
       test('MessageShownIfErrorAndCanRetry', async function() {
-        console.log(`Starting test ${this.test.title}`);
         await clickShowDiskResize(true);
-        console.log('Awaiting getCrostiniDiskInfo');
         await crostiniBrowserProxy.resolvePromises(
             'getCrostiniDiskInfo', {succeeded: false, isUserChosenSize: true});
 
@@ -819,14 +837,12 @@ suite('CrostiniPageTests', function() {
 
         // Back to the loading screen.
         button.click();
-        console.log('Awaiting test_util.flushTasks');
         await test_util.flushTasks();
         assertVisibleBlockIs('#loading');
         assertTrue(dialog.$$('#resize').disabled);
         assertFalse(dialog.$$('#cancel').disabled);
 
         // And failure page again.
-        console.log('Awaiting getCrostiniDiskInfo');
         await crostiniBrowserProxy.rejectPromises('getCrostiniDiskInfo');
         button = dialog.$$('#retry');
         assertTrue(isVisible(button));
@@ -834,33 +850,20 @@ suite('CrostiniPageTests', function() {
         assertTrue(dialog.$$('#resize').disabled);
         assertTrue(dialog.$$('#resize').disabled);
         assertFalse(dialog.$$('#cancel').disabled);
-
-        console.log('Rejecting promises.');
-        await crostiniBrowserProxy.rejectAllPromises(
-            ['getCrostiniDiskInfo', 'resizeCrostiniDisk']);
-        console.log(`Finished test ${this.test.title}`);
       });
 
       test('MessageShownIfCannotResize', async function() {
-        console.log(`Starting test ${this.test.title}`);
         await clickShowDiskResize(true);
-        console.log('Awaiting getCrostiniDiskInfo');
         await crostiniBrowserProxy.resolvePromises(
             'getCrostiniDiskInfo',
             {succeeded: true, canResize: false, isUserChosenSize: true});
         assertVisibleBlockIs('#unsupported');
         assertTrue(dialog.$$('#resize').disabled);
         assertFalse(dialog.$$('#cancel').disabled);
-        console.log('Rejecting promises.');
-        await crostiniBrowserProxy.rejectAllPromises(
-            ['getCrostiniDiskInfo', 'resizeCrostiniDisk']);
-        console.log(`Finished test ${this.test.title}`);
       });
 
       test('ResizePageShownIfCanResize', async function() {
-        console.log(`Starting test ${this.test.title}`);
         await clickShowDiskResize(true);
-        console.log('Awaiting getCrostiniDiskInfo');
         await crostiniBrowserProxy.resolvePromises(
             'getCrostiniDiskInfo', resizeableData);
         assertVisibleBlockIs('#resize-block');
@@ -871,78 +874,50 @@ suite('CrostiniPageTests', function() {
 
         assertFalse(dialog.$$('#resize').disabled);
         assertFalse(dialog.$$('#cancel').disabled);
-        console.log('Rejecting promises.');
-        await crostiniBrowserProxy.rejectAllPromises(
-            ['getCrostiniDiskInfo', 'resizeCrostiniDisk']);
-        console.log(`Finished test ${this.test.title}`);
       });
 
       test('InProgressResizing', async function() {
-        console.log(`Starting test ${this.test.title}`);
         await clickShowDiskResize(true);
-        console.log('Awaiting getCrostiniDiskInfo');
         await crostiniBrowserProxy.resolvePromises(
             'getCrostiniDiskInfo', resizeableData);
         const button = dialog.$$('#resize');
         button.click();
-        console.log('Awaiting test_util.flushTasks');
         await test_util.flushTasks();
         assertTrue(button.disabled);
         assertFalse(isVisible(dialog.$$('#done')));
         assertTrue(isVisible(dialog.$$('#resizing')));
         assertFalse(isVisible(dialog.$$('#resize-error')));
         assertTrue(dialog.$$('#cancel').disabled);
-        console.log('Rejecting promises.');
-        await crostiniBrowserProxy.rejectAllPromises(
-            ['getCrostiniDiskInfo', 'resizeCrostiniDisk']);
-        console.log(`Finished test ${this.test.title}`);
       });
 
       test('ErrorResizing', async function() {
-        console.log(`Starting test ${this.test.title}`);
         await clickShowDiskResize(true);
-        console.log('Awaiting getCrostiniDiskInfo');
         await crostiniBrowserProxy.resolvePromises(
             'getCrostiniDiskInfo', resizeableData);
         const button = dialog.$$('#resize');
         button.click();
-        console.log('Awaiting resizeCrostiniDisk');
         await crostiniBrowserProxy.resolvePromises('resizeCrostiniDisk', false);
         assertFalse(button.disabled);
         assertFalse(isVisible(dialog.$$('#done')));
         assertFalse(isVisible(dialog.$$('#resizing')));
         assertTrue(isVisible(dialog.$$('#resize-error')));
         assertFalse(dialog.$$('#cancel').disabled);
-        console.log('Rejecting promises.');
-        await crostiniBrowserProxy.rejectAllPromises(
-            ['getCrostiniDiskInfo', 'resizeCrostiniDisk']);
-        console.log(`Finished test ${this.test.title}`);
       });
 
       test('SuccessResizing', async function() {
-        console.log(`Starting test ${this.test.title}`);
         await clickShowDiskResize(true);
-        console.log('Awaiting getCrostiniDiskInfo');
         await crostiniBrowserProxy.resolvePromises(
             'getCrostiniDiskInfo', resizeableData);
         const button = dialog.$$('#resize');
         button.click();
-        console.log('Awaiting resizeCrostiniDisk');
         await crostiniBrowserProxy.resolvePromises('resizeCrostiniDisk', true);
         // Dialog should close itself.
-        console.log('Awaiting close');
         await test_util.eventToPromise('close', dialog);
-        console.log('Rejecting promises.');
-        await crostiniBrowserProxy.rejectAllPromises(
-            ['getCrostiniDiskInfo', 'resizeCrostiniDisk']);
-        console.log(`Finished test ${this.test.title}`);
       });
 
       test('DiskResizeConfirmationDialogShownAndAccepted', async function() {
-        console.log(`Starting test ${this.test.title}`);
         await crostiniBrowserProxy.resolvePromises(
             'getCrostiniDiskInfo', sparseDiskData);
-        console.log('Awaiting show');
         await clickShowDiskResize(false);
         // Dismiss confirmation.
         let confirmationDialog =
@@ -950,7 +925,6 @@ suite('CrostiniPageTests', function() {
         assertTrue(isVisible(confirmationDialog.$$('#continue')));
         assertTrue(isVisible(confirmationDialog.$$('#cancel')));
         confirmationDialog.$$('#continue').click();
-        console.log('Awaiting close');
         await test_util.eventToPromise('close', confirmationDialog);
         assertFalse(isVisible(confirmationDialog));
 
@@ -961,18 +935,15 @@ suite('CrostiniPageTests', function() {
 
         // Cancel main resize dialog.
         dialog.$$('#cancel').click();
-        console.log('Awaiting close');
         await test_util.eventToPromise('close', dialog);
         assertFalse(isVisible(dialog));
 
         // On another click, confirmation dialog should be shown again.
-        console.log('Awaiting click show');
         await clickShowDiskResize(false);
         confirmationDialog =
             subpage.$$('settings-crostini-disk-resize-confirmation-dialog');
         assertTrue(isVisible(confirmationDialog.$$('#continue')));
         confirmationDialog.$$('#continue').click();
-        console.log('Awaiting close');
         await test_util.eventToPromise('close', confirmationDialog);
 
         // Main dialog should show again.
@@ -980,17 +951,11 @@ suite('CrostiniPageTests', function() {
         assertTrue(!!dialog);
         assertTrue(isVisible(dialog.$$('#resize')));
         assertTrue(isVisible(dialog.$$('#cancel')));
-        console.log('Rejecting promises.');
-        await crostiniBrowserProxy.rejectAllPromises(
-            ['getCrostiniDiskInfo', 'resizeCrostiniDisk']);
-        console.log(`Finished test ${this.test.title}`);
       });
 
       test('DiskResizeConfirmationDialogShownAndCanceled', async function() {
-        console.log(`Starting test ${this.test.title}`);
         await crostiniBrowserProxy.resolvePromises(
             'getCrostiniDiskInfo', sparseDiskData);
-        console.log('Awaiting click show');
         await clickShowDiskResize(false);
 
         const confirmationDialog =
@@ -998,14 +963,9 @@ suite('CrostiniPageTests', function() {
         assertTrue(isVisible(confirmationDialog.$$('#continue')));
         assertTrue(isVisible(confirmationDialog.$$('#cancel')));
         confirmationDialog.$$('#cancel').click();
-        console.log('Awaiting confirmationDialog close');
         await test_util.eventToPromise('close', confirmationDialog);
 
         assertFalse(!!subpage.$$('settings-crostini-disk-resize-dialog'));
-        console.log('Rejecting promises.');
-        await crostiniBrowserProxy.rejectAllPromises(
-            ['getCrostiniDiskInfo', 'resizeCrostiniDisk']);
-        console.log(`Finished test ${this.test.title}`);
       });
     });
   });
@@ -1022,6 +982,7 @@ suite('CrostiniPageTests', function() {
           settings.routes.CROSTINI_SHARED_PATHS);
 
       await test_util.flushTasks();
+      Polymer.dom.flush();
       subpage = crostiniPage.$$('settings-crostini-shared-paths');
       assertTrue(!!subpage);
     });
@@ -1037,6 +998,8 @@ suite('CrostiniPageTests', function() {
       assertFalse(subpage.$.crostiniList.hidden);
       assertTrue(subpage.$.crostiniListEmpty.hidden);
       assertTrue(!!subpage.$$('.list-item cr-icon-button'));
+      const rows = '.list-item:not([hidden])';
+      assertEquals(2, subpage.shadowRoot.querySelectorAll(rows).length);
 
       {
         // Remove first shared path, still one left.
@@ -1050,13 +1013,13 @@ suite('CrostiniPageTests', function() {
 
       await test_util.flushTasks();
       Polymer.dom.flush();
-      assertEquals(1, subpage.shadowRoot.querySelectorAll('.list-item').length);
+      assertEquals(1, subpage.shadowRoot.querySelectorAll(rows).length);
       assertFalse(subpage.$.crostiniInstructionsRemove.hidden);
 
       {
         // Remove remaining shared path, none left.
         crostiniBrowserProxy.resetResolver('removeCrostiniSharedPath');
-        subpage.$$('.list-item cr-icon-button').click();
+        subpage.$$(`${rows} cr-icon-button`).click();
         const [vmName, path] =
             await crostiniBrowserProxy.whenCalled('removeCrostiniSharedPath');
         assertEquals('termina', vmName);
@@ -1066,9 +1029,7 @@ suite('CrostiniPageTests', function() {
 
       await test_util.flushTasks();
       Polymer.dom.flush();
-      assertEquals(0, subpage.shadowRoot.querySelectorAll('.list-item').length);
-      // Verify remove instructions are hidden, and empty list message
-      // is shown.
+      // Verify remove instructions are hidden, and empty list message is shown.
       assertTrue(subpage.$.crostiniInstructionsRemove.hidden);
       assertTrue(subpage.$.crostiniList.hidden);
       assertFalse(subpage.$.crostiniListEmpty.hidden);
@@ -1100,9 +1061,24 @@ suite('CrostiniPageTests', function() {
     setup(async function() {
       setCrostiniPrefs(true, {
         sharedUsbDevices: [
-          {shared: true, guid: '0001', name: 'usb_dev1'},
-          {shared: false, guid: '0002', name: 'usb_dev2'},
-          {shared: true, guid: '0003', name: 'usb_dev3'}
+          {
+            guid: '0001',
+            name: 'usb_dev1',
+            shared: false,
+            shareWillReassign: false
+          },
+          {
+            guid: '0002',
+            name: 'usb_dev2',
+            shared: true,
+            shareWillReassign: false
+          },
+          {
+            guid: '0003',
+            name: 'usb_dev3',
+            shared: false,
+            shareWillReassign: true
+          },
         ]
       });
 
@@ -1129,14 +1105,84 @@ suite('CrostiniPageTests', function() {
       const args =
           await crostiniBrowserProxy.whenCalled('setCrostiniUsbDeviceShared');
       assertEquals('0001', args[0]);
-      assertEquals(false, args[1]);
+      assertEquals(true, args[1]);
 
       // Simulate a change in the underlying model.
       cr.webUIListenerCallback('crostini-shared-usb-devices-changed', [
-        {shared: true, guid: '0001', name: 'usb_dev1'},
+        {
+          guid: '0001',
+          name: 'usb_dev1',
+          shared: true,
+          shareWillReassign: false
+        },
       ]);
       Polymer.dom.flush();
       assertEquals(1, subpage.shadowRoot.querySelectorAll('.toggle').length);
+    });
+
+    test('Show dialog for reassign', async function() {
+      const items = subpage.shadowRoot.querySelectorAll('.toggle');
+      assertEquals(3, items.length);
+
+      // Clicking on item[2] should show dialog.
+      assertFalse(!!subpage.$$('#reassignDialog'));
+      items[2].click();
+      Polymer.dom.flush();
+      assertTrue(subpage.$$('#reassignDialog').open);
+
+      // Clicking cancel will close the dialog.
+      subpage.$$('#cancel').click();
+      Polymer.dom.flush();
+      assertFalse(!!subpage.$$('#reassignDialog'));
+
+      // Clicking continue will call the proxy and close the dialog.
+      items[2].click();
+      Polymer.dom.flush();
+      assertTrue(subpage.$$('#reassignDialog').open);
+      subpage.$$('#continue').click();
+      Polymer.dom.flush();
+      assertFalse(!!subpage.$$('#reassignDialog'));
+      const args =
+          await crostiniBrowserProxy.whenCalled('setCrostiniUsbDeviceShared');
+      assertEquals('0003', args[0]);
+      assertEquals(true, args[1]);
+    });
+  });
+
+  suite('SubPageArcAdb', function() {
+    let subpage;
+
+    setup(async function() {
+      setCrostiniPrefs(true, {arcEnabled: true});
+      loadTimeData.overrideValues({
+        arcAdbSideloadingSupported: true,
+      });
+
+      await test_util.flushTasks();
+      settings.Router.getInstance().navigateTo(
+          settings.routes.CROSTINI_ANDROID_ADB);
+
+      await test_util.flushTasks();
+      subpage = crostiniPage.$$('settings-crostini-arc-adb');
+      assertTrue(!!subpage);
+    });
+
+    test('Deep link to enable adb debugging', async () => {
+      loadTimeData.overrideValues({isDeepLinkingEnabled: true});
+      assertTrue(loadTimeData.getBoolean('isDeepLinkingEnabled'));
+
+      const params = new URLSearchParams;
+      params.append('settingId', '804');
+      settings.Router.getInstance().navigateTo(
+          settings.routes.CROSTINI_ANDROID_ADB, params);
+
+      Polymer.dom.flush();
+
+      const deepLinkElement = subpage.$$('#arcAdbEnabledButton');
+      await test_util.waitAfterNextRender(deepLinkElement);
+      assertEquals(
+          deepLinkElement, getDeepActiveElement(),
+          'Enable adb debugging button should be focused for settingId=804.');
     });
   });
 });

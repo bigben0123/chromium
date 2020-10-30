@@ -9,7 +9,6 @@
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/macros.h"
-#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -29,7 +28,6 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/omnibox/browser/omnibox_popup_model.h"
 #include "components/omnibox/browser/test_scheme_classifier.h"
-#include "components/omnibox/common/omnibox_features.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test.h"
@@ -69,10 +67,8 @@ void SetClipboardText(ui::ClipboardBuffer buffer, const std::string& text) {
 
 class OmniboxViewViewsTest : public InProcessBrowserTest {
  protected:
-  OmniboxViewViewsTest() {
-    scoped_feature_list_.InitAndEnableFeature(
-        omnibox::kOmniboxContextMenuShowFullUrls);
-  }
+  OmniboxViewViewsTest() = default;
+  ~OmniboxViewViewsTest() override = default;
 
   static void GetOmniboxViewForBrowser(const Browser* browser,
                                        OmniboxView** omnibox_view) {
@@ -139,8 +135,6 @@ class OmniboxViewViewsTest : public InProcessBrowserTest {
 #endif
     return native_window;
   }
-
-  base::test::ScopedFeatureList scoped_feature_list_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxViewViewsTest);
 };
@@ -291,7 +285,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, SelectionClipboard) {
 #endif  // OS_LINUX && !OS_CHROMEOS
 
 // No touch on desktop Mac. Tracked in http://crbug.com/445520.
-#if !defined(OS_MACOSX) || defined(USE_AURA)
+#if !defined(OS_MAC) || defined(USE_AURA)
 
 IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, SelectAllOnTap) {
   OmniboxView* omnibox_view = NULL;
@@ -373,7 +367,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest,
   EXPECT_FALSE(textfield_test_api.touch_selection_controller());
 }
 
-#endif  // !defined(OS_MACOSX) || defined(USE_AURA)
+#endif  // !defined(OS_MAC) || defined(USE_AURA)
 
 IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, SelectAllOnTabToFocus) {
   OmniboxView* omnibox_view = NULL;
@@ -534,7 +528,10 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, FragmentUnescapedForDisplay) {
   ui_test_utils::NavigateToURL(browser(),
                                GURL("http://example.com/#%E2%98%83"));
 
-  EXPECT_EQ(view->GetText(), base::UTF8ToUTF16("example.com/#\u2603"));
+  EXPECT_EQ(view->GetText(),
+            OmniboxFieldTrial::ShouldRevealPathQueryRefOnHover()
+                ? base::UTF8ToUTF16("http://example.com/#\u2603")
+                : base::UTF8ToUTF16("example.com/#\u2603"));
 }
 
 // Ensure that when the user navigates between suggestions, that the accessible
@@ -706,7 +703,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, ReloadAfterKill) {
 
   // Reload the tab.
   tab->GetController().Reload(content::ReloadType::NORMAL, false);
-  content::WaitForLoadStop(tab);
+  EXPECT_TRUE(content::WaitForLoadStop(tab));
 
   // Verify the omnibox contents, URL and icon.
   EXPECT_EQ(base::ASCIIToUTF16(""), omnibox_view_views->GetText());
@@ -723,23 +720,40 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, AlwaysShowFullURLs) {
       static_cast<OmniboxViewViews*>(omnibox_view);
 
   ASSERT_TRUE(embedded_test_server()->Start());
-  GURL url = embedded_test_server()->GetURL("/title1.html");
+  // Use a hostname ("a.test") since IP addresses aren't eligible for eliding.
+  GURL url = embedded_test_server()->GetURL("a.test", "/title1.html");
   base::string16 url_text = base::ASCIIToUTF16(url.spec());
 
   ui_test_utils::NavigateToURL(browser(), url);
 
-  // By default, the elided URL should be shown.
-  EXPECT_EQ(url_text,
-            base::ASCIIToUTF16("http://") + omnibox_view_views->GetText());
+  // By default, the URL should be elided. Depending on field trial
+  // configuration, this will be implemented by pushing the scheme out of the
+  // display area or by eliding it from the actual text.
+  if (OmniboxFieldTrial::ShouldRevealPathQueryRefOnHover()) {
+    EXPECT_EQ(url_text, omnibox_view_views->GetText());
+    EXPECT_GT(
+        0, omnibox_view_views->GetRenderText()->GetUpdatedDisplayOffset().x());
+  } else {
+    EXPECT_EQ(url_text,
+              base::ASCIIToUTF16("http://") + omnibox_view_views->GetText());
+  }
 
   // After toggling the setting, the full URL should be shown.
   chrome::ToggleShowFullURLs(browser());
   EXPECT_EQ(url_text, omnibox_view_views->GetText());
+  EXPECT_EQ(0,
+            omnibox_view_views->GetRenderText()->GetUpdatedDisplayOffset().x());
 
   // Toggling the setting again should go back to the elided URL.
   chrome::ToggleShowFullURLs(browser());
-  EXPECT_EQ(url_text,
-            base::ASCIIToUTF16("http://") + omnibox_view_views->GetText());
+  if (OmniboxFieldTrial::ShouldRevealPathQueryRefOnHover()) {
+    EXPECT_EQ(url_text, omnibox_view_views->GetText());
+    EXPECT_GT(
+        0, omnibox_view_views->GetRenderText()->GetUpdatedDisplayOffset().x());
+  } else {
+    EXPECT_EQ(url_text,
+              base::ASCIIToUTF16("http://") + omnibox_view_views->GetText());
+  }
 }
 
 // The following set of tests require UIA accessibility support, which only

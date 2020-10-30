@@ -17,10 +17,10 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
-import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
-import org.chromium.chrome.test.ChromeActivityTestRule;
+import org.chromium.chrome.browser.fullscreen.BrowserControlsManager;
+import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 /**
@@ -30,8 +30,7 @@ import org.chromium.content_public.browser.test.util.TestThreadUtils;
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class TabViewManagerTest {
     @Rule
-    public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
-            new ChromeActivityTestRule<>(ChromeActivity.class);
+    public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
 
     @Before
     public void setUp() throws InterruptedException {
@@ -46,7 +45,7 @@ public class TabViewManagerTest {
     @SmallTest
     public void testControllerMargins() {
         ChromeActivity activity = mActivityTestRule.getActivity();
-        ChromeFullscreenManager fullscreenManager = activity.getFullscreenManager();
+        BrowserControlsManager browserControls = activity.getBrowserControlsManager();
         View view = new View(activity);
         TabViewProvider tvp = new TabViewProvider() {
             @Override
@@ -65,9 +64,9 @@ public class TabViewManagerTest {
 
         FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams) view.getLayoutParams();
         int expectedTopMargin =
-                fullscreenManager.getTopControlsHeight() + fullscreenManager.getTopControlOffset();
-        int expectedBottomMargin = fullscreenManager.getBottomControlsHeight()
-                - fullscreenManager.getBottomControlOffset();
+                browserControls.getTopControlsHeight() + browserControls.getTopControlOffset();
+        int expectedBottomMargin = browserControls.getBottomControlsHeight()
+                - browserControls.getBottomControlOffset();
 
         Assert.assertEquals("Top margin for view was not set correctly in TabViewManagerImpl",
                 expectedTopMargin, layoutParams.topMargin);

@@ -14,6 +14,7 @@ namespace network_health {
 namespace {
 
 constexpr webui::LocalizedString kLocalizedStrings[] = {
+    // Network Health Summary Strings
     {"NetworkHealthState", IDS_NETWORK_HEALTH_STATE},
     {"NetworkHealthStateUninitialized", IDS_NETWORK_HEALTH_STATE_UNINITIALIZED},
     {"NetworkHealthStateDisabled", IDS_NETWORK_HEALTH_STATE_DISABLED},

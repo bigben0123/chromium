@@ -8,6 +8,7 @@
 
 #include "ash/public/cpp/assistant/controller/assistant_alarm_timer_controller.h"
 #include "base/json/json_reader.h"
+#include "base/optional.h"
 #include "base/test/bind_test_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
@@ -43,6 +44,7 @@ namespace assistant {
 using media_session::mojom::MediaSessionAction;
 using testing::ElementsAre;
 using testing::Invoke;
+using testing::NiceMock;
 using testing::StrictMock;
 using CommunicationErrorType = AssistantManagerService::CommunicationErrorType;
 using UserInfo = AssistantManagerService::UserInfo;
@@ -178,7 +180,8 @@ class AssistantManagerServiceImplTest : public testing::Test {
 
     assistant_manager_service_ = std::make_unique<AssistantManagerServiceImpl>(
         service_context_.get(), std::move(delegate),
-        shared_url_loader_factory_->Clone(), s3_server_uri_override);
+        shared_url_loader_factory_->Clone(), s3_server_uri_override,
+        /*device_id_override=*/base::nullopt);
   }
 
   void TearDown() override {
@@ -321,6 +324,10 @@ TEST_F(AssistantManagerServiceImplTest,
 
 TEST_F(AssistantManagerServiceImplTest,
        StateShouldBecomeRunningAfterLibassistantSignalsOnStartFinished) {
+  NiceMock<AssistantAlarmTimerControllerMock> alarm_timer_controller;
+  fake_service_context()->set_assistant_alarm_timer_controller(
+      &alarm_timer_controller);
+
   Start();
   WaitUntilStartIsFinished();
 
@@ -505,6 +512,10 @@ TEST_F(AssistantManagerServiceImplTest, ShouldFireStateObserverWhenStarted) {
 
 TEST_F(AssistantManagerServiceImplTest,
        ShouldFireStateObserverWhenLibAssistantSignalsOnStartFinished) {
+  NiceMock<AssistantAlarmTimerControllerMock> alarm_timer_controller;
+  fake_service_context()->set_assistant_alarm_timer_controller(
+      &alarm_timer_controller);
+
   Start();
   WaitUntilStartIsFinished();
 
@@ -555,7 +566,10 @@ TEST_F(AssistantManagerServiceImplTest,
 }
 
 TEST_F(AssistantManagerServiceImplTest,
-       ShouldNotifyAlarmTimerControllerOfOnlyRingingTimers) {
+       ShouldNotifyAlarmTimerControllerOfOnlyRingingTimersInV1) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(features::kAssistantTimersV2);
+
   Start();
   WaitUntilStartIsFinished();
   assistant_manager_service()->OnStartFinished();

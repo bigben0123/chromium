@@ -173,9 +173,21 @@ String ListMarker::MarkerTextWithoutSuffix(const LayoutObject& marker) const {
 
 String ListMarker::TextAlternative(const LayoutObject& marker) const {
   DCHECK_EQ(Get(&marker), this);
-  // For accessibility, return the marker string in the logical order even in
-  // RTL, reflecting speech order.
-  return MarkerTextWithSuffix(marker);
+  DCHECK_NE(marker_text_type_, kUnresolved);
+  if (marker_text_type_ == kNotText || marker_text_type_ == kUnresolved) {
+    // For accessibility, return the marker string in the logical order even in
+    // RTL, reflecting speech order.
+    return MarkerTextWithSuffix(marker);
+  }
+
+  LayoutObject* child = marker.SlowFirstChild();
+
+  // There should be a single text child
+  DCHECK(child);
+  DCHECK(child->IsText());
+  DCHECK(!child->NextSibling());
+
+  return ToLayoutText(child)->PlainText();
 }
 
 void ListMarker::UpdateMarkerContentIfNeeded(LayoutObject& marker) {
@@ -274,16 +286,16 @@ LayoutUnit ListMarker::WidthOfSymbol(const ComputedStyle& style) {
 }
 
 std::pair<LayoutUnit, LayoutUnit> ListMarker::InlineMarginsForInside(
-    const ComputedStyle& style,
-    bool is_image) {
-  if (!style.ContentBehavesAsNormal())
+    const ComputedStyle& marker_style,
+    const ComputedStyle& list_item_style) {
+  if (!marker_style.ContentBehavesAsNormal())
     return {};
-  if (is_image)
+  if (list_item_style.GeneratesMarkerImage())
     return {LayoutUnit(), LayoutUnit(kCMarkerPaddingPx)};
-  switch (GetListStyleCategory(style.ListStyleType())) {
+  switch (GetListStyleCategory(list_item_style.ListStyleType())) {
     case ListStyleCategory::kSymbol:
       return {LayoutUnit(-1),
-              LayoutUnit(kCUAMarkerMarginEm * style.ComputedFontSize())};
+              LayoutUnit(kCUAMarkerMarginEm * marker_style.ComputedFontSize())};
     default:
       break;
   }
@@ -291,22 +303,22 @@ std::pair<LayoutUnit, LayoutUnit> ListMarker::InlineMarginsForInside(
 }
 
 std::pair<LayoutUnit, LayoutUnit> ListMarker::InlineMarginsForOutside(
-    const ComputedStyle& style,
-    bool is_image,
+    const ComputedStyle& marker_style,
+    const ComputedStyle& list_item_style,
     LayoutUnit marker_inline_size) {
   LayoutUnit margin_start;
   LayoutUnit margin_end;
-  if (!style.ContentBehavesAsNormal()) {
+  if (!marker_style.ContentBehavesAsNormal()) {
     margin_start = -marker_inline_size;
-  } else if (is_image) {
+  } else if (list_item_style.GeneratesMarkerImage()) {
     margin_start = -marker_inline_size - kCMarkerPaddingPx;
     margin_end = LayoutUnit(kCMarkerPaddingPx);
   } else {
-    switch (GetListStyleCategory(style.ListStyleType())) {
+    switch (GetListStyleCategory(list_item_style.ListStyleType())) {
       case ListStyleCategory::kNone:
         break;
       case ListStyleCategory::kSymbol: {
-        const SimpleFontData* font_data = style.GetFont().PrimaryFont();
+        const SimpleFontData* font_data = marker_style.GetFont().PrimaryFont();
         DCHECK(font_data);
         if (!font_data)
           return {};

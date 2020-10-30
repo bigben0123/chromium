@@ -18,9 +18,9 @@ import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.browser.infobar.InfoBarIdentifier;
-import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.TabUtils;
 import org.chromium.chrome.browser.ui.messages.infobar.SimpleConfirmInfoBarBuilder;
+import org.chromium.content_public.browser.WebContents;
+import org.chromium.ui.base.WindowAndroid;
 
 /**
  * Manages logic around VrCore Installation and Versioning
@@ -122,7 +122,8 @@ public class VrCoreInstallUtils {
     private static boolean isVrCoreCompatible() {
         VrCoreVersionChecker checker = getVrCoreVersionChecker();
         if (checker == null) return false;
-        return checker.getVrCoreCompatibility() == VrCoreCompatibility.VR_READY;
+        return checker.getVrCoreCompatibility()
+                == VrCoreVersionChecker.VrCoreCompatibility.VR_READY;
     }
 
     /**
@@ -142,13 +143,26 @@ public class VrCoreInstallUtils {
         mNativeVrCoreInstallUtils = 0;
     }
 
+    private Activity getActivity(final WebContents webContents) {
+        if (webContents == null) return null;
+        WindowAndroid window = webContents.getTopLevelNativeWindow();
+        if (window == null) return null;
+        return window.getActivity().get();
+    }
+
     /**
      * Prompts the user to install or update VRSupport if needed.
      */
     @CalledByNative
     @VisibleForTesting
-    protected void requestInstallVrCore(final Tab tab) {
-        if (tab == null) {
+    protected void requestInstallVrCore(final WebContents webContents) {
+        if (webContents == null) {
+            maybeNotifyNativeOnInstallResult(false);
+            return;
+        }
+
+        final Activity activity = getActivity(webContents);
+        if (activity == null) {
             maybeNotifyNativeOnInstallResult(false);
             return;
         }
@@ -161,18 +175,19 @@ public class VrCoreInstallUtils {
             return;
         }
 
+        @VrCoreVersionChecker.VrCoreCompatibility
         int vrCoreCompatibility = getVrCoreVersionChecker().getVrCoreCompatibility();
 
         String infobarText;
         String buttonText;
 
-        if (vrCoreCompatibility == VrCoreCompatibility.VR_NOT_AVAILABLE) {
+        if (vrCoreCompatibility == VrCoreVersionChecker.VrCoreCompatibility.VR_NOT_AVAILABLE) {
             // Supported, but not installed. Ask user to install instead of upgrade.
             infobarText = ContextUtils.getApplicationContext().getString(
                     org.chromium.chrome.vr.R.string.vr_services_check_infobar_install_text);
             buttonText = ContextUtils.getApplicationContext().getString(
                     org.chromium.chrome.vr.R.string.vr_services_check_infobar_install_button);
-        } else if (vrCoreCompatibility == VrCoreCompatibility.VR_OUT_OF_DATE) {
+        } else if (vrCoreCompatibility == VrCoreVersionChecker.VrCoreCompatibility.VR_OUT_OF_DATE) {
             infobarText = ContextUtils.getApplicationContext().getString(
                     org.chromium.chrome.vr.R.string.vr_services_check_infobar_update_text);
             buttonText = ContextUtils.getApplicationContext().getString(
@@ -182,7 +197,6 @@ public class VrCoreInstallUtils {
             return;
         }
 
-        final Activity activity = TabUtils.getActivity(tab);
         SimpleConfirmInfoBarBuilder.Listener listener = new SimpleConfirmInfoBarBuilder.Listener() {
             @Override
             public void onInfoBarDismissed() {
@@ -204,7 +218,7 @@ public class VrCoreInstallUtils {
                 return false;
             }
         };
-        SimpleConfirmInfoBarBuilder.create(tab.getWebContents(), listener,
+        SimpleConfirmInfoBarBuilder.create(webContents, listener,
                 InfoBarIdentifier.VR_SERVICES_UPGRADE_ANDROID, activity,
                 org.chromium.chrome.vr.R.drawable.vr_services, infobarText, buttonText, null, null,
                 true);

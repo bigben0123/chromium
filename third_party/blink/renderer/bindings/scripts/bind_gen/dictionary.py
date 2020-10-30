@@ -7,6 +7,7 @@ import web_idl
 from . import name_style
 from .blink_v8_bridge import blink_class_name
 from .blink_v8_bridge import blink_type_info
+from .blink_v8_bridge import make_blink_to_v8_value
 from .blink_v8_bridge import make_default_value_expr
 from .blink_v8_bridge import make_v8_to_blink_value
 from .blink_v8_bridge import native_value_tag
@@ -34,6 +35,7 @@ from .codegen_utils import make_forward_declarations
 from .codegen_utils import make_header_include_directives
 from .codegen_utils import write_code_node_to_file
 from .mako_renderer import MakoRenderer
+from .package_initializer import package_initializer
 from .path_manager import PathManager
 from .task_queue import TaskQueue
 
@@ -58,7 +60,7 @@ def _blink_member_name(member):
             # C++ data member that shows the presence of the IDL member.
             self.presence_var = name_style.member_var("has", blink_name)
             # C++ data member that holds the value of the IDL member.
-            self.value_var = name_style.member_var(blink_name)
+            self.value_var = name_style.member_var_f("member_{}", blink_name)
             # Migration Adapters
             self.get_non_null_api = name_style.api_func(blink_name, "non_null")
             self.has_non_null_api = name_style.api_func(
@@ -96,7 +98,7 @@ def bind_member_iteration_local_vars(code_node):
             "current_context", "v8::Local<v8::Context> ${current_context} = "
             "${isolate}->GetCurrentContext();"),
         SymbolNode(
-            "member_names", "const auto* ${member_names} = "
+            "v8_member_names", "const auto* ${v8_member_names} = "
             "GetV8MemberNames(${isolate}).data();"),
         SymbolNode(
             "is_in_secure_context", "const bool ${is_in_secure_context} = "
@@ -372,9 +374,20 @@ def make_dict_member_get(cg_context):
     member = cg_context.dict_member
     blink_member_name = _blink_member_name(member)
     name = blink_member_name.get_api
-    blink_type = blink_type_info(member.idl_type)
+    idl_type = member.idl_type.unwrap(typedef=True)
+    blink_type = blink_type_info(idl_type)
     const_ref_t = blink_type.const_ref_t
     ref_t = blink_type.ref_t
+
+    # Since Blink conventionally prefers non-const references to const
+    # references for the certain types, makes const member's getters return a
+    # non-const reference.  For example, "Node* foo() const;" is preferable to
+    # "const Node* foo() const;".
+    if (idl_type.unwrap().is_interface
+            or idl_type.unwrap().is_callback_interface
+            or idl_type.unwrap().is_callback_function
+            or idl_type.unwrap().is_buffer_source_type):
+        const_ref_t = ref_t
 
     decls = ListNode()
     defs = ListNode()
@@ -399,10 +412,33 @@ def make_dict_member_get(cg_context):
             TextNode(_format("return {};", blink_member_name.value_var)),
         ])
 
-    if not _is_member_always_present(member):
-        name = blink_member_name.get_or_api
-        arg_decls = [_format("{} fallback_value", blink_type.value_t)]
+    if idl_type.is_numeric or idl_type.unwrap().is_string:
+        arg_type = blink_type.const_ref_t
         return_type = blink_type.value_t
+    elif idl_type.unwrap().is_enumeration:
+        arg_type = ("base::nullopt_t"
+                    if idl_type.is_nullable else blink_type.value_t)
+        return_type = blink_type.value_t
+    elif idl_type.unwrap().is_dictionary:
+        arg_type = "nullptr_t"
+        return_type = blink_type.const_ref_t
+    elif idl_type.unwrap().type_definition_object:
+        arg_type = "nullptr_t"
+        return_type = blink_type.ref_t
+    elif idl_type.is_nullable and (idl_type.unwrap().is_sequence
+                                   or idl_type.unwrap().is_frozen_array
+                                   or idl_type.unwrap().is_record):
+        arg_type = "base::nullopt_t"
+        return_type = blink_type.value_t
+    else:
+        arg_type = None
+        return_type = None
+
+    if arg_type is not None or return_type is not None:
+        assert arg_type is not None and return_type is not None
+
+        name = blink_member_name.get_or_api
+        arg_decls = [_format("{} fallback_value", arg_type)]
 
         def should_be_defined_in_source(member):
             # sequence<Dictionary> and record<String, Dictionary> are
@@ -741,43 +777,32 @@ def make_fill_with_own_dict_members_func(cg_context):
     func_def.set_base_template_vars(cg_context.template_bindings())
     body = func_def.body
     body.add_template_var("isolate", "isolate")
+    body.add_template_var("creation_context", "creation_context")
+    body.add_template_var("v8_dictionary", "v8_dictionary")
     bind_member_iteration_local_vars(body)
 
-    def to_v8_expr(member):
-        get_api = _blink_member_name(member).get_api
-        member_type = member.idl_type.unwrap(typedef=True)
-        expr = _format("ToV8({}(), creation_context, isolate)", get_api)
-        if member_type.is_nullable and member_type.unwrap().is_string:
-            expr = _format(
-                "({get_api}().IsNull() ? v8::Null(isolate).As<v8::Value>() "
-                ": {to_v8})",
-                get_api=get_api,
-                to_v8=expr)
-        return expr
-
-    for key_index, member in enumerate(own_members):
-        pattern = """\
-if ({has_api}()) {{
-  if (!v8_dictionary
-           ->CreateDataProperty(
-               ${current_context},
-               ${member_names}[{index}].Get(isolate),
-               {to_v8_expr})
-           .ToChecked()) {{
-    return false;
-  }}
-}}\
-"""
-        node = TextNode(
-            _format(pattern,
-                    has_api=_blink_member_name(member).has_api,
-                    index=key_index,
-                    to_v8_expr=to_v8_expr(member)))
-
+    for index, member in enumerate(own_members):
+        member_name = _blink_member_name(member)
+        v8_member_name = name_style.local_var_f("v8_member_{}",
+                                                member.identifier)
+        body.register_code_symbol(
+            make_blink_to_v8_value(v8_member_name,
+                                   "{}()".format(member_name.get_api),
+                                   member.idl_type, "${creation_context}"))
+        node = CxxLikelyIfNode(
+            cond="{}()".format(member_name.has_api),
+            body=TextNode(
+                _format(
+                    "${v8_dictionary}->CreateDataProperty("
+                    "${current_context}, "
+                    "${v8_member_names}[{index}].Get(${isolate}), "
+                    "${{{v8_member_name}}}"
+                    ").ToChecked();",
+                    index=index,
+                    v8_member_name=v8_member_name)))
         conditional = expr_from_exposure(member.exposure)
         if not conditional.is_always_true:
             node = CxxLikelyIfNode(cond=conditional, body=node)
-
         body.append(node)
 
     body.append(TextNode("return true;"))
@@ -909,7 +934,7 @@ if (!bindings::ConvertDictionaryMember<{nvt_tag}, {is_required}>(
         ${isolate},
         ${current_context},
         v8_dictionary,
-        ${member_names}[{key_index}].Get(${isolate}),
+        ${v8_member_names}[{key_index}].Get(${isolate}),
         "${{dictionary.identifier}}",
         "{member_name}",
         {value_var},
@@ -974,8 +999,11 @@ def make_dict_trace_func(cg_context):
     return func_decl, func_def
 
 
-def generate_dictionary(dictionary):
-    assert isinstance(dictionary, web_idl.Dictionary)
+def generate_dictionary(dictionary_identifier):
+    assert isinstance(dictionary_identifier, web_idl.Identifier)
+
+    web_idl_database = package_initializer().web_idl_database()
+    dictionary = web_idl_database.find(dictionary_identifier)
 
     assert len(dictionary.components) == 1, (
         "We don't support partial dictionaries across components yet.")
@@ -1165,9 +1193,10 @@ def generate_dictionary(dictionary):
     write_code_node_to_file(source_node, path_manager.gen_path_to(source_path))
 
 
-def generate_dictionaries(task_queue, web_idl_database):
+def generate_dictionaries(task_queue):
     assert isinstance(task_queue, TaskQueue)
-    assert isinstance(web_idl_database, web_idl.Database)
+
+    web_idl_database = package_initializer().web_idl_database()
 
     for dictionary in web_idl_database.dictionaries:
-        task_queue.post_task(generate_dictionary, dictionary)
+        task_queue.post_task(generate_dictionary, dictionary.identifier)

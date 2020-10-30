@@ -23,7 +23,6 @@
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/search/instant_service_observer.h"
-#include "chrome/browser/search/ntp_features.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -41,7 +40,9 @@
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/ntp_tiles/constants.h"
 #include "components/omnibox/browser/omnibox_view.h"
+#include "components/omnibox/common/omnibox_features.h"
 #include "components/prefs/pref_service.h"
+#include "components/search/ntp_features.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
@@ -75,7 +76,7 @@ const int kDefaultCustomLinkMaxCount = 10;
 // Name for the Most Visited iframe in the NTP.
 const char kMostVisitedIframe[] = "mv-single";
 
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_WIN) || defined(OS_MAC)
 // Name for the edit/add custom link iframe in the NTP.
 const char kEditCustomLinkIframe[] = "custom-links-edit";
 #endif
@@ -109,7 +110,9 @@ class LocalNTPTest : public InProcessBrowserTest {
   }
 };
 
-IN_PROC_BROWSER_TEST_F(LocalNTPTest, EmbeddedSearchAPIOnlyAvailableOnNTP) {
+// Disabled for being flaky. crbug.com/1096976
+IN_PROC_BROWSER_TEST_F(LocalNTPTest,
+                       DISABLED_EmbeddedSearchAPIOnlyAvailableOnNTP) {
   // Set up a test server, so we have some arbitrary non-NTP URL to navigate to.
   net::EmbeddedTestServer test_server(net::EmbeddedTestServer::TYPE_HTTPS);
   test_server.ServeFilesFromSourceDirectory(GetChromeTestDataDir());
@@ -936,7 +939,7 @@ IN_PROC_BROWSER_TEST_F(LocalNTPRTLTest, RightToLeft) {
 
 // TODO(crbug/980638): Update/Remove when Linux and/or ChromeOS support dark
 // mode.
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_WIN) || defined(OS_MAC)
 
 // Tests that dark mode styling is properly applied to the local NTP.
 class LocalNTPDarkModeTest : public LocalNTPTest, public DarkModeTestBase {
@@ -1160,10 +1163,17 @@ IN_PROC_BROWSER_TEST_F(LocalNTPTest, PendingNavigations) {
 
   // Verify that the omnibox displays |slow_url|.
   OmniboxView* view = browser()->window()->GetLocationBar()->GetOmniboxView();
-  std::string omnibox_text = base::UTF16ToUTF8(view->GetText());
-  EXPECT_THAT(omnibox_text, ::testing::StartsWith(slow_url.host()));
-  EXPECT_THAT(omnibox_text, ::testing::EndsWith(slow_url.path()));
-  EXPECT_THAT(slow_url.spec(), ::testing::EndsWith(omnibox_text));
+  // Depending on field trial configuration, the omnibox text might contain the
+  // full URL or just a portion of it.
+  if (base::FeatureList::IsEnabled(
+          omnibox::kRevealSteadyStateUrlPathQueryAndRefOnHover)) {
+    EXPECT_EQ(base::ASCIIToUTF16(slow_url.spec()), view->GetText());
+  } else {
+    std::string omnibox_text = base::UTF16ToUTF8(view->GetText());
+    EXPECT_THAT(omnibox_text, ::testing::StartsWith(slow_url.host()));
+    EXPECT_THAT(omnibox_text, ::testing::EndsWith(slow_url.path()));
+    EXPECT_THAT(slow_url.spec(), ::testing::EndsWith(omnibox_text));
+  }
 }
 
 // Verifies that Chrome won't spawn a separate renderer process for
@@ -1222,7 +1232,7 @@ IN_PROC_BROWSER_TEST_F(LocalNTPTest, ProcessPerSite) {
 // Just like LocalNTPTest.ProcessPerSite, but for an incognito window.
 IN_PROC_BROWSER_TEST_F(LocalNTPTest, ProcessPerSite_Incognito) {
   GURL ntp_url("chrome://newtab");
-  Browser* incognito_browser = new Browser(Browser::CreateParams(
+  Browser* incognito_browser = Browser::Create(Browser::CreateParams(
       browser()->profile()->GetPrimaryOTRProfile(), true));
 
   // Open NTP in |tab1|.

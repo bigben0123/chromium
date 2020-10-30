@@ -27,6 +27,9 @@ class ButtonMenuItemModel;
 // The breadth of MenuModel is not exposed through this API.
 class COMPONENT_EXPORT(UI_BASE) SimpleMenuModel : public MenuModel {
  public:
+  // Default icon size to be used for context menus.
+  static constexpr int kDefaultIconSize = 16;
+
   class COMPONENT_EXPORT(UI_BASE) Delegate : public AcceleratorProvider {
    public:
     ~Delegate() override {}
@@ -40,6 +43,10 @@ class COMPONENT_EXPORT(UI_BASE) SimpleMenuModel : public MenuModel {
 
     // Delegate should return true if |command_id| should be visible.
     virtual bool IsCommandIdVisible(int command_id) const;
+
+    // Determines if |command_id| should be rendered with an alert for
+    // in-product help.
+    virtual bool IsCommandIdAlerted(int command_id) const;
 
     // Some command ids have labels and icons that change over time.
     virtual bool IsItemForCommandIdDynamic(int command_id) const;
@@ -186,6 +193,7 @@ class COMPONENT_EXPORT(UI_BASE) SimpleMenuModel : public MenuModel {
   ui::ButtonMenuItemModel* GetButtonMenuItemAt(int index) const override;
   bool IsEnabledAt(int index) const override;
   bool IsVisibleAt(int index) const override;
+  bool IsAlertedAt(int index) const override;
   bool IsNewFeatureAt(int index) const override;
   void ActivatedAt(int index) override;
   void ActivatedAt(int index, int event_flags) override;

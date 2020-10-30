@@ -9,48 +9,40 @@ import android.annotation.SuppressLint;
 import android.content.ContentResolver;
 import android.content.SyncStatusObserver;
 import android.os.Bundle;
-import android.os.StrictMode;
 
+import androidx.annotation.MainThread;
 import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
-import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ObserverList;
-import org.chromium.base.StrictModeContext;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.task.PostTask;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.signin.IdentityServicesProvider;
 import org.chromium.components.signin.AccountManagerFacadeProvider;
-import org.chromium.components.signin.ChromeSigninController;
-import org.chromium.components.sync.SyncContentResolverDelegate;
-import org.chromium.components.sync.SystemSyncContentResolverDelegate;
-
-import javax.annotation.concurrent.ThreadSafe;
+import org.chromium.components.signin.base.CoreAccountInfo;
+import org.chromium.components.signin.identitymanager.ConsentLevel;
+import org.chromium.components.signin.identitymanager.IdentityManager;
+import org.chromium.content_public.browser.UiThreadTaskTraits;
 
 /**
- * A helper class to handle the current status of sync for Chrome in Android settings.
+ * WARNING: Chrome will be decoupled from Android auto-sync (crbug.com/1105795).
+ * Some documentation in this class may be outdated or may not be coherent when
+ * DecoupleSyncFromAndroidMasterSync is enabled.
  *
+ * A helper class to handle the current status of sync for Chrome in Android settings.
  * It also provides an observer to be used whenever Android sync settings change.
  *
- * This class is a collection of static methods so that no references to its object can be
- * stored. This is important because tests need to be able to overwrite the object with a
- * mock content resolver and know that no references to the old one are cached.
- *
- * This class must be initialized via updateAccount() on startup if the user is signed in.
+ * {@link #updateAccount(Account)} should be invoked whenever sync account is changed.
  */
-@ThreadSafe
+@MainThread
 public class AndroidSyncSettings {
-    public static final String TAG = "AndroidSyncSettings";
-
-    /**
-     * Lock for ensuring singleton instantiation across threads.
-     */
-    private static final Object CLASS_LOCK = new Object();
-
     @SuppressLint("StaticFieldLeak")
     private static AndroidSyncSettings sInstance;
 
-    private final Object mLock = new Object();
-
+    // Cached value of the static |getContractAuthority()|.
     private final String mContractAuthority;
 
     private final SyncContentResolverDelegate mSyncContentResolverDelegate;
@@ -63,60 +55,81 @@ public class AndroidSyncSettings {
 
     private boolean mMasterSyncEnabled;
 
-    private final ObserverList<AndroidSyncSettingsObserver> mObservers =
-            new ObserverList<AndroidSyncSettingsObserver>();
+    private boolean mShouldDecoupleSyncFromMasterSync;
+
+    private final ObserverList<AndroidSyncSettingsObserver> mObservers = new ObserverList<>();
 
     /**
      * Provides notifications when Android sync settings have changed.
      */
-    public interface AndroidSyncSettingsObserver { public void androidSyncSettingsChanged(); }
+    public interface AndroidSyncSettingsObserver {
+        void androidSyncSettingsChanged();
+    }
 
     /**
       Singleton instance getter. Will initialize the singleton if it hasn't been initialized before.
      */
+    @MainThread
     public static AndroidSyncSettings get() {
-        synchronized (CLASS_LOCK) {
-            if (sInstance == null) {
-                SyncContentResolverDelegate contentResolver =
-                        new SystemSyncContentResolverDelegate();
-                sInstance = new AndroidSyncSettings(contentResolver);
-            }
-            return sInstance;
+        ThreadUtils.assertOnUiThread();
+        if (sInstance == null) {
+            sInstance = new AndroidSyncSettings(getSyncAccount());
         }
+        return sInstance;
     }
 
+    /**
+     * Overrides AndroidSyncSettings instance for tests.
+     */
+    @MainThread
     @VisibleForTesting
-    public static void overrideForTests(
-            SyncContentResolverDelegate contentResolver, @Nullable Callback<Boolean> callback) {
-        synchronized (CLASS_LOCK) {
-            sInstance = new AndroidSyncSettings(contentResolver, callback);
-        }
+    public static void overrideForTests(AndroidSyncSettings instance) {
+        ThreadUtils.assertOnUiThread();
+        sInstance = instance;
     }
 
+    // TODO(crbug.com/1125622): Exposing these testing constructors that don't register the
+    // singleton instance can be dangerous when there's code that explicitly calls |get()|
+    // (in that case, a new object would be returned, not the one constructed by the test).
+    // Consider exposing them as static methods that also register a singleton instance.
     /**
-     * @param syncContentResolverDelegate an implementation of {@link SyncContentResolverDelegate}.
+     * WARNING: Consider using |overrideForTests()| to inject a mock instead.
+     * @param account The sync account if sync is enabled, null otherwise.
      */
-    private AndroidSyncSettings(SyncContentResolverDelegate syncContentResolverDelegate) {
-        this(syncContentResolverDelegate, null);
-    }
+    @VisibleForTesting
+    @Deprecated
+    public AndroidSyncSettings(@Nullable Account account) {
+        ThreadUtils.assertOnUiThread();
+        mContractAuthority = getContractAuthority();
+        mSyncContentResolverDelegate = SyncContentResolverDelegate.get();
 
-    /**
-     * @param syncContentResolverDelegate an implementation of {@link SyncContentResolverDelegate}.
-     * @param callback Callback that will be called after updating account is finished. Boolean
-     *                 passed to the callback indicates whether syncability was changed.
-     */
-    private AndroidSyncSettings(SyncContentResolverDelegate syncContentResolverDelegate,
-            @Nullable Callback<Boolean> callback) {
-        mContractAuthority = ContextUtils.getApplicationContext().getPackageName();
-        mSyncContentResolverDelegate = syncContentResolverDelegate;
-
-        mAccount = ChromeSigninController.get().getSignedInUser();
-        updateSyncability(callback);
+        mAccount = account;
         updateCachedSettings();
+        updateSyncability();
 
+        ProfileSyncService syncService = ProfileSyncService.get();
+        if (syncService != null
+                && ChromeFeatureList.isEnabled(
+                        ChromeFeatureList.DECOUPLE_SYNC_FROM_ANDROID_MASTER_SYNC)) {
+            // Read initial persisted value.
+            mShouldDecoupleSyncFromMasterSync = syncService.getDecoupledFromAndroidMasterSync();
+        }
+
+        SyncStatusObserver androidOsListener = new SyncStatusObserver() {
+            @Override
+            public void onStatusChanged(int which) {
+                if (which != ContentResolver.SYNC_OBSERVER_TYPE_SETTINGS) return;
+                // This is called by Android on a background thread, but AndroidSyncSettings
+                // methods should be called from the UI thread, so post a task.
+                PostTask.postTask(UiThreadTaskTraits.DEFAULT, () -> {
+                    if (updateCachedSettings()) {
+                        notifyObservers();
+                    }
+                });
+            }
+        };
         mSyncContentResolverDelegate.addStatusChangeListener(
-                ContentResolver.SYNC_OBSERVER_TYPE_SETTINGS,
-                new AndroidSyncSettingsChangedObserver());
+                ContentResolver.SYNC_OBSERVER_TYPE_SETTINGS, androidOsListener);
     }
 
     /**
@@ -128,204 +141,179 @@ public class AndroidSyncSettings {
      * @return true if sync is on, false otherwise
      */
     public boolean isSyncEnabled() {
-        return mMasterSyncEnabled && mChromeSyncEnabled;
+        ThreadUtils.assertOnUiThread();
+        return mChromeSyncEnabled && doesMasterSyncSettingAllowChromeSync();
     }
 
     /**
-     * Checks whether sync is currently enabled from Chrome for a given account.
+     * Checks whether sync is currently enabled for Chrome for a given account.
      *
      * It checks only Chrome sync setting for the given account,
      * and ignores the master sync setting.
      *
      * @return true if sync is on, false otherwise
      */
-    @VisibleForTesting
     public boolean isChromeSyncEnabled() {
+        ThreadUtils.assertOnUiThread();
         return mChromeSyncEnabled;
     }
 
     /**
-     * Checks whether the master sync flag for Android is currently enabled.
+     * Checks whether the master sync flag for Android allows syncing Chrome
+     * data.
      */
-    public boolean isMasterSyncEnabled() {
-        return mMasterSyncEnabled;
+    public boolean doesMasterSyncSettingAllowChromeSync() {
+        ThreadUtils.assertOnUiThread();
+        return mMasterSyncEnabled || mShouldDecoupleSyncFromMasterSync;
     }
 
     /**
-     * Make sure Chrome is syncable, and enable sync.
+     * Enables Chrome sync for |mAccount| if it's non-null.
      */
     public void enableChromeSync() {
+        ThreadUtils.assertOnUiThread();
         setChromeSyncEnabled(true);
     }
 
     /**
-     * Disables Android Chrome sync
+     * Disables Chrome sync for |mAccount| if it's non-null.
      */
     public void disableChromeSync() {
+        ThreadUtils.assertOnUiThread();
         setChromeSyncEnabled(false);
     }
 
     /**
-     * Must be called when a new account is signed in.
+     * Must be called with the new account on sign-in and with null on sign-out.
      */
     public void updateAccount(Account account) {
-        updateAccount(account, null);
-    }
-
-    /**
-     * Must be called when a new account is signed in.
-     * @param callback Callback that will be called after updating account is finished. Boolean
-     *                 passed to the callback indicates whether syncability was changed.
-     */
-    @VisibleForTesting
-    public void updateAccount(Account account, @Nullable Callback<Boolean> callback) {
-        synchronized (mLock) {
-            mAccount = account;
-            updateSyncability(callback);
-        }
+        ThreadUtils.assertOnUiThread();
+        mAccount = account;
+        updateSyncability();
         if (updateCachedSettings()) {
             notifyObservers();
         }
     }
 
     /**
-     * Returns the contract authority to use when requesting sync.
+     * Returns the contract authority used by Chrome when talking to auto-sync.
+     * Exposed only to tests, so they can fake user interaction with the
+     * auto-sync UI.
      */
-    public String getContractAuthority() {
-        return mContractAuthority;
+    @VisibleForTesting
+    public static String getContractAuthority() {
+        return ContextUtils.getApplicationContext().getPackageName();
     }
 
     /**
      * Add a new AndroidSyncSettingsObserver.
      */
     public void registerObserver(AndroidSyncSettingsObserver observer) {
-        synchronized (mLock) {
-            mObservers.addObserver(observer);
-        }
+        ThreadUtils.assertOnUiThread();
+        mObservers.addObserver(observer);
     }
 
     /**
      * Remove an AndroidSyncSettingsObserver that was previously added.
      */
     public void unregisterObserver(AndroidSyncSettingsObserver observer) {
-        synchronized (mLock) {
-            mObservers.removeObserver(observer);
-        }
+        ThreadUtils.assertOnUiThread();
+        mObservers.removeObserver(observer);
     }
 
     private void setChromeSyncEnabled(boolean value) {
-        synchronized (mLock) {
-            updateSyncability(null);
-            if (value == mChromeSyncEnabled || mAccount == null) return;
-            mChromeSyncEnabled = value;
+        updateSyncability();
+        if (value == mChromeSyncEnabled || mAccount == null) return;
+        mChromeSyncEnabled = value;
 
-            StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskWrites();
-            mSyncContentResolverDelegate.setSyncAutomatically(mAccount, mContractAuthority, value);
-            StrictMode.setThreadPolicy(oldPolicy);
-        }
+        mSyncContentResolverDelegate.setSyncAutomatically(mAccount, mContractAuthority, value);
         notifyObservers();
     }
 
     /**
-     * Ensure Chrome is registered with the Android Sync Manager iff signed in.
+     * Updates whether Chrome is registered with the Android Auto-Sync Manager.
      *
      * This is what causes the "Chrome" option to appear in Settings -> Accounts -> Sync .
-     * This function must be called within a synchronized block.
      */
-    private void updateSyncability(@Nullable final Callback<Boolean> callback) {
-        boolean shouldBeSyncable = mAccount != null;
-        if (mIsSyncable == shouldBeSyncable) {
-            if (callback != null) callback.onResult(false);
-            return;
-        }
+    private void updateSyncability() {
+        boolean shouldBeSyncable = mAccount != null
+                && !ChromeFeatureList.isEnabled(
+                        ChromeFeatureList.DECOUPLE_SYNC_FROM_ANDROID_MASTER_SYNC);
+        if (mIsSyncable == shouldBeSyncable) return;
 
         mIsSyncable = shouldBeSyncable;
 
-        try (StrictModeContext ignored = StrictModeContext.allowDiskWrites()) {
-            // Make account syncable if there is one.
-            if (shouldBeSyncable) {
-                mSyncContentResolverDelegate.setIsSyncable(mAccount, mContractAuthority, 1);
-                // This reduces unnecessary resource usage. See http://crbug.com/480688 for details.
-                mSyncContentResolverDelegate.removePeriodicSync(
-                        mAccount, mContractAuthority, Bundle.EMPTY);
-            }
+        // Make account syncable if there is one.
+        if (shouldBeSyncable) {
+            mSyncContentResolverDelegate.setIsSyncable(mAccount, mContractAuthority, 1);
+            // This reduces unnecessary resource usage. See http://crbug.com/480688 for details.
+            mSyncContentResolverDelegate.removePeriodicSync(
+                    mAccount, mContractAuthority, Bundle.EMPTY);
+        } else if (mAccount != null) {
+            mSyncContentResolverDelegate.setIsSyncable(mAccount, mContractAuthority, 0);
         }
 
         // Disable the syncability of Chrome for all other accounts.
-        ThreadUtils.postOnUiThread(() -> {
-            AccountManagerFacadeProvider.getInstance().tryGetGoogleAccounts(accounts -> {
-                synchronized (mLock) {
-                    try (StrictModeContext ignored = StrictModeContext.allowDiskWrites()) {
-                        for (int i = 0; i < accounts.size(); i++) {
-                            Account account = accounts.get(i);
-                            if (!account.equals(mAccount)
-                                    && mSyncContentResolverDelegate.getIsSyncable(
-                                               account, mContractAuthority)
-                                            > 0) {
-                                mSyncContentResolverDelegate.setIsSyncable(
-                                        account, mContractAuthority, 0);
-                            }
-                        }
-                    }
+        AccountManagerFacadeProvider.getInstance().tryGetGoogleAccounts(accounts -> {
+            for (Account account : accounts) {
+                if (account.equals(mAccount)) continue;
+                if (mSyncContentResolverDelegate.getIsSyncable(account, mContractAuthority) <= 0) {
+                    continue;
                 }
-
-                if (callback != null) callback.onResult(true);
-            });
+                mSyncContentResolverDelegate.setIsSyncable(account, mContractAuthority, 0);
+            }
         });
     }
 
     /**
-     * Helper class to be used by observers whenever sync settings change.
-     *
-     * To register the observer, call AndroidSyncSettings.registerObserver(...).
-     */
-    private class AndroidSyncSettingsChangedObserver implements SyncStatusObserver {
-        @Override
-        public void onStatusChanged(int which) {
-            if (which == ContentResolver.SYNC_OBSERVER_TYPE_SETTINGS) {
-                // Sync settings have changed; update our cached values.
-                if (updateCachedSettings()) {
-                    // If something actually changed, tell our observers.
-                    notifyObservers();
-                }
-            }
-        }
-    }
-
-    /**
-     * Update the three cached settings from the content resolver.
+     * Update the three cached settings from the content resolver and the
+     * master sync decoupling setting.
      *
      * @return Whether either chromeSyncEnabled or masterSyncEnabled changed.
      */
     private boolean updateCachedSettings() {
-        synchronized (mLock) {
-            boolean oldChromeSyncEnabled = mChromeSyncEnabled;
-            boolean oldMasterSyncEnabled = mMasterSyncEnabled;
+        boolean oldChromeSyncEnabled = mChromeSyncEnabled;
+        boolean oldMasterSyncEnabled = mMasterSyncEnabled;
 
-            StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskWrites();
-            if (mAccount != null) {
-                mIsSyncable =
-                        mSyncContentResolverDelegate.getIsSyncable(mAccount, mContractAuthority)
-                        == 1;
-                mChromeSyncEnabled = mSyncContentResolverDelegate.getSyncAutomatically(
-                        mAccount, mContractAuthority);
-            } else {
-                mIsSyncable = false;
-                mChromeSyncEnabled = false;
-            }
-            mMasterSyncEnabled = mSyncContentResolverDelegate.getMasterSyncAutomatically();
-            StrictMode.setThreadPolicy(oldPolicy);
-
-            return oldChromeSyncEnabled != mChromeSyncEnabled
-                    || oldMasterSyncEnabled != mMasterSyncEnabled;
+        if (mAccount != null) {
+            mIsSyncable =
+                    mSyncContentResolverDelegate.getIsSyncable(mAccount, mContractAuthority) > 0;
+            mChromeSyncEnabled =
+                    mSyncContentResolverDelegate.getSyncAutomatically(mAccount, mContractAuthority);
+        } else {
+            mIsSyncable = false;
+            mChromeSyncEnabled = false;
         }
+        mMasterSyncEnabled = mSyncContentResolverDelegate.getMasterSyncAutomatically();
+
+        if (mAccount != null && ProfileSyncService.get() != null
+                && ChromeFeatureList.isEnabled(
+                        ChromeFeatureList.DECOUPLE_SYNC_FROM_ANDROID_MASTER_SYNC)
+                && mMasterSyncEnabled && !mShouldDecoupleSyncFromMasterSync) {
+            // Re-enabling master sync at least once should cause Sync to no longer care whether
+            // the former is enabled or not. This fact should be persisted via ProfileSyncService
+            // so it's known on the next startup.
+            mShouldDecoupleSyncFromMasterSync = true;
+            ProfileSyncService.get().setDecoupledFromAndroidMasterSync();
+        }
+
+        return oldChromeSyncEnabled != mChromeSyncEnabled
+                || oldMasterSyncEnabled != mMasterSyncEnabled;
     }
 
     private void notifyObservers() {
-        // TODO(crbug.com/1028568): This should post tasks to the UI thread to prevent individual
-        // observers from having to post tasks themselves.
         for (AndroidSyncSettingsObserver observer : mObservers) {
             observer.androidSyncSettingsChanged();
         }
+    }
+
+    /**
+     * Returns the sync account in the last used regular profile.
+     */
+    private static @Nullable Account getSyncAccount() {
+        IdentityManager identityManager = IdentityServicesProvider.get().getIdentityManager(
+                Profile.getLastUsedRegularProfile());
+        return CoreAccountInfo.getAndroidAccountFrom(
+                identityManager.getPrimaryAccountInfo(ConsentLevel.SYNC));
     }
 }

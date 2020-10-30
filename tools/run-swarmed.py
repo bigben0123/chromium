@@ -48,7 +48,7 @@ def _Spawn(args):
   - The json file created by triggering and used to collect results;
   - The command line arguments object.
   """
-  index, args, isolated_hash = args
+  index, args, isolated_hash, swarming_command = args
   json_file = os.path.join(args.results, '%d.json' % index)
   trigger_args = [
       'tools/luci-go/swarming',
@@ -102,17 +102,17 @@ def _Spawn(args):
     ]
   if args.gtest_filter:
     runner_args.append('--gtest_filter=' + args.gtest_filter)
-  if args.repeat:
-    runner_args.append('--repeat=' + args.repeat)
+  if args.gtest_repeat:
+    runner_args.append('--gtest_repeat=' + args.gtest_repeat)
   elif args.target_os == 'fuchsia':
     filter_file = \
         'testing/buildbot/filters/fuchsia.' + args.target_name + '.filter'
     if os.path.isfile(filter_file):
       runner_args.append('--test-launcher-filter-file=../../' + filter_file)
 
-  if runner_args:
-    trigger_args.append('--')
-    trigger_args.extend(runner_args)
+  trigger_args.extend(['--relative-cwd', args.out_dir, '--raw-cmd', '--'])
+  trigger_args.extend(swarming_command)
+  trigger_args.extend(runner_args)
 
   with open(os.devnull, 'w') as nul:
     subprocess.check_call(trigger_args, stdout=nul)
@@ -180,7 +180,8 @@ def main():
                       help='Use the given gtest_filter, rather than the '
                            'default filter file, if any.')
   parser.add_argument(
-      '--repeat', help='Number of times to repeat the specified set of tests.')
+      '--gtest_repeat',
+      help='Number of times to repeat the specified set of tests.')
   parser.add_argument('--no-test-flags', action='store_true',
                       help='Do not add --test-launcher-summary-output and '
                            '--system-log-file flags to the comment.')
@@ -248,6 +249,16 @@ def main():
   with open(isolated) as f:
     isolated_hash = hashlib.sha1(f.read()).hexdigest()
 
+  mb_cmd = [
+      sys.executable, 'tools/mb/mb.py', 'get-swarming-command', '--as-list'
+  ]
+  if not args.build:
+    mb_cmd.append('--no-build')
+  if args.isolate_map_file:
+    mb_cmd += ['--isolate-map-file', args.isolate_map_file]
+  mb_cmd += ['//' + args.out_dir, args.target_name]
+  swarming_cmd = json.loads(subprocess.check_output(mb_cmd))
+
   if os.path.isdir(args.results):
     shutil.rmtree(args.results)
   os.makedirs(args.results)
@@ -257,7 +268,8 @@ def main():
     # Use dummy since threadpools give better exception messages
     # than process pools do, and threads work fine for what we're doing.
     pool = multiprocessing.dummy.Pool()
-    spawn_args = map(lambda i: (i, args, isolated_hash), range(args.copies))
+    spawn_args = map(lambda i: (i, args, isolated_hash, swarming_cmd),
+                     range(args.copies))
     spawn_results = pool.imap_unordered(_Spawn, spawn_args)
 
     exit_codes = []

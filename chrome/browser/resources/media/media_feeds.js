@@ -105,6 +105,8 @@ class MediaFeedsTableDelegate {
         td.textContent = 'Auto';
       } else if (data == mediaFeeds.mojom.FeedUserStatus.kDisabled) {
         td.textContent = 'Disabled';
+      } else if (data == mediaFeeds.mojom.FeedUserStatus.kEnabled) {
+        td.textContent = 'Enabled';
       }
     } else if (key === 'lastFetchResult') {
       // Format a FetchResult.
@@ -375,7 +377,7 @@ class MediaFeedsTableDelegate {
  * @returns {number}
  */
 function timeDeltaToSeconds(timeDelta) {
-  return timeDelta.microseconds / 1000 / 1000;
+  return Number(timeDelta.microseconds) / 1000 / 1000;
 }
 
 /**

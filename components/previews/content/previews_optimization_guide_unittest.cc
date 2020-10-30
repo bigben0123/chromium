@@ -61,22 +61,32 @@ class TestOptimizationGuideDecider
     return registered_optimization_targets_;
   }
 
-  optimization_guide::OptimizationGuideDecision ShouldTargetNavigation(
+  void ShouldTargetNavigationAsync(
       content::NavigationHandle* navigation_handle,
-      optimization_guide::proto::OptimizationTarget optimization_target)
+      optimization_guide::proto::OptimizationTarget optimization_target,
+      const base::flat_map<optimization_guide::proto::ClientModelFeature,
+                           float>& client_model_features,
+      optimization_guide::OptimizationGuideTargetDecisionCallback callback)
       override {
     // This method should always be called with the painful page load target.
     EXPECT_EQ(optimization_target,
               optimization_guide::proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD);
+    // We expect that the opt guide will calculate all features for us and we
+    // will not override with anything.
+    EXPECT_TRUE(client_model_features.empty());
 
     net::EffectiveConnectionType ect =
         network_quality_tracker_.GetEffectiveConnectionType();
     if (ect == net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN) {
-      return optimization_guide::OptimizationGuideDecision::kUnknown;
+      std::move(callback).Run(
+          optimization_guide::OptimizationGuideDecision::kUnknown);
+    } else if (ect <= net::EFFECTIVE_CONNECTION_TYPE_2G) {
+      std::move(callback).Run(
+          optimization_guide::OptimizationGuideDecision::kTrue);
+    } else {
+      std::move(callback).Run(
+          optimization_guide::OptimizationGuideDecision::kFalse);
     }
-    if (ect <= net::EFFECTIVE_CONNECTION_TYPE_2G)
-      return optimization_guide::OptimizationGuideDecision::kTrue;
-    return optimization_guide::OptimizationGuideDecision::kFalse;
   }
 
   optimization_guide::OptimizationGuideDecision CanApplyOptimization(
@@ -146,8 +156,6 @@ class PreviewsOptimizationGuideTest : public testing::Test {
 
     optimization_guide::proto::PreviewsMetadata rlh_previews_metadata;
     rlh_previews_metadata.set_inflation_percent(123);
-    rlh_previews_metadata.set_max_ect_trigger(
-        optimization_guide::proto::EFFECTIVE_CONNECTION_TYPE_3G);
     auto* rlh1 = rlh_previews_metadata.add_resource_loading_hints();
     rlh1->set_resource_pattern("resource1");
     rlh1->set_loading_optimization_type(
@@ -375,6 +383,10 @@ TEST_F(PreviewsOptimizationGuideTest,
   content::MockNavigationHandle navigation_handle;
   navigation_handle.set_url(GURL("doesntmatter"));
 
+  // This should be a no-op, but call it just to make sure any decisions are
+  // overridden.
+  guide.StartCheckingIfShouldShowPreview(&navigation_handle);
+
   EXPECT_TRUE(guide.ShouldShowPreview(&navigation_handle));
 }
 
@@ -395,6 +407,8 @@ TEST_F(PreviewsOptimizationGuideTest,
   content::MockNavigationHandle navigation_handle;
   navigation_handle.set_url(GURL("doesntmatter"));
 
+  guide.StartCheckingIfShouldShowPreview(&navigation_handle);
+
   EXPECT_FALSE(guide.ShouldShowPreview(&navigation_handle));
 }
 
@@ -407,6 +421,8 @@ TEST_F(PreviewsOptimizationGuideTest,
 
   content::MockNavigationHandle navigation_handle;
   navigation_handle.set_url(GURL("doesntmatter"));
+
+  guide.StartCheckingIfShouldShowPreview(&navigation_handle);
 
   EXPECT_TRUE(guide.ShouldShowPreview(&navigation_handle));
 }
@@ -421,6 +437,8 @@ TEST_F(PreviewsOptimizationGuideTest,
   content::MockNavigationHandle navigation_handle;
   navigation_handle.set_url(GURL("doesntmatter"));
 
+  guide.StartCheckingIfShouldShowPreview(&navigation_handle);
+
   EXPECT_FALSE(guide.ShouldShowPreview(&navigation_handle));
 }
 
@@ -434,55 +452,9 @@ TEST_F(PreviewsOptimizationGuideTest,
   content::MockNavigationHandle navigation_handle;
   navigation_handle.set_url(GURL("doesntmatter"));
 
+  guide.StartCheckingIfShouldShowPreview(&navigation_handle);
+
   EXPECT_FALSE(guide.ShouldShowPreview(&navigation_handle));
-}
-
-TEST_F(
-    PreviewsOptimizationGuideTest,
-    AreCommitTimePreviewsAvailableWithAtLeastOneNonFalseDecisionReturnsTrue) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitWithFeatures(
-      {previews::features::kDeferAllScriptPreviews,
-       previews::features::kNoScriptPreviews,
-       previews::features::kResourceLoadingHints},
-      {});
-
-  PreviewsOptimizationGuide guide(optimization_guide_decider());
-  SeedOptimizationGuideDeciderWithDefaultResponses();
-
-  content::MockNavigationHandle navigation_handle;
-  navigation_handle.set_url(hint_not_loaded_url());
-
-  EXPECT_TRUE(guide.AreCommitTimePreviewsAvailable(&navigation_handle));
-}
-
-TEST_F(
-    PreviewsOptimizationGuideTest,
-    AreCommitTimePreviewsAvailableReturnsFalseIfNoClientSidePreviewsEnabled) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitWithFeatures(
-      {}, {previews::features::kDeferAllScriptPreviews,
-           previews::features::kNoScriptPreviews,
-           previews::features::kResourceLoadingHints});
-
-  PreviewsOptimizationGuide guide(optimization_guide_decider());
-  SeedOptimizationGuideDeciderWithDefaultResponses();
-
-  content::MockNavigationHandle navigation_handle;
-  navigation_handle.set_url(hint_not_loaded_url());
-
-  EXPECT_FALSE(guide.AreCommitTimePreviewsAvailable(&navigation_handle));
-}
-
-TEST_F(PreviewsOptimizationGuideTest,
-       AreCommitTimePreviewsAvailableWithAllFalseDecisionsReturnsFalse) {
-  PreviewsOptimizationGuide guide(optimization_guide_decider());
-  SeedOptimizationGuideDeciderWithDefaultResponses();
-
-  content::MockNavigationHandle navigation_handle;
-  navigation_handle.set_url(GURL("https://nohints.com"));
-
-  EXPECT_FALSE(guide.AreCommitTimePreviewsAvailable(&navigation_handle));
 }
 
 }  // namespace previews

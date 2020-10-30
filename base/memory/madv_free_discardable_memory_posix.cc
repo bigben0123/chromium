@@ -48,7 +48,7 @@ base::MadvFreeSupport ProbePlatformMadvFreeSupport() {
   // the MADV_FREE define will not exist and the probe will default to
   // unsupported, regardless of whether the target system actually supports
   // MADV_FREE.
-#if !defined(OS_MACOSX) && defined(MADV_FREE)
+#if !defined(OS_APPLE) && defined(MADV_FREE)
   uint8_t* dummy_page = static_cast<uint8_t*>(AllocatePages(1));
   dummy_page[0] = 1;
 
@@ -292,7 +292,7 @@ void MadvFreeDiscardableMemoryPosix::SetKeepMemoryForTesting(bool keep_memory) {
 
 bool MadvFreeDiscardableMemoryPosix::IsResident() const {
   DFAKE_SCOPED_RECURSIVE_LOCK(thread_collision_warner_);
-#ifdef OS_MACOSX
+#if defined(OS_APPLE)
   std::vector<char> vec(allocated_pages_);
 #else
   std::vector<unsigned char> vec(allocated_pages_);

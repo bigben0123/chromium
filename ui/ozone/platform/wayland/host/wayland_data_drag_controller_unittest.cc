@@ -26,7 +26,6 @@
 #include "ui/ozone/platform/wayland/host/wayland_data_drag_controller.h"
 #include "ui/ozone/platform/wayland/host/wayland_data_source.h"
 #include "ui/ozone/platform/wayland/host/wayland_toplevel_window.h"
-#include "ui/ozone/platform/wayland/test/constants.h"
 #include "ui/ozone/platform/wayland/test/mock_surface.h"
 #include "ui/ozone/platform/wayland/test/test_data_device.h"
 #include "ui/ozone/platform/wayland/test/test_data_device_manager.h"
@@ -35,9 +34,9 @@
 #include "ui/ozone/platform/wayland/test/test_wayland_server_thread.h"
 #include "ui/ozone/platform/wayland/test/wayland_test.h"
 #include "ui/ozone/public/platform_clipboard.h"
-#include "ui/platform_window/platform_window_handler/wm_drag_handler.h"
-#include "ui/platform_window/platform_window_handler/wm_drop_handler.h"
 #include "ui/platform_window/platform_window_init_properties.h"
+#include "ui/platform_window/wm/wm_drag_handler.h"
+#include "ui/platform_window/wm/wm_drop_handler.h"
 #include "url/gurl.h"
 
 using testing::_;
@@ -47,18 +46,21 @@ namespace ui {
 
 namespace {
 
+constexpr char kSampleTextForDragAndDrop[] =
+    "This is a sample text for drag-and-drop.";
+
 constexpr FilenameToURLPolicy kFilenameToURLPolicy =
     FilenameToURLPolicy::CONVERT_FILENAMES;
 
 template <typename StringType>
 PlatformClipboard::Data ToClipboardData(const StringType& data_string) {
-  PlatformClipboard::Data result;
-  auto* begin =
-      reinterpret_cast<typename PlatformClipboard::Data::const_pointer>(
-          data_string.data());
-  result.assign(begin, begin + (data_string.size() *
-                                sizeof(typename StringType::value_type)));
-  return result;
+  auto* begin = reinterpret_cast<typename std::vector<uint8_t>::const_pointer>(
+      data_string.data());
+  std::vector<uint8_t> result(
+      begin,
+      begin + (data_string.size() * sizeof(typename StringType::value_type)));
+  return scoped_refptr<base::RefCountedBytes>(
+      base::RefCountedBytes::TakeVector(&result));
 }
 
 }  // namespace
@@ -76,11 +78,13 @@ class MockDropHandler : public WmDropHandler {
   MockDropHandler() = default;
   ~MockDropHandler() override = default;
 
-  MOCK_METHOD3(OnDragEnter,
+  MOCK_METHOD4(OnDragEnter,
                void(const gfx::PointF& point,
                     std::unique_ptr<OSExchangeData> data,
-                    int operation));
-  MOCK_METHOD2(OnDragMotion, int(const gfx::PointF& point, int operation));
+                    int operation,
+                    int modifiers));
+  MOCK_METHOD3(OnDragMotion,
+               int(const gfx::PointF& point, int operation, int modifiers));
   MOCK_METHOD0(MockOnDragDrop, void());
   MOCK_METHOD0(OnDragLeave, void());
 
@@ -91,7 +95,8 @@ class MockDropHandler : public WmDropHandler {
   OSExchangeData* dropped_data() { return dropped_data_.get(); }
 
  protected:
-  void OnDragDrop(std::unique_ptr<OSExchangeData> data) override {
+  void OnDragDrop(std::unique_ptr<OSExchangeData> data,
+                  int modifiers) override {
     dropped_data_ = std::move(data);
     MockOnDragDrop();
     on_drop_closure_.Run();
@@ -130,8 +135,58 @@ class WaylandDataDragControllerTest : public WaylandTest {
   }
 
   base::string16 sample_text_for_dnd() const {
-    static auto text = base::ASCIIToUTF16(wl::kSampleTextForDragAndDrop);
+    static auto text = base::ASCIIToUTF16(kSampleTextForDragAndDrop);
     return text;
+  }
+
+  void ReadDataWhenSourceIsReady() {
+    Sync();
+
+    if (!data_device_manager_->data_source()) {
+      // The data source is created asynchronously via the window's data drag
+      // controller.  If it is null now, it means that the task for that has not
+      // yet executed, and we have to come later.
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE,
+          base::BindOnce(
+              &WaylandDataDragControllerTest::ReadDataWhenSourceIsReady,
+              base::Unretained(this)));
+      return;
+    }
+
+    // Now the server can read the data and give it to our callback.
+    base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
+    auto callback = base::BindOnce(
+        [](base::RunLoop* loop, std::vector<uint8_t>&& data) {
+          std::string result(data.begin(), data.end());
+          EXPECT_EQ(kSampleTextForDragAndDrop, result);
+          loop->Quit();
+        },
+        &run_loop);
+    data_device_manager_->data_source()->ReadData(kMimeTypeTextUtf8,
+                                                  std::move(callback));
+    run_loop.Run();
+
+    data_device_manager_->data_source()->OnCancelled();
+    Sync();
+  }
+
+  void ScheduleDragCancel() {
+    Sync();
+
+    if (!data_device_manager_->data_source()) {
+      // The data source is created asynchronously by the data drag controller.
+      // If it is null at this point, it means that the task for that has not
+      // yet executed, and we have to try again a bit later.
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE,
+          base::BindOnce(&WaylandDataDragControllerTest::ScheduleDragCancel,
+                         base::Unretained(this)));
+      return;
+    }
+
+    data_device_manager_->data_source()->OnCancelled();
+    Sync();
   }
 
  protected:
@@ -141,34 +196,25 @@ class WaylandDataDragControllerTest : public WaylandTest {
 };
 
 TEST_P(WaylandDataDragControllerTest, StartDrag) {
-  bool restored_focus = window_->has_pointer_focus();
+  const bool restored_focus = window_->has_pointer_focus();
   window_->SetPointerFocus(true);
 
   // The client starts dragging.
   ASSERT_EQ(PlatformWindowType::kWindow, window_->type());
-  auto* toplevel = static_cast<WaylandToplevelWindow*>(window_.get());
   OSExchangeData os_exchange_data;
   os_exchange_data.SetString(sample_text_for_dnd());
-  int operation = DragDropTypes::DRAG_COPY | DragDropTypes::DRAG_MOVE;
-  toplevel->StartDrag(os_exchange_data, operation, {},
-                      drag_handler_delegate_.get());
+
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&WaylandDataDragControllerTest::ReadDataWhenSourceIsReady,
+                     base::Unretained(this)));
+
+  static_cast<WaylandToplevelWindow*>(window_.get())
+      ->StartDrag(os_exchange_data,
+                  DragDropTypes::DRAG_COPY | DragDropTypes::DRAG_MOVE, {}, true,
+                  drag_handler_delegate_.get());
   Sync();
 
-  // The server reads the data and the callback gets it.
-  base::RunLoop run_loop;
-  auto callback = base::BindOnce(
-      [](base::RunLoop* loop, PlatformClipboard::Data&& data) {
-        std::string result(data.begin(), data.end());
-        EXPECT_EQ(wl::kSampleTextForDragAndDrop, result);
-        loop->Quit();
-      },
-      &run_loop);
-  data_device_manager_->data_source()->ReadData(wl::kTextMimeTypeUtf8,
-                                                std::move(callback));
-  run_loop.Run();
-
-  data_device_manager_->data_source()->OnCancelled();
-  Sync();
   EXPECT_FALSE(data_device()->drag_delegate_);
 
   window_->SetPointerFocus(restored_focus);
@@ -189,7 +235,7 @@ TEST_P(WaylandDataDragControllerTest, StartDragWithWrongMimeType) {
   // to read it with a different mime type.
   base::RunLoop run_loop;
   auto callback = base::BindOnce(
-      [](base::RunLoop* loop, PlatformClipboard::Data&& data) {
+      [](base::RunLoop* loop, std::vector<uint8_t>&& data) {
         std::string result(data.begin(), data.end());
         EXPECT_TRUE(result.empty());
         loop->Quit();
@@ -217,9 +263,9 @@ TEST_P(WaylandDataDragControllerTest, StartDragWithText) {
   // |kTextMimeTypeUtf8|.
   base::RunLoop run_loop;
   auto callback = base::BindOnce(
-      [](base::RunLoop* loop, PlatformClipboard::Data&& data) {
+      [](base::RunLoop* loop, std::vector<uint8_t>&& data) {
         std::string result(data.begin(), data.end());
-        EXPECT_EQ(wl::kSampleTextForDragAndDrop, result);
+        EXPECT_EQ(kSampleTextForDragAndDrop, result);
         loop->Quit();
       },
       &run_loop);
@@ -231,9 +277,8 @@ TEST_P(WaylandDataDragControllerTest, StartDragWithText) {
 
 TEST_P(WaylandDataDragControllerTest, ReceiveDrag) {
   auto* data_offer = data_device_manager_->data_device()->OnDataOffer();
-  data_offer->OnOffer(
-      kMimeTypeText,
-      ToClipboardData(std::string(wl::kSampleTextForDragAndDrop)));
+  data_offer->OnOffer(kMimeTypeText,
+                      ToClipboardData(std::string(kSampleTextForDragAndDrop)));
 
   gfx::Point entered_point(10, 10);
   // The server sends an enter event.
@@ -252,11 +297,11 @@ TEST_P(WaylandDataDragControllerTest, ReceiveDrag) {
 
   Sync();
 
-  auto callback = base::BindOnce([](const PlatformClipboard::Data& contents) {
+  auto callback = base::BindOnce([](PlatformClipboard::Data contents) {
     std::string result;
-    result.assign(reinterpret_cast<std::string::const_pointer>(&contents[0]),
-                  contents.size());
-    EXPECT_EQ(wl::kSampleTextForDragAndDrop, result);
+    EXPECT_TRUE(contents);
+    result.assign(contents->front_as<char>(), contents->size());
+    EXPECT_EQ(kSampleTextForDragAndDrop, result);
   });
 
   // The client requests the data and gets callback with it.
@@ -269,9 +314,8 @@ TEST_P(WaylandDataDragControllerTest, ReceiveDrag) {
 
 TEST_P(WaylandDataDragControllerTest, DropSeveralMimeTypes) {
   auto* data_offer = data_device_manager_->data_device()->OnDataOffer();
-  data_offer->OnOffer(
-      kMimeTypeText,
-      ToClipboardData(std::string(wl::kSampleTextForDragAndDrop)));
+  data_offer->OnOffer(kMimeTypeText,
+                      ToClipboardData(std::string(kSampleTextForDragAndDrop)));
   data_offer->OnOffer(kMimeTypeMozillaURL, ToClipboardData(base::UTF8ToUTF16(
                                                "https://sample.com/\r\n"
                                                "Sample")));
@@ -279,7 +323,7 @@ TEST_P(WaylandDataDragControllerTest, DropSeveralMimeTypes) {
       kMimeTypeURIList,
       ToClipboardData(std::string("file:///home/user/file\r\n")));
 
-  EXPECT_CALL(*drop_handler_, OnDragEnter(_, _, _)).Times(1);
+  EXPECT_CALL(*drop_handler_, OnDragEnter(_, _, _, _)).Times(1);
   gfx::Point entered_point(10, 10);
   data_device_manager_->data_device()->OnEnter(
       1002, surface_->resource(), wl_fixed_from_int(entered_point.x()),
@@ -326,7 +370,7 @@ TEST_P(WaylandDataDragControllerTest, ValidateDroppedUriList) {
     auto* data_offer = data_device_manager_->data_device()->OnDataOffer();
     data_offer->OnOffer(kMimeTypeURIList, ToClipboardData(kCase.content));
 
-    EXPECT_CALL(*drop_handler_, OnDragEnter(_, _, _)).Times(1);
+    EXPECT_CALL(*drop_handler_, OnDragEnter(_, _, _, _)).Times(1);
     gfx::Point entered_point(10, 10);
     data_device_manager_->data_device()->OnEnter(
         1002, surface_->resource(), wl_fixed_from_int(entered_point.x()),
@@ -381,7 +425,7 @@ TEST_P(WaylandDataDragControllerTest, ValidateDroppedXMozUrl) {
     data_offer->OnOffer(kMimeTypeMozillaURL,
                         ToClipboardData(base::UTF8ToUTF16(kCase.content)));
 
-    EXPECT_CALL(*drop_handler_, OnDragEnter(_, _, _)).Times(1);
+    EXPECT_CALL(*drop_handler_, OnDragEnter(_, _, _, _)).Times(1);
     gfx::Point entered_point(10, 10);
     data_device_manager_->data_device()->OnEnter(
         1002, surface_->resource(), wl_fixed_from_int(entered_point.x()),
@@ -416,6 +460,35 @@ TEST_P(WaylandDataDragControllerTest, ValidateDroppedXMozUrl) {
     Sync();
     Mock::VerifyAndClearExpectations(drop_handler_.get());
   }
+}
+
+// Verifies the correct delegate functions are called when a drag session is
+// started and cancelled within the same surface.
+TEST_P(WaylandDataDragControllerTest, StartAndCancel) {
+  const bool restored_focus = window_->has_pointer_focus();
+  window_->SetPointerFocus(true);
+
+  ASSERT_EQ(PlatformWindowType::kWindow, window_->type());
+  OSExchangeData os_exchange_data;
+  os_exchange_data.SetString(sample_text_for_dnd());
+
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&WaylandDataDragControllerTest::ScheduleDragCancel,
+                     base::Unretained(this)));
+
+  // DnD handlers expect DragLeave to be sent before DragFinished when drag
+  // sessions end up with no data transfer (cancelled). Otherwise, it might lead
+  // to issues like https://crbug.com/1109324.
+  EXPECT_CALL(*drop_handler_, OnDragLeave()).Times(1);
+  EXPECT_CALL(*drag_handler_delegate_, OnDragFinished(_)).Times(1);
+
+  static_cast<WaylandToplevelWindow*>(window_.get())
+      ->StartDrag(os_exchange_data, DragDropTypes::DRAG_COPY, {}, true,
+                  drag_handler_delegate_.get());
+  Sync();
+
+  window_->SetPointerFocus(restored_focus);
 }
 
 INSTANTIATE_TEST_SUITE_P(XdgVersionStableTest,

@@ -55,7 +55,7 @@
 
   Profile* profile;
   if ([mode isEqualToString:AppleScript::kIncognitoWindowMode]) {
-    profile = lastProfile->GetOffTheRecordProfile();
+    profile = lastProfile->GetPrimaryOTRProfile();
   }
   else if ([mode isEqualToString:AppleScript::kNormalWindowMode] || !mode) {
     profile = lastProfile;
@@ -77,7 +77,7 @@
   }
 
   if ((self = [super init])) {
-    _browser = new Browser(Browser::CreateParams(aProfile, false));
+    _browser = Browser::Create(Browser::CreateParams(aProfile, false));
     chrome::NewTab(_browser);
     _browser->window()->Show();
     base::scoped_nsobject<NSNumber> numID(

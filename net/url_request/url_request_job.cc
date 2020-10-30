@@ -79,15 +79,13 @@ class URLRequestJob::URLRequestJobSourceStream : public SourceStream {
   DISALLOW_COPY_AND_ASSIGN(URLRequestJobSourceStream);
 };
 
-URLRequestJob::URLRequestJob(URLRequest* request,
-                             NetworkDelegate* network_delegate)
+URLRequestJob::URLRequestJob(URLRequest* request)
     : request_(request),
       done_(false),
       prefilter_bytes_read_(0),
       postfilter_bytes_read_(0),
       has_handled_response_(false),
-      expected_content_size_(-1),
-      network_delegate_(network_delegate) {}
+      expected_content_size_(-1) {}
 
 URLRequestJob::~URLRequestJob() {
 }
@@ -290,7 +288,7 @@ GURL MaybeStripToOrigin(GURL url, bool should_strip_to_origin) {
 
 // static
 GURL URLRequestJob::ComputeReferrerForPolicy(
-    URLRequest::ReferrerPolicy policy,
+    ReferrerPolicy policy,
     const GURL& original_referrer,
     const GURL& destination,
     bool* same_origin_out_for_metrics) {
@@ -335,13 +333,13 @@ GURL URLRequestJob::ComputeReferrerForPolicy(
       !destination.SchemeIsCryptographic();
 
   switch (policy) {
-    case URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE:
+    case ReferrerPolicy::CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE:
       if (secure_referrer_but_insecure_destination)
         return GURL();
       return MaybeStripToOrigin(std::move(stripped_referrer),
                                 should_strip_to_origin);
 
-    case URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN:
+    case ReferrerPolicy::REDUCE_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN:
       if (secure_referrer_but_insecure_destination)
         return GURL();
       if (!same_origin)
@@ -349,40 +347,44 @@ GURL URLRequestJob::ComputeReferrerForPolicy(
       return MaybeStripToOrigin(std::move(stripped_referrer),
                                 should_strip_to_origin);
 
-    case URLRequest::ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN:
+    case ReferrerPolicy::ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN:
       if (!same_origin)
         should_strip_to_origin = true;
       return MaybeStripToOrigin(std::move(stripped_referrer),
                                 should_strip_to_origin);
 
-    case URLRequest::NEVER_CLEAR_REFERRER:
+    case ReferrerPolicy::NEVER_CLEAR:
       return MaybeStripToOrigin(std::move(stripped_referrer),
                                 should_strip_to_origin);
 
-    case URLRequest::ORIGIN:
+    case ReferrerPolicy::ORIGIN:
       should_strip_to_origin = true;
       return MaybeStripToOrigin(std::move(stripped_referrer),
                                 should_strip_to_origin);
 
-    case URLRequest::CLEAR_REFERRER_ON_TRANSITION_CROSS_ORIGIN:
+    case ReferrerPolicy::CLEAR_ON_TRANSITION_CROSS_ORIGIN:
       if (!same_origin)
         return GURL();
       return MaybeStripToOrigin(std::move(stripped_referrer),
                                 should_strip_to_origin);
 
-    case URLRequest::ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE:
+    case ReferrerPolicy::ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE:
       if (secure_referrer_but_insecure_destination)
         return GURL();
       should_strip_to_origin = true;
       return MaybeStripToOrigin(std::move(stripped_referrer),
                                 should_strip_to_origin);
 
-    case URLRequest::NO_REFERRER:
+    case ReferrerPolicy::NO_REFERRER:
       return GURL();
   }
 
   NOTREACHED();
   return GURL();
+}
+
+int URLRequestJob::NotifyConnected(const TransportInfo& info) {
+  return request_->NotifyConnected(info);
 }
 
 void URLRequestJob::NotifyCertificateRequested(

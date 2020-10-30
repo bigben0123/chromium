@@ -60,6 +60,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "net/url_request/referrer_policy.h"
 
 #if defined(OS_ANDROID)
 #include "components/download/internal/common/android/download_collection_bridge.h"
@@ -644,11 +645,13 @@ void DownloadItemImpl::UpdateResumptionInfo(bool user_resume) {
 
   auto_resume_count_ = user_resume ? 0 : ++auto_resume_count_;
   download_schedule_ = base::nullopt;
+  RecordDownloadLaterEvent(DownloadLaterEvent::kScheduleRemoved);
 }
 
 void DownloadItemImpl::Cancel(bool user_cancel) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DVLOG(20) << __func__ << "() download = " << DebugString(true);
+  download_schedule_ = base::nullopt;
   InterruptAndDiscardPartialState(
       user_cancel ? DOWNLOAD_INTERRUPT_REASON_USER_CANCELED
                   : DOWNLOAD_INTERRUPT_REASON_USER_SHUTDOWN);
@@ -689,6 +692,16 @@ void DownloadItemImpl::OpenDownload() {
   last_access_time_ = base::Time::Now();
   for (auto& observer : observers_)
     observer.OnDownloadOpened(this);
+
+#if defined(OS_WIN)
+  // On Windows, don't actually open the file if it has no extension, to prevent
+  // Windows from interpreting it as the command for an executable of the same
+  // name.
+  if (destination_info_.current_path.Extension().empty()) {
+    delegate_->ShowDownloadInShell(this);
+    return;
+  }
+#endif
   delegate_->OpenDownload(this);
 }
 
@@ -972,17 +985,17 @@ DownloadFile* DownloadItemImpl::GetDownloadFile() {
 }
 
 bool DownloadItemImpl::IsDangerous() const {
-  return (danger_type_ == DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE ||
-          danger_type_ == DOWNLOAD_DANGER_TYPE_DANGEROUS_URL ||
-          danger_type_ == DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT ||
-          danger_type_ == DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT ||
-          danger_type_ == DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST ||
-          danger_type_ == DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED ||
-          danger_type_ == DOWNLOAD_DANGER_TYPE_BLOCKED_TOO_LARGE ||
-          danger_type_ == DOWNLOAD_DANGER_TYPE_BLOCKED_PASSWORD_PROTECTED ||
-          danger_type_ == DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_BLOCK ||
-          danger_type_ == DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_WARNING ||
-          danger_type_ == DOWNLOAD_DANGER_TYPE_PROMPT_FOR_SCANNING);
+  return danger_type_ == DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE ||
+         danger_type_ == DOWNLOAD_DANGER_TYPE_DANGEROUS_URL ||
+         danger_type_ == DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT ||
+         danger_type_ == DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT ||
+         danger_type_ == DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST ||
+         danger_type_ == DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED ||
+         danger_type_ == DOWNLOAD_DANGER_TYPE_BLOCKED_PASSWORD_PROTECTED ||
+         danger_type_ == DOWNLOAD_DANGER_TYPE_BLOCKED_TOO_LARGE ||
+         danger_type_ == DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_WARNING ||
+         danger_type_ == DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_BLOCK ||
+         danger_type_ == DOWNLOAD_DANGER_TYPE_PROMPT_FOR_SCANNING;
 }
 
 bool DownloadItemImpl::IsMixedContent() const {
@@ -1145,6 +1158,28 @@ void DownloadItemImpl::OnAsyncScanningCompleted(
   UpdateObservers();
 }
 
+void DownloadItemImpl::OnDownloadScheduleChanged(
+    base::Optional<DownloadSchedule> schedule) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  if (!base::FeatureList::IsEnabled(features::kDownloadLater) ||
+      state_ != INTERRUPTED_INTERNAL) {
+    return;
+  }
+
+  RecordDownloadLaterEvent(DownloadLaterEvent::kScheduleChanged);
+
+  SwapDownloadSchedule(std::move(schedule));
+
+  // Need to start later, don't proceed and ping observers.
+  if (ShouldDownloadLater()) {
+    UpdateObservers();
+    return;
+  }
+
+  // Download now. allow_metered_ will be updated afterward.
+  Resume(true /*user_resume*/);
+}
+
 void DownloadItemImpl::SetOpenWhenComplete(bool open) {
   open_when_complete_ = open;
 }
@@ -1278,22 +1313,8 @@ void DownloadItemImpl::UpdateValidatorsOnResumption(
   // a full request rather than a partial. Full restarts clobber validators.
   if (etag_ != new_create_info.etag ||
       last_modified_time_ != new_create_info.last_modified) {
-    if (destination_info_.received_bytes > 0) {
-      RecordResumptionRestartCount(
-          ResumptionRestartCountTypes::kStrongValidatorChangesCount);
-    }
     received_slices_.clear();
     destination_info_.received_bytes = 0;
-  }
-
-  if (destination_info_.received_bytes > 0 && new_create_info.offset == 0) {
-    if (!base::FeatureList::IsEnabled(
-            features::kAllowDownloadResumptionWithoutStrongValidators) ||
-        GetDownloadValidationLengthConfig() >
-            destination_info_.received_bytes) {
-      RecordResumptionRestartCount(
-          ResumptionRestartCountTypes::kRequestedByServerCount);
-    }
   }
 
   request_info_.url_chain.insert(request_info_.url_chain.end(), chain_iter,
@@ -1569,9 +1590,8 @@ void DownloadItemImpl::Start(
     }
     RecordDownloadMimeType(mime_type_);
     DownloadContent file_type = DownloadContentFromMimeType(mime_type_, false);
-    bool is_same_host_download =
-        base::StringPiece(new_create_info.url().host())
-            .ends_with(new_create_info.site_url.host());
+    bool is_same_host_download = base::EndsWith(
+        new_create_info.url().host(), new_create_info.site_url.host());
     DownloadConnectionSecurity state = CheckDownloadConnectionSecurity(
         new_create_info.url(), new_create_info.url_chain);
     DownloadUkmHelper::RecordDownloadStarted(
@@ -1604,7 +1624,7 @@ void DownloadItemImpl::Start(
   TransitionTo(TARGET_PENDING_INTERNAL);
 
   job_->Start(download_file_.get(),
-              base::Bind(&DownloadItemImpl::OnDownloadFileInitialized,
+              base::BindRepeating(&DownloadItemImpl::OnDownloadFileInitialized,
                          weak_ptr_factory_.GetWeakPtr()),
               GetReceivedSlices());
 }
@@ -1640,7 +1660,7 @@ void DownloadItemImpl::DetermineDownloadTarget() {
   RecordDownloadCountWithSource(DETERMINE_DOWNLOAD_TARGET_COUNT,
                                 download_source_);
   delegate_->DetermineDownloadTarget(
-      this, base::Bind(&DownloadItemImpl::OnDownloadTargetDetermined,
+      this, base::BindOnce(&DownloadItemImpl::OnDownloadTargetDetermined,
                        weak_ptr_factory_.GetWeakPtr()));
 }
 
@@ -1674,14 +1694,9 @@ void DownloadItemImpl::OnDownloadTargetDetermined(
     return;
   }
 
-  if (base::FeatureList::IsEnabled(features::kDownloadLater)) {
-    // If the user select to download on wifi only, use |allow_metered_| to
-    // enforce it. If the user select to download later, allow download on
-    // metered network.
-    download_schedule_ = std::move(download_schedule);
-    if (download_schedule.has_value())
-      allow_metered_ = !download_schedule->only_on_wifi();
-  }
+  if (download_schedule)
+    RecordDownloadLaterEvent(DownloadLaterEvent::kScheduleAdded);
+  SwapDownloadSchedule(std::move(download_schedule));
 
   // There were no other pending errors, and we just failed to determined the
   // download target. The target path, if it is non-empty, should be considered
@@ -1735,7 +1750,7 @@ void DownloadItemImpl::OnDownloadTargetDetermined(
   //               http://crbug.com/74187.
   DCHECK(!IsSavePackageDownload());
   DownloadFile::RenameCompletionCallback callback =
-      base::Bind(&DownloadItemImpl::OnDownloadRenamedToIntermediateName,
+      base::BindOnce(&DownloadItemImpl::OnDownloadRenamedToIntermediateName,
                  weak_ptr_factory_.GetWeakPtr());
 #if defined(OS_ANDROID)
   if ((download_type_ == TYPE_ACTIVE_DOWNLOAD && !transient_ &&
@@ -1826,6 +1841,8 @@ void DownloadItemImpl::OnTargetResolved() {
     return;
   }
 
+  download_schedule_ = base::nullopt;
+
   TransitionTo(IN_PROGRESS_INTERNAL);
   // TODO(asanka): Calling UpdateObservers() prior to MaybeCompleteDownload() is
   // not safe. The download could be in an underminate state after invoking
@@ -1840,15 +1857,7 @@ bool DownloadItemImpl::MaybeDownloadLater() {
     return false;
   }
 
-  bool network_type_ok = !download_schedule_->only_on_wifi() ||
-                         !delegate_->IsActiveNetworkMetered();
-  bool should_start_later = false;
-  if (download_schedule_->start_time().has_value() &&
-      download_schedule_->start_time() > base::Time::Now()) {
-    should_start_later = true;
-  }
-
-  if (!network_type_ok || should_start_later) {
+  if (ShouldDownloadLater()) {
     // TODO(xingliu): Maybe add a new interrupt reason for download later
     // feature.
     InterruptWithPartialState(GetReceivedBytes(), std::move(hash_state_),
@@ -1857,6 +1866,31 @@ bool DownloadItemImpl::MaybeDownloadLater() {
   }
 
   return false;
+}
+
+bool DownloadItemImpl::ShouldDownloadLater() const {
+  // No schedule, just proceed.
+  if (!download_schedule_)
+    return false;
+
+  bool network_type_ok = !download_schedule_->only_on_wifi() ||
+                         !delegate_->IsActiveNetworkMetered();
+  bool should_start_later =
+      download_schedule_->start_time().has_value() &&
+      download_schedule_->start_time() > base::Time::Now();
+
+  // Don't proceed if network requirement is not met or has a scheduled start
+  // time.
+  return !network_type_ok || should_start_later;
+}
+
+void DownloadItemImpl::SwapDownloadSchedule(
+    base::Optional<DownloadSchedule> download_schedule) {
+  if (!base::FeatureList::IsEnabled(features::kDownloadLater))
+    return;
+  download_schedule_ = std::move(download_schedule);
+  if (download_schedule_)
+    allow_metered_ = !download_schedule_->only_on_wifi();
 }
 
 // When SavePackage downloads MHTML to GData (see
@@ -1901,7 +1935,7 @@ void DownloadItemImpl::OnDownloadCompleting() {
   // Unilaterally rename; even if it already has the right name,
   // we need theannotation.
   DownloadFile::RenameCompletionCallback callback =
-      base::Bind(&DownloadItemImpl::OnDownloadRenamedToFinalName,
+      base::BindOnce(&DownloadItemImpl::OnDownloadRenamedToFinalName,
                  weak_ptr_factory_.GetWeakPtr());
 #if defined(OS_ANDROID)
   if (GetTargetFilePath().IsContentUri()) {
@@ -2473,10 +2507,6 @@ void DownloadItemImpl::ResumeInterruptedDownload(
     LOG_IF(ERROR, !GetFullPath().empty())
         << "Download full path should be empty before resumption";
     if (destination_info_.received_bytes > 0) {
-      if (!HasStrongValidators()) {
-        RecordResumptionRestartCount(
-            ResumptionRestartCountTypes::kMissingStrongValidatorsCount);
-      }
       RecordResumptionRestartReason(last_reason_);
     }
     destination_info_.received_bytes = 0;
@@ -2563,7 +2593,7 @@ void DownloadItemImpl::ResumeInterruptedDownload(
   // (which is the contents of the Referer header for the last download request)
   // will only be sent to the URL returned by GetURL().
   download_params->set_referrer(GetReferrerUrl());
-  download_params->set_referrer_policy(net::URLRequest::NEVER_CLEAR_REFERRER);
+  download_params->set_referrer_policy(net::ReferrerPolicy::NEVER_CLEAR);
   download_params->set_cross_origin_redirects(
       network::mojom::RedirectMode::kError);
 

@@ -71,7 +71,8 @@ void ChromeNTPTilesInternalsMessageHandlerClient::RegisterMessages() {
 
 bool ChromeNTPTilesInternalsMessageHandlerClient::SupportsNTPTiles() {
   Profile* profile = Profile::FromWebUI(web_ui());
-  return !(profile->IsGuestSession() || profile->IsOffTheRecord());
+  return !(profile->IsGuestSession() || profile->IsEphemeralGuestProfile() ||
+           profile->IsOffTheRecord());
 }
 
 bool ChromeNTPTilesInternalsMessageHandlerClient::DoesSourceExist(
@@ -91,10 +92,11 @@ bool ChromeNTPTilesInternalsMessageHandlerClient::DoesSourceExist(
       return false;
 #endif
     case ntp_tiles::TileSource::CUSTOM_LINKS:
-#if !defined(OS_ANDROID)
-      return true;
-#else
+    case ntp_tiles::TileSource::REPEATABLE_QUERIES_SERVICE:
+#if defined(OS_ANDROID)
       return false;
+#else
+      return true;
 #endif
   }
   NOTREACHED();
@@ -129,6 +131,9 @@ content::WebUIDataSource* CreateNTPTilesInternalsHTMLSource() {
   source->OverrideContentSecurityPolicy(
       network::mojom::CSPDirectiveName::ScriptSrc,
       "script-src chrome://resources 'self' 'unsafe-eval';");
+  source->OverrideContentSecurityPolicy(
+      network::mojom::CSPDirectiveName::TrustedTypes,
+      "trusted-types jstemplate;");
 
   source->AddResourcePath("ntp_tiles_internals.js", IDR_NTP_TILES_INTERNALS_JS);
   source->AddResourcePath("ntp_tiles_internals.css",

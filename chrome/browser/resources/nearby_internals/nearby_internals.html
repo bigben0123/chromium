@@ -20,11 +20,10 @@
   }
 
   iron-pages > * {
-    display: flex;
+    display: block;
     height: 100%;
     overflow: auto;
   }
-
 </style>
 <app-header>
   <app-toolbar>Nearby Share Internals</app-toolbar>
@@ -33,4 +32,7 @@
 <cr-tabs selected="{{selectedTabIndex_}}" tab-names="[[tabNames_]]"></cr-tabs>
 <iron-pages selected="[[selectedTabIndex_]]">
   <logging-tab></logging-tab>
+  <http-tab></http-tab>
+  <contact-tab></contact-tab>
+  <ui-trigger-tab></ui-trigger-tab>
 </iron-pages>

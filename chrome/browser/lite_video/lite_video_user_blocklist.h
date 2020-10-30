@@ -52,9 +52,15 @@ enum class LiteVideoBlocklistReason {
   // LiteVideos were blocked because the host was on the
   // NavigationBlocklist.
   kNavigationBlocklisted,
+  // LiteVideo not shown because it was a reloaded navigation.
+  kNavigationReload,
+  // LiteVideo not shown because it was a forward-back navigation.
+  kNavigationForwardBack,
+  // LiteVideo not shown because the host was permanently blocklisted.
+  kHostPermanentlyBlocklisted,
 
   // Insert new values before this line.
-  kMaxValue = kNavigationBlocklisted,
+  kMaxValue = kHostPermanentlyBlocklisted,
 };
 
 // The LiteVideoUserBlocklist maintains information about hosts the user
@@ -77,6 +83,17 @@ class LiteVideoUserBlocklist : public blocklist::OptOutBlocklist {
   virtual LiteVideoBlocklistReason IsLiteVideoAllowedOnNavigation(
       content::NavigationHandle* navigation_handle) const;
 
+  // Update the entry within the NavigationBlocklistType for the
+  // |navigation_handle| based on whether it was an opt-out or not.
+  void AddNavigationToBlocklist(content::NavigationHandle* navigation_handle,
+                                bool opt_out);
+
+  // Update the entry within the RebufferBlocklistType for the
+  // mainframe and subframe urls based on whether it was an opt-out or not.
+  void AddRebufferToBlocklist(const GURL& mainframe_url,
+                              base::Optional<GURL> subframe_url,
+                              bool opt_out);
+
  protected:
   // OptOutBlocklist:
   bool ShouldUseSessionPolicy(base::TimeDelta* duration,
@@ -96,11 +113,6 @@ class LiteVideoUserBlocklist : public blocklist::OptOutBlocklist {
       const override;
 
  private:
-  // Returns the key for a navigation used for the rebuffer blocklist type.
-  // The key format is "mainframe.com_subframe.com", if the navigation is the
-  // mainframe navigation, the key omits subframe.com, e.g., "mainframe.com_".
-  static base::Optional<std::string> GetRebufferBlocklistKey(
-      content::NavigationHandle* navigation_handle);
 
   SEQUENCE_CHECKER(sequence_checker_);
 };

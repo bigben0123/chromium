@@ -13,7 +13,6 @@
 
 #include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
-#include "base/timer/elapsed_timer.h"
 #include "content/browser/accessibility/browser_accessibility.h"
 #include "ui/accessibility/platform/ax_platform_node.h"
 
@@ -27,7 +26,8 @@ class CONTENT_EXPORT BrowserAccessibilityAndroid : public BrowserAccessibility {
   // Overrides from BrowserAccessibility.
   void OnDataChanged() override;
   void OnLocationChanged() override;
-  base::string16 GetValue() const override;
+  base::string16 GetLocalizedStringForImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus status) const override;
 
   bool IsCheckable() const;
   bool IsChecked() const;
@@ -46,8 +46,10 @@ class CONTENT_EXPORT BrowserAccessibilityAndroid : public BrowserAccessibility {
   bool IsHierarchical() const;
   bool IsLink() const;
   bool IsMultiLine() const;
-  bool IsRangeType() const;
+  bool IsMultiselectable() const;
+  bool IsReportingCheckable() const;
   bool IsScrollable() const;
+  bool IsSeekControl() const;
   bool IsSelected() const;
   bool IsSlider() const;
   bool IsVisibleToUser() const;
@@ -73,6 +75,8 @@ class CONTENT_EXPORT BrowserAccessibilityAndroid : public BrowserAccessibility {
 
   bool CanOpenPopup() const;
 
+  bool HasAriaCurrent() const;
+
   bool HasFocusableNonOptionChild() const;
   bool HasNonEmptyValue() const;
 
@@ -83,16 +87,26 @@ class CONTENT_EXPORT BrowserAccessibilityAndroid : public BrowserAccessibility {
   bool IsChildOfLeaf() const override;
   bool IsLeaf() const override;
   base::string16 GetInnerText() const override;
+  base::string16 GetValueForControl() const override;
   base::string16 GetHint() const;
 
   std::string GetRoleString() const;
 
   base::string16 GetContentInvalidErrorMessage() const;
 
+  base::string16 GetStateDescription() const;
+  base::string16 GetMultiselectableStateDescription() const;
+  base::string16 GetToggleButtonStateDescription() const;
+  base::string16 GetCheckboxStateDescription() const;
+  base::string16 GetListBoxStateDescription() const;
+  base::string16 GetListBoxItemStateDescription() const;
+  base::string16 GetAriaCurrentStateDescription() const;
+
   base::string16 GetRoleDescription() const;
 
   int GetItemIndex() const;
   int GetItemCount() const;
+  int GetSelectedItemCount() const;
 
   bool CanScrollForward() const;
   bool CanScrollBackward() const;
@@ -162,11 +176,6 @@ class CONTENT_EXPORT BrowserAccessibilityAndroid : public BrowserAccessibility {
   void GetSuggestions(std::vector<int>* suggestion_starts,
                       std::vector<int>* suggestion_ends) const;
 
-  // Used to keep track of when to stop reporting content_invalid.
-  // Timer only applies if node has focus.
-  void ResetContentInvalidTimer();
-  base::ElapsedTimer content_invalid_timer_ = base::ElapsedTimer();
-
  private:
   // This gives BrowserAccessibility::Create access to the class constructor.
   friend class BrowserAccessibility;
@@ -187,6 +196,9 @@ class CONTENT_EXPORT BrowserAccessibilityAndroid : public BrowserAccessibility {
                                    const base::string16 b);
   static size_t CommonEndLengths(const base::string16 a,
                                  const base::string16 b);
+
+  void AppendTextToString(base::string16 extra_text,
+                          base::string16* string) const;
 
   base::string16 cached_text_;
   base::string16 old_value_;

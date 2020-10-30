@@ -23,10 +23,6 @@ const CGFloat kProgressBarHeight = 2.0f;
 
 const CGFloat kToolbarSeparatorHeight = 0.1f;
 
-const CGFloat kHandleBarWidth = 60.0f;
-const CGFloat kHandleBarHeight = 4.5f;
-const CGFloat kHandleBarBottomAnchorConstant = 2.7f;
-
 const CGFloat kAdaptiveToolbarButtonHeight = 44.0f;
 const CGFloat kAdaptiveToolbarButtonWidth = 44.0f;
 const CGFloat kSearchButtonWidth = 70.0f;
@@ -57,6 +53,8 @@ const CGFloat kSecondaryToolbarHeight = 44;
 const CGFloat kNonDynamicToolbarHeight = 14;
 const CGFloat kToolbarHeightFullscreen = 20;
 const CGFloat kNonDynamicToolbarHeightFullscreen = 3;
+
+const CGFloat kTopCornerRadius = 10;
 
 NSString* const kToolbarToolsMenuButtonIdentifier =
     @"kToolbarToolsMenuButtonIdentifier";

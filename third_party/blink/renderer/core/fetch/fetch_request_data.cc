@@ -191,7 +191,6 @@ FetchRequestData* FetchRequestData::CloneExceptBody() {
   request->header_list_ = header_list_->Clone();
   request->origin_ = origin_;
   request->isolated_world_origin_ = isolated_world_origin_;
-  request->context_ = context_;
   request->destination_ = destination_;
   request->referrer_string_ = referrer_string_;
   request->referrer_policy_ = referrer_policy_;
@@ -234,16 +233,13 @@ FetchRequestData* FetchRequestData::Clone(ScriptState* script_state,
   return request;
 }
 
-FetchRequestData* FetchRequestData::Pass(ScriptState* script_state,
-                                         ExceptionState& exception_state) {
+FetchRequestData* FetchRequestData::Pass(ScriptState* script_state) {
   FetchRequestData* request = FetchRequestData::CloneExceptBody();
   if (buffer_) {
     request->buffer_ = buffer_;
     buffer_ = BodyStreamBuffer::Create(
         script_state, BytesConsumer::CreateClosed(), nullptr /* AbortSignal */);
-    buffer_->CloseAndLockAndDisturb(exception_state);
-    if (exception_state.HadException())
-      return nullptr;
+    buffer_->CloseAndLockAndDisturb();
   }
   request->url_loader_factory_ = std::move(url_loader_factory_);
   return request;
@@ -254,7 +250,6 @@ FetchRequestData::~FetchRequestData() {}
 FetchRequestData::FetchRequestData(ExecutionContext* execution_context)
     : method_(http_names::kGET),
       header_list_(MakeGarbageCollected<FetchHeaderList>()),
-      context_(mojom::RequestContextType::UNSPECIFIED),
       destination_(network::mojom::RequestDestination::kEmpty),
       referrer_string_(Referrer::ClientReferrerString()),
       referrer_policy_(network::mojom::ReferrerPolicy::kDefault),

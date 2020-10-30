@@ -7,13 +7,13 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/metrics/histogram_macros.h"
+#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings.h"
+#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/download/android/download_controller.h"
 #include "chrome/browser/download/android/jni_headers/DownloadDialogBridge_jni.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
-#include "net/base/network_change_notifier.h"
-#include "services/network/public/cpp/network_connection_tracker.h"
 #include "ui/android/window_android.h"
 
 // -----------------------------------------------------------------------------
@@ -44,6 +44,7 @@ void DownloadDialogBridge::ShowDialog(gfx::NativeWindow native_window,
                                       int64_t total_bytes,
                                       DownloadLocationDialogType dialog_type,
                                       const base::FilePath& suggested_path,
+                                      bool supports_later_dialog,
                                       DialogCallback dialog_callback) {
   if (!native_window)
     return;
@@ -72,12 +73,6 @@ void DownloadDialogBridge::ShowDialog(gfx::NativeWindow native_window,
   }
 
   is_dialog_showing_ = true;
-
-  // Only show download later dialog when on cellular network.
-  auto connection_type = network::mojom::ConnectionType(
-      net::NetworkChangeNotifier::GetConnectionType());
-  bool supports_later_dialog =
-      network::NetworkConnectionTracker::IsConnectionCellular(connection_type);
 
   JNIEnv* env = base::android::AttachCurrentThread();
   Java_DownloadDialogBridge_showDialog(
@@ -153,4 +148,11 @@ void JNI_DownloadDialogBridge_SetDownloadAndSaveFileDefaultDirectory(
   base::FilePath path(base::android::ConvertJavaStringToUTF8(env, directory));
   pref_service->SetFilePath(prefs::kDownloadDefaultDirectory, path);
   pref_service->SetFilePath(prefs::kSaveFileDefaultDirectory, path);
+}
+
+jboolean JNI_DownloadDialogBridge_IsDataReductionProxyEnabled(JNIEnv* env) {
+  auto* data_reduction_settings =
+      DataReductionProxyChromeSettingsFactory::GetForBrowserContext(
+          ProfileManager::GetActiveUserProfile());
+  return data_reduction_settings->IsDataReductionProxyEnabled();
 }

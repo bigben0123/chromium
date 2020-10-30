@@ -47,6 +47,7 @@
 <translation id="2488661730534396940">启用左侧桌面</translation>
 <translation id="2515586267016047495">Alt</translation>
 <translation id="2530339807289914946">向下滚动网页</translation>
+<translation id="2530896289327917474">开启或关闭光标浏览模式</translation>
 <translation id="2574014812750545982">重置网页的缩放级别</translation>
 <translation id="2596078834055697711">截取窗口屏幕截图</translation>
 <translation id="2685170433750953446"><ph name="SHIFT" /><ph name="SEPARATOR1" /><ph name="ALT" /><ph name="SEPARATOR2" /><ph name="L" />，然后按 <ph name="TAB" /> 键或<ph name="RIGHT" />键</translation>
@@ -185,6 +186,7 @@
 <translation id="8234414138295101081">将屏幕旋转 90 度</translation>
 <translation id="8241665785394195545">右中括号</translation>
 <translation id="8264941229485248811">显示或隐藏开发者工具检查器</translation>
+<translation id="8322502972606429618">显示最近复制到剪贴板中的几项内容</translation>
 <translation id="836869401750819675">打开“下载内容”页面</translation>
 <translation id="8388247778047144397">将链接拖到标签栏的空白区域中</translation>
 <translation id="8389638407792712197">打开新窗口</translation>

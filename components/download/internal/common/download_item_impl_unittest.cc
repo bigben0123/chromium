@@ -55,6 +55,7 @@ const base::FilePath::CharType kDummyTargetPath[] =
     FILE_PATH_LITERAL("/testpath");
 const base::FilePath::CharType kDummyIntermediatePath[] =
     FILE_PATH_LITERAL("/testpathx");
+const char kGuid[] = "8DF158E8-C980-4618-BB03-EBA3242EB48B";
 
 namespace download {
 namespace {
@@ -253,6 +254,25 @@ class DownloadItemTest : public testing::Test {
         mock_delegate(), ++next_download_id_, *create_info_);
     allocated_downloads_[download] = base::WrapUnique(download);
     return download;
+  }
+
+  std::unique_ptr<DownloadItemImpl> CreateDownloadItem(
+      DownloadItem::DownloadState state,
+      download::DownloadInterruptReason reason) {
+    auto item = std::make_unique<download::DownloadItemImpl>(
+        mock_delegate(), kGuid, 10, base::FilePath(), base::FilePath(),
+        std::vector<GURL>(), GURL("http://example.com/a"),
+        GURL("http://example.com/a"), GURL("http://example.com/a"),
+        GURL("http://example.com/a"),
+        url::Origin::Create(GURL("http://example.com")),
+        "application/octet-stream", "application/octet-stream",
+        base::Time::Now(), base::Time::Now(), std::string(), std::string(), 10,
+        10, 0, std::string(), state,
+        download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS, reason, false, false,
+        false, base::Time::Now(), true,
+        std::vector<download::DownloadItem::ReceivedSlice>(),
+        base::nullopt /*download_schedule*/, nullptr /* download_entry */);
+    return item;
   }
 
   // Add DownloadFile to DownloadItem.
@@ -1217,7 +1237,7 @@ TEST_F(DownloadItemTest, InitDownloadFileFails) {
 
   item->Start(
       std::move(file),
-      base::Bind(&DownloadItemTest::CancelRequest, base::Unretained(this)),
+      base::BindOnce(&DownloadItemTest::CancelRequest, base::Unretained(this)),
       *create_info(), URLLoaderFactoryProvider::GetNullPtr());
   task_environment_.RunUntilIdle();
 
@@ -2065,7 +2085,7 @@ TEST_F(DownloadItemTest, StealDangerousDownloadAndDiscard) {
   item->OnAllDataSaved(0, std::unique_ptr<crypto::SecureHash>());
   item->StealDangerousDownload(
       true,  // delete_file_after_feedback
-      base::Bind(&DownloadItemTest::OnDownloadFileAcquired,
+      base::BindOnce(&DownloadItemTest::OnDownloadFileAcquired,
                  weak_ptr_factory.GetWeakPtr(),
                  base::Unretained(&returned_path)));
   task_environment_.RunUntilIdle();
@@ -2084,7 +2104,7 @@ TEST_F(DownloadItemTest, StealDangerousDownloadAndKeep) {
   item->OnAllDataSaved(0, std::unique_ptr<crypto::SecureHash>());
   item->StealDangerousDownload(
       false,  // delete_file_after_feedback
-      base::Bind(&DownloadItemTest::OnDownloadFileAcquired,
+      base::BindOnce(&DownloadItemTest::OnDownloadFileAcquired,
                  weak_ptr_factory.GetWeakPtr(),
                  base::Unretained(&returned_path)));
   task_environment_.RunUntilIdle();
@@ -2110,7 +2130,7 @@ TEST_F(DownloadItemTest, StealInterruptedContinuableDangerousDownload) {
   base::WeakPtrFactory<DownloadItemTest> weak_ptr_factory(this);
   item->OnAllDataSaved(0, std::unique_ptr<crypto::SecureHash>());
   item->StealDangerousDownload(
-      true, base::Bind(&DownloadItemTest::OnDownloadFileAcquired,
+      true, base::BindOnce(&DownloadItemTest::OnDownloadFileAcquired,
                        weak_ptr_factory.GetWeakPtr(),
                        base::Unretained(&returned_path)));
   task_environment_.RunUntilIdle();
@@ -2132,7 +2152,7 @@ TEST_F(DownloadItemTest, StealInterruptedNonContinuableDangerousDownload) {
   base::WeakPtrFactory<DownloadItemTest> weak_ptr_factory(this);
   item->OnAllDataSaved(0, std::unique_ptr<crypto::SecureHash>());
   item->StealDangerousDownload(
-      true, base::Bind(&DownloadItemTest::OnDownloadFileAcquired,
+      true, base::BindOnce(&DownloadItemTest::OnDownloadFileAcquired,
                        weak_ptr_factory.GetWeakPtr(),
                        base::Unretained(&returned_path)));
   task_environment_.RunUntilIdle();
@@ -2239,7 +2259,7 @@ TEST_F(DownloadItemTest, AnnotationWithEmptyURLInIncognito) {
 // various permutations of observer calls that will then be applied to a
 // DownloadItem in a state as yet undetermined.
 using CurriedObservation =
-    base::Callback<void(base::WeakPtr<DownloadDestinationObserver>)>;
+    base::RepeatingCallback<void(base::WeakPtr<DownloadDestinationObserver>)>;
 
 // A list of observations that are to be made during some event in the
 // DownloadItemImpl control flow. Ordering of the observations is significant.
@@ -2349,17 +2369,17 @@ std::vector<EventList> DistributeObservationsIntoEvents(
 
 std::vector<EventList> GenerateSuccessfulEventLists() {
   std::vector<CurriedObservation> all_observations;
-  all_observations.push_back(base::Bind(&DestinationUpdateInvoker, 100, 100));
-  all_observations.push_back(base::Bind(&DestinationUpdateInvoker, 200, 100));
-  all_observations.push_back(base::Bind(&DestinationCompletedInvoker, 200));
+  all_observations.push_back(base::BindRepeating(&DestinationUpdateInvoker, 100, 100));
+  all_observations.push_back(base::BindRepeating(&DestinationUpdateInvoker, 200, 100));
+  all_observations.push_back(base::BindRepeating(&DestinationCompletedInvoker, 200));
   return DistributeObservationsIntoEvents(all_observations.begin(),
                                           all_observations.end(), kEventCount);
 }
 
 std::vector<EventList> GenerateFailingEventLists() {
   std::vector<CurriedObservation> all_observations;
-  all_observations.push_back(base::Bind(&DestinationUpdateInvoker, 100, 100));
-  all_observations.push_back(base::Bind(
+  all_observations.push_back(base::BindRepeating(&DestinationUpdateInvoker, 100, 100));
+  all_observations.push_back(base::BindRepeating(
       &DestinationErrorInvoker, DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED, 100));
   return DistributeObservationsIntoEvents(all_observations.begin(),
                                           all_observations.end(), kEventCount);
@@ -2402,9 +2422,6 @@ class DownloadItemDestinationUpdateRaceTest
 
   DownloadItemImpl* item_;
   std::unique_ptr<MockDownloadFile> file_;
-
-  base::queue<base::Closure> successful_update_events_;
-  base::queue<base::Closure> failing_update_events_;
 };
 
 INSTANTIATE_TEST_SUITE_P(Success,
@@ -2427,7 +2444,7 @@ TEST_P(DownloadItemDestinationUpdateRaceTest, DownloadCancelledByUser) {
       .WillOnce(SaveArg<0>(&initialize_callback));
   item_->Start(
       std::move(file_),
-      base::Bind(&DownloadItemTest::CancelRequest, base::Unretained(this)),
+      base::BindOnce(&DownloadItemTest::CancelRequest, base::Unretained(this)),
       *create_info(), URLLoaderFactoryProvider::GetNullPtr());
   task_environment_.RunUntilIdle();
 
@@ -2480,7 +2497,7 @@ TEST_P(DownloadItemDestinationUpdateRaceTest, IntermediateRenameFails) {
 
   item_->Start(
       std::move(file_),
-      base::Bind(&DownloadItemTest::CancelRequest, base::Unretained(this)),
+      base::BindOnce(&DownloadItemTest::CancelRequest, base::Unretained(this)),
       *create_info(), URLLoaderFactoryProvider::GetNullPtr());
   task_environment_.RunUntilIdle();
 
@@ -2646,7 +2663,7 @@ INSTANTIATE_TEST_SUITE_P(All,
                          DownloadLaterTest,
                          testing::ValuesIn(DownloadLaterTestParams()));
 
-TEST_P(DownloadLaterTest, TestAll) {
+TEST_P(DownloadLaterTest, TestDownloadScheduleAfterTargetDetermined) {
   const auto& param = GetParam();
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitAndEnableFeature(features::kDownloadLater);
@@ -2682,7 +2699,62 @@ TEST_P(DownloadLaterTest, TestAll) {
     ASSERT_EQ(DOWNLOAD_INTERRUPT_REASON_CRASH, item->GetLastReason());
   }
 
+  if (param.state == DownloadItem::IN_PROGRESS) {
+    EXPECT_FALSE(item->GetDownloadSchedule().has_value())
+        << "Download schedule should be cleared before completion.";
+  }
+
   CleanupItem(item, download_file, param.state);
+}
+
+TEST_P(DownloadLaterTest, TestOnDownloadScheduleChanged) {
+  const auto& param = GetParam();
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(features::kDownloadLater);
+
+  auto item = CreateDownloadItem(DownloadItem::DownloadState::INTERRUPTED,
+                                 DOWNLOAD_INTERRUPT_REASON_CRASH);
+  EXPECT_EQ(DownloadItem::INTERRUPTED, item->GetState());
+
+  // Setup network type and download schedule.
+  EXPECT_CALL(*mock_delegate(), IsActiveNetworkMetered)
+      .WillRepeatedly(Return(param.is_active_network_metered));
+
+  bool will_resume = (param.state == DownloadItem::DownloadState::IN_PROGRESS);
+  EXPECT_CALL(*mock_delegate(), MockResumeInterruptedDownload(_))
+      .Times(will_resume);
+
+  // Change the download schedule.
+  base::Optional<DownloadSchedule> download_schedule =
+      base::make_optional<DownloadSchedule>(param.only_on_wifi,
+                                            param.start_time);
+
+  item->OnDownloadScheduleChanged(std::move(download_schedule));
+
+  // Verify final states.
+  ASSERT_EQ(param.allow_metered, item->AllowMetered());
+  ASSERT_EQ(param.state, item->GetState());
+  ASSERT_EQ(0, item->GetAutoResumeCount())
+      << "Download should not be auto resumed with DownloadSchedule.";
+  if (param.state == DownloadItem::INTERRUPTED) {
+    ASSERT_EQ(DOWNLOAD_INTERRUPT_REASON_CRASH, item->GetLastReason());
+  }
+}
+
+TEST_F(DownloadItemTest, CancelWithDownloadSchedule) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(features::kDownloadLater);
+
+  auto item = CreateDownloadItem(DownloadItem::DownloadState::INTERRUPTED,
+                                 DOWNLOAD_INTERRUPT_REASON_CRASH);
+  auto download_schedule = base::make_optional<DownloadSchedule>(
+      false, base::Time::Now() + base::TimeDelta::FromDays(10));
+  item->OnDownloadScheduleChanged(std::move(download_schedule));
+
+  EXPECT_EQ(item->GetState(), DownloadItem::DownloadState::INTERRUPTED);
+  EXPECT_TRUE(item->GetDownloadSchedule().has_value());
+  item->Cancel(true);
+  EXPECT_FALSE(item->GetDownloadSchedule().has_value());
 }
 
 }  // namespace

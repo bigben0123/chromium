@@ -376,7 +376,7 @@ void ChromeAppSorting::SetAppLaunchOrdinal(
   if (web_app_registrar_ && web_app_registrar_->IsInstalled(extension_id)) {
     web_app_sync_bridge_->SetUserLaunchOrdinal(extension_id,
                                                new_app_launch_ordinal);
-    // Fall through on purpose to ensure Extensions system has correct data.
+    return;
   }
 
   std::unique_ptr<base::Value> new_value =
@@ -462,7 +462,7 @@ void ChromeAppSorting::SetPageOrdinal(
 
   if (web_app_registrar_ && web_app_registrar_->IsInstalled(extension_id)) {
     web_app_sync_bridge_->SetUserPageOrdinal(extension_id, new_page_ordinal);
-    // Fall through on purpose to ensure Extensions system has correct data.
+    return;
   }
 
   std::unique_ptr<base::Value> new_value =
@@ -518,6 +518,10 @@ void ChromeAppSorting::SetExtensionVisible(const std::string& extension_id,
 
 void ChromeAppSorting::OnWebAppInstalled(const web_app::AppId& app_id) {
   const web_app::WebApp* web_app = web_app_registrar_->GetAppById(app_id);
+  // There seems to be a racy bug where |web_app| can be a nullptr. Until that
+  // bug is solved, check for that here. https://crbug.com/1101668
+  if (!web_app)
+    return;
   if (web_app->user_page_ordinal().IsValid() &&
       web_app->user_launch_ordinal().IsValid()) {
     AddOrdinalMapping(web_app->app_id(), web_app->user_page_ordinal(),

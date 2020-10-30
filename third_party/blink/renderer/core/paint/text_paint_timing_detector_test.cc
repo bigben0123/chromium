@@ -33,7 +33,7 @@ class TextPaintTimingDetectorTest : public testing::Test {
         .SetAcceleratedCompositingEnabled(true);
 
     WebLocalFrameImpl& frame_impl = *web_view_helper_.LocalMainFrame();
-    frame_impl.ViewImpl()->MainFrameWidget()->Resize(WebSize(640, 480));
+    frame_impl.ViewImpl()->MainFrameViewWidget()->Resize(gfx::Size(640, 480));
 
     frame_test_helpers::LoadFrame(
         web_view_helper_.GetWebView()->MainFrameImpl(), "about:blank");
@@ -356,10 +356,10 @@ TEST_F(TextPaintTimingDetectorTest, LargestTextPaint_TraceEvent_NoCandidate) {
     UpdateAllLifecyclePhasesAndSimulateSwapTime();
     RemoveElement(element);
     UpdateAllLifecyclePhases();
-    EXPECT_EQ(LargestPaintSize(), 0u);
-    EXPECT_EQ(LargestPaintTime(), base::TimeTicks());
-    EXPECT_GT(ExperimentalLargestPaintSize(), 0u);
-    EXPECT_NE(ExperimentalLargestPaintTime(), base::TimeTicks());
+    EXPECT_GT(LargestPaintSize(), 0u);
+    EXPECT_NE(LargestPaintTime(), base::TimeTicks());
+    EXPECT_EQ(ExperimentalLargestPaintSize(), 0u);
+    EXPECT_EQ(ExperimentalLargestPaintTime(), base::TimeTicks());
   }
   auto analyzer = trace_analyzer::Stop();
   trace_analyzer::TraceEventVector events;
@@ -528,7 +528,7 @@ TEST_F(TextPaintTimingDetectorTest,
   EXPECT_FALSE(TextRecordOfLargestTextPaint());
 }
 
-TEST_F(TextPaintTimingDetectorTest, LargestTextPaint_IgnoreRemovedText) {
+TEST_F(TextPaintTimingDetectorTest, LargestTextPaint_RemovedText) {
   SetBodyInnerHTML(R"HTML(
   )HTML");
   Element* large_text = AppendDivElementToBody(
@@ -538,20 +538,22 @@ TEST_F(TextPaintTimingDetectorTest, LargestTextPaint_IgnoreRemovedText) {
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
   EXPECT_EQ(TextRecordOfLargestTextPaint()->node_id,
             DOMNodeIds::ExistingIdForNode(large_text));
-  uint64_t experimental_size = ExperimentalLargestPaintSize();
-  base::TimeTicks experimental_time = ExperimentalLargestPaintTime();
-  EXPECT_EQ(LargestPaintSize(), experimental_size);
-  EXPECT_EQ(LargestPaintTime(), experimental_time);
-  EXPECT_GT(experimental_size, 0u);
-  EXPECT_GT(experimental_time, base::TimeTicks());
+  uint64_t size_before_remove = LargestPaintSize();
+  base::TimeTicks time_before_remove = LargestPaintTime();
+  EXPECT_EQ(ExperimentalLargestPaintSize(), size_before_remove);
+  EXPECT_EQ(ExperimentalLargestPaintTime(), time_before_remove);
+  EXPECT_GT(size_before_remove, 0u);
+  EXPECT_GT(time_before_remove, base::TimeTicks());
 
   RemoveElement(large_text);
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
   EXPECT_EQ(TextRecordOfLargestTextPaint()->node_id,
             DOMNodeIds::ExistingIdForNode(small_text));
-  // Experimental values should remain unchanged.
-  EXPECT_EQ(ExperimentalLargestPaintSize(), experimental_size);
-  EXPECT_EQ(ExperimentalLargestPaintTime(), experimental_time);
+  // LCP values should remain unchanged.
+  EXPECT_EQ(LargestPaintSize(), size_before_remove);
+  EXPECT_EQ(LargestPaintTime(), time_before_remove);
+  // Experimental values should correspond to the smaller text.
+  EXPECT_LT(ExperimentalLargestPaintSize(), size_before_remove);
 }
 
 TEST_F(TextPaintTimingDetectorTest,
@@ -632,10 +634,12 @@ TEST_F(TextPaintTimingDetectorTest, LargestTextPaint_ReportLastNullCandidate) {
   RemoveElement(text);
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
   EXPECT_FALSE(TextRecordOfLargestTextPaint());
-  EXPECT_EQ(LargestPaintTime(), base::TimeTicks());
-  // Experimental values remain unchanged.
-  EXPECT_EQ(largest_paint_time, ExperimentalLargestPaintTime());
-  EXPECT_EQ(largest_paint_size, ExperimentalLargestPaintSize());
+  // LCP values should remain unchanged.
+  EXPECT_EQ(largest_paint_time, LargestPaintTime());
+  EXPECT_EQ(largest_paint_size, LargestPaintSize());
+  // Experimental values should be reset.
+  EXPECT_EQ(base::TimeTicks(), ExperimentalLargestPaintTime());
+  EXPECT_EQ(0u, ExperimentalLargestPaintSize());
 }
 
 TEST_F(TextPaintTimingDetectorTest,
@@ -846,6 +850,51 @@ TEST_F(TextPaintTimingDetectorTest, VisibleTextAfterUserScroll) {
   SimulateScroll();
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
   EXPECT_EQ(CountVisibleTexts(), 1u);
+}
+
+TEST_F(TextPaintTimingDetectorTest, OpacityZeroHTML) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      :root {
+        opacity: 0;
+        will-change: opacity;
+      }
+    </style>
+    <div>Text</div>
+  )HTML");
+  UpdateAllLifecyclePhasesAndSimulateSwapTime();
+  EXPECT_EQ(CountVisibleTexts(), 0u);
+
+  // Change the opacity of documentElement, now the img should be a candidate.
+  GetDocument().documentElement()->setAttribute(html_names::kStyleAttr,
+                                                "opacity: 1");
+  UpdateAllLifecyclePhasesAndSimulateSwapTime();
+  EXPECT_EQ(CountVisibleTexts(), 1u);
+  EXPECT_TRUE(TextRecordOfLargestTextPaint());
+}
+
+TEST_F(TextPaintTimingDetectorTest, OpacityZeroHTML2) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      #target {
+        opacity: 0;
+        will-change: opacity;
+      }
+    </style>
+    <div id="target">Text</div>
+  )HTML");
+  UpdateAllLifecyclePhasesAndSimulateSwapTime();
+  EXPECT_EQ(CountVisibleTexts(), 0u);
+
+  GetDocument().documentElement()->setAttribute(html_names::kStyleAttr,
+                                                "opacity: 0");
+  UpdateAllLifecyclePhasesAndSimulateSwapTime();
+  EXPECT_EQ(CountVisibleTexts(), 0u);
+
+  GetDocument().documentElement()->setAttribute(html_names::kStyleAttr,
+                                                "opacity: 1");
+  UpdateAllLifecyclePhasesAndSimulateSwapTime();
+  EXPECT_EQ(CountVisibleTexts(), 0u);
 }
 
 }  // namespace blink

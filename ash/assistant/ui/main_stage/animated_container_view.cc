@@ -14,6 +14,7 @@
 #include "chromeos/services/assistant/public/cpp/features.h"
 #include "ui/compositor/callback_layer_animation_observer.h"
 #include "ui/compositor/layer_animator.h"
+#include "ui/views/metadata/metadata_impl_macros.h"
 
 namespace ash {
 
@@ -292,7 +293,7 @@ void AnimatedContainerView::FadeOutViews() {
 }
 
 void AnimatedContainerView::SetInteractionsEnabled(bool enabled) {
-  set_can_process_events_within_subtree(enabled);
+  SetCanProcessEventsWithinSubtree(enabled);
   // We also need to enable/disable the individual views, to enable/disable
   // processing of key events.
   for (const auto& animator : animators_)
@@ -377,5 +378,8 @@ bool AnimatedContainerView::FadeOutObserverCallback(
   // We return true to delete our observer.
   return true;
 }
+
+BEGIN_METADATA(AnimatedContainerView, AssistantScrollView)
+END_METADATA
 
 }  // namespace ash

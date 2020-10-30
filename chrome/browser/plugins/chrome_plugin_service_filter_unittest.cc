@@ -14,14 +14,12 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
-#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/plugins/flash_temporary_permission_tracker.h"
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/plugins/plugin_metadata.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/common/chrome_content_client.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -158,27 +156,4 @@ TEST_F(ChromePluginServiceFilterTest,
   SetContents(
       content::WebContentsTester::CreateTestWebContents(profile(), nullptr));
   EXPECT_FALSE(IsPluginAvailable(url, main_frame_origin, flash_plugin));
-}
-
-TEST_F(ChromePluginServiceFilterTest, ManagedSetting) {
-  content::WebPluginInfo flash_plugin(
-      base::ASCIIToUTF16(content::kFlashPluginName), flash_plugin_path_,
-      base::ASCIIToUTF16("1"), base::ASCIIToUTF16("The Flash plugin."));
-
-  sync_preferences::TestingPrefServiceSyncable* prefs =
-      profile()->GetTestingPrefService();
-  prefs->SetManagedPref(prefs::kManagedDefaultPluginsSetting,
-                        std::make_unique<base::Value>(CONTENT_SETTING_ASK));
-
-  GURL url("http://www.google.com");
-  url::Origin main_frame_origin = url::Origin::Create(url);
-  NavigateAndCommit(url);
-
-  // Flash is normally blocked on the ASK managed policy.
-  EXPECT_FALSE(IsPluginAvailable(url, main_frame_origin, flash_plugin));
-
-  // Allow flash temporarily.
-  FlashTemporaryPermissionTracker::Get(profile())->FlashEnabledForWebContents(
-      web_contents());
-  EXPECT_TRUE(IsPluginAvailable(url, main_frame_origin, flash_plugin));
 }

@@ -11,20 +11,21 @@
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/web/modules/mediastream/media_stream_video_track.h"
 #include "third_party/blink/renderer/bindings/core/v8/callback_promise_adapter.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_fill_light_mode.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_media_settings_range.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_media_track_capabilities.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_media_track_constraints.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_photo_capabilities.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/fileapi/blob.h"
-#include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/imagecapture/image_capture_frame_grabber.h"
-#include "third_party/blink/renderer/modules/imagecapture/media_settings_range.h"
-#include "third_party/blink/renderer/modules/imagecapture/photo_capabilities.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_track.h"
+#include "third_party/blink/renderer/modules/mediastream/media_stream_video_track.h"
 #include "third_party/blink/renderer/modules/permissions/permission_utils.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
@@ -36,6 +37,7 @@ namespace blink {
 
 using FillLightMode = media::mojom::blink::FillLightMode;
 using MeteringMode = media::mojom::blink::MeteringMode;
+using RedEyeReduction = media::mojom::blink::RedEyeReduction;
 
 namespace {
 
@@ -81,10 +83,51 @@ WebString ToString(MeteringMode value) {
       return WebString::FromUTF8("single-shot");
     case MeteringMode::CONTINUOUS:
       return WebString::FromUTF8("continuous");
-    default:
-      NOTREACHED() << "Unknown MeteringMode";
   }
-  return WebString();
+}
+
+#ifdef USE_BLINK_V8_BINDING_NEW_IDL_DICTIONARY
+V8FillLightMode ToV8FillLightMode(FillLightMode value) {
+  switch (value) {
+    case FillLightMode::OFF:
+      return V8FillLightMode(V8FillLightMode::Enum::kOff);
+    case FillLightMode::AUTO:
+      return V8FillLightMode(V8FillLightMode::Enum::kAuto);
+    case FillLightMode::FLASH:
+      return V8FillLightMode(V8FillLightMode::Enum::kFlash);
+  }
+}
+#else
+String ToV8FillLightMode(FillLightMode value) {
+  switch (value) {
+    case FillLightMode::OFF:
+      return String::FromUTF8("off");
+    case FillLightMode::AUTO:
+      return String::FromUTF8("auto");
+    case FillLightMode::FLASH:
+      return String::FromUTF8("flash");
+  }
+}
+#endif
+
+WebString ToString(RedEyeReduction value) {
+  switch (value) {
+    case RedEyeReduction::NEVER:
+      return WebString::FromUTF8("never");
+    case RedEyeReduction::ALWAYS:
+      return WebString::FromUTF8("always");
+    case RedEyeReduction::CONTROLLABLE:
+      return WebString::FromUTF8("controllable");
+  }
+}
+
+MediaSettingsRange* ToMediaSettingsRange(
+    const media::mojom::blink::Range& range) {
+  MediaSettingsRange* result = MediaSettingsRange::Create();
+  result->setMax(range.max);
+  result->setMin(range.min);
+  result->setStep(range.step);
+  return result;
 }
 
 }  // anonymous namespace
@@ -105,8 +148,8 @@ ImageCapture* ImageCapture::Create(ExecutionContext* context,
       (track->GetImageCapture() &&
        track->GetImageCapture()->HasPanTiltZoomPermissionGranted());
 
-  return MakeGarbageCollected<ImageCapture>(context, track,
-                                            pan_tilt_zoom_allowed);
+  return MakeGarbageCollected<ImageCapture>(
+      context, track, pan_tilt_zoom_allowed, base::DoNothing());
 }
 
 ImageCapture::~ImageCapture() {
@@ -138,6 +181,13 @@ ScriptPromise ImageCapture::getPhotoCapabilities(ScriptState* script_state) {
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
 
+  if (TrackIsInactive(*stream_track_)) {
+    resolver->Reject(MakeGarbageCollected<DOMException>(
+        DOMExceptionCode::kInvalidStateError,
+        "The associated Track is in an invalid state."));
+    return promise;
+  }
+
   if (!service_.is_bound()) {
     resolver->Reject(MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kNotFoundError, kNoServiceError));
@@ -163,6 +213,13 @@ ScriptPromise ImageCapture::getPhotoCapabilities(ScriptState* script_state) {
 ScriptPromise ImageCapture::getPhotoSettings(ScriptState* script_state) {
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
+
+  if (TrackIsInactive(*stream_track_)) {
+    resolver->Reject(MakeGarbageCollected<DOMException>(
+        DOMExceptionCode::kInvalidStateError,
+        "The associated Track is in an invalid state."));
+    return promise;
+  }
 
   if (!service_.is_bound()) {
     resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -241,7 +298,7 @@ ScriptPromise ImageCapture::setOptions(ScriptState* script_state,
   settings->has_red_eye_reduction = photo_settings->hasRedEyeReduction();
   if (settings->has_red_eye_reduction) {
     if (photo_capabilities_ &&
-        !photo_capabilities_->IsRedEyeReductionControllable()) {
+        photo_capabilities_->redEyeReduction() != "controllable") {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kNotSupportedError,
           "redEyeReduction is not controllable."));
@@ -351,10 +408,9 @@ void ImageCapture::GetMediaTrackCapabilities(
     if (capabilities_->hasTilt())
       capabilities->setTilt(capabilities_->tilt());
   }
-  // TODO(crbug.com/934063): Check HasPanTiltZoomPermissionGranted() as well if
-  // upcoming metrics show that zoom may be moved under this permission.
-  if (capabilities_->hasZoom())
+  if (capabilities_->hasZoom() && HasZoomPermissionGranted()) {
     capabilities->setZoom(capabilities_->zoom());
+  }
 
   if (capabilities_->hasTorch())
     capabilities->setTorch(capabilities_->torch());
@@ -430,9 +486,8 @@ void ImageCapture::SetMediaTrackConstraints(
        !(capabilities_->hasPan() && HasPanTiltZoomPermissionGranted())) ||
       (constraints->hasTilt() &&
        !(capabilities_->hasTilt() && HasPanTiltZoomPermissionGranted())) ||
-      // TODO(crbug.com/934063): Check HasPanTiltZoomPermissionGranted() as well
-      // if upcoming metrics show that zoom may be moved under this permission.
-      (constraints->hasZoom() && !capabilities_->hasZoom()) ||
+      (constraints->hasZoom() &&
+       !(capabilities_->hasZoom() && HasZoomPermissionGranted())) ||
       (constraints->hasTorch() && !capabilities_->hasTorch())) {
     resolver->Reject(MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kNotSupportedError, "Unsupported constraint(s)"));
@@ -635,6 +690,11 @@ void ImageCapture::SetMediaTrackConstraints(
 
   settings->has_pan = constraints->hasPan() && constraints->pan().IsDouble();
   if (settings->has_pan) {
+    if (!IsPageVisible()) {
+      resolver->Reject(MakeGarbageCollected<DOMException>(
+          DOMExceptionCode::kSecurityError, "the page is not visible"));
+      return;
+    }
     const auto pan = constraints->pan().GetAsDouble();
     if (pan < capabilities_->pan()->min() ||
         pan > capabilities_->pan()->max()) {
@@ -648,6 +708,11 @@ void ImageCapture::SetMediaTrackConstraints(
 
   settings->has_tilt = constraints->hasTilt() && constraints->tilt().IsDouble();
   if (settings->has_tilt) {
+    if (!IsPageVisible()) {
+      resolver->Reject(MakeGarbageCollected<DOMException>(
+          DOMExceptionCode::kSecurityError, "the page is not visible"));
+      return;
+    }
     const auto tilt = constraints->tilt().GetAsDouble();
     if (tilt < capabilities_->tilt()->min() ||
         tilt > capabilities_->tilt()->max()) {
@@ -661,6 +726,11 @@ void ImageCapture::SetMediaTrackConstraints(
 
   settings->has_zoom = constraints->hasZoom() && constraints->zoom().IsDouble();
   if (settings->has_zoom) {
+    if (!IsPageVisible()) {
+      resolver->Reject(MakeGarbageCollected<DOMException>(
+          DOMExceptionCode::kSecurityError, "the page is not visible"));
+      return;
+    }
     const auto zoom = constraints->zoom().GetAsDouble();
     if (zoom < capabilities_->zoom()->min() ||
         zoom > capabilities_->zoom()->max()) {
@@ -697,19 +767,27 @@ void ImageCapture::SetMediaTrackConstraints(
 }
 
 void ImageCapture::SetPanTiltZoomSettingsFromTrack(
+    base::OnceClosure initialized_callback,
     media::mojom::blink::PhotoStatePtr photo_state) {
-  UpdateMediaTrackCapabilities(std::move(photo_state));
+  UpdateMediaTrackCapabilities(base::DoNothing(), std::move(photo_state));
 
-  MediaStreamVideoTrack* video_track =
-      MediaStreamVideoTrack::GetVideoTrack(stream_track_->Component());
+  auto* video_track = MediaStreamVideoTrack::From(stream_track_->Component());
   DCHECK(video_track);
 
   base::Optional<double> pan = video_track->pan();
   base::Optional<double> tilt = video_track->tilt();
   base::Optional<double> zoom = video_track->zoom();
 
-  if (!pan.has_value() && !tilt.has_value() && !zoom.has_value())
+  const bool ptz_requested =
+      pan.has_value() || tilt.has_value() || zoom.has_value();
+  const bool ptz_supported = capabilities_->hasPan() ||
+                             capabilities_->hasTilt() ||
+                             capabilities_->hasZoom();
+  if (!ptz_supported || !ptz_requested || !HasPanTiltZoomPermissionGranted() ||
+      !service_.is_bound()) {
+    std::move(initialized_callback).Run();
     return;
+  }
 
   ExecutionContext* context = GetExecutionContext();
   if (pan.has_value())
@@ -718,17 +796,6 @@ void ImageCapture::SetPanTiltZoomSettingsFromTrack(
     UseCounter::Count(context, WebFeature::kImageCaptureTilt);
   if (zoom.has_value())
     UseCounter::Count(context, WebFeature::kImageCaptureZoom);
-
-  if (!HasPanTiltZoomPermissionGranted())
-    return;
-
-  if (!capabilities_->hasPan() && !capabilities_->hasTilt() &&
-      !capabilities_->hasZoom()) {
-    return;
-  }
-
-  if (!service_.is_bound())
-    return;
 
   auto settings = media::mojom::blink::PhotoSettings::New();
 
@@ -754,13 +821,16 @@ void ImageCapture::SetPanTiltZoomSettingsFromTrack(
   service_->SetOptions(
       stream_track_->Component()->Source()->Id(), std::move(settings),
       WTF::Bind(&ImageCapture::OnSetPanTiltZoomSettingsFromTrack,
-                WrapPersistent(this)));
+                WrapPersistent(this), std::move(initialized_callback)));
 }
 
-void ImageCapture::OnSetPanTiltZoomSettingsFromTrack(bool result) {
-  service_->GetPhotoState(stream_track_->Component()->Source()->Id(),
-                          WTF::Bind(&ImageCapture::UpdateMediaTrackCapabilities,
-                                    WrapPersistent(this)));
+void ImageCapture::OnSetPanTiltZoomSettingsFromTrack(
+    base::OnceClosure done_callback,
+    bool result) {
+  service_->GetPhotoState(
+      stream_track_->Component()->Source()->Id(),
+      WTF::Bind(&ImageCapture::UpdateMediaTrackCapabilities,
+                WrapPersistent(this), std::move(done_callback)));
 }
 
 const MediaTrackConstraintSet* ImageCapture::GetMediaTrackConstraints() const {
@@ -817,10 +887,9 @@ void ImageCapture::GetMediaTrackSettings(MediaTrackSettings* settings) const {
     if (settings_->hasTilt())
       settings->setTilt(settings_->tilt());
   }
-  // TODO(crbug.com/934063): Check HasPanTiltZoomPermissionGranted() as well if
-  // upcoming metrics show that zoom may be moved under this permission.
-  if (settings_->hasZoom())
+  if (settings_->hasZoom() && HasZoomPermissionGranted()) {
     settings->setZoom(settings_->zoom());
+  }
 
   if (settings_->hasTorch())
     settings->setTorch(settings_->torch());
@@ -828,7 +897,8 @@ void ImageCapture::GetMediaTrackSettings(MediaTrackSettings* settings) const {
 
 ImageCapture::ImageCapture(ExecutionContext* context,
                            MediaStreamTrack* track,
-                           bool pan_tilt_zoom_allowed)
+                           bool pan_tilt_zoom_allowed,
+                           base::OnceClosure initialized_callback)
     : ExecutionContextLifecycleObserver(context),
       stream_track_(track),
       service_(context),
@@ -846,10 +916,10 @@ ImageCapture::ImageCapture(ExecutionContext* context,
 
   // This object may be constructed over an ExecutionContext that has already
   // been detached. In this case the ImageCapture service will not be available.
-  if (!GetFrame())
+  if (!DomWindow())
     return;
 
-  GetFrame()->GetBrowserInterfaceBroker().GetInterface(
+  DomWindow()->GetBrowserInterfaceBroker().GetInterface(
       service_.BindNewPipeAndPassReceiver(
           context->GetTaskRunner(TaskType::kDOMManipulation)));
 
@@ -861,7 +931,7 @@ ImageCapture::ImageCapture(ExecutionContext* context,
   service_->GetPhotoState(
       stream_track_->Component()->Source()->Id(),
       WTF::Bind(&ImageCapture::SetPanTiltZoomSettingsFromTrack,
-                WrapPersistent(this)));
+                WrapPersistent(this), std::move(initialized_callback)));
 
   ConnectToPermissionService(
       context, permission_service_.BindNewPipeAndPassReceiver(
@@ -888,6 +958,10 @@ bool ImageCapture::HasPanTiltZoomPermissionGranted() const {
   return pan_tilt_zoom_permission_ == mojom::blink::PermissionStatus::GRANTED;
 }
 
+bool ImageCapture::HasZoomPermissionGranted() const {
+  return pan_tilt_zoom_permission_ == mojom::blink::PermissionStatus::GRANTED;
+}
+
 void ImageCapture::OnMojoGetPhotoState(
     ScriptPromiseResolver* resolver,
     PromiseResolverFunction resolve_function,
@@ -902,29 +976,44 @@ void ImageCapture::OnMojoGetPhotoState(
     return;
   }
 
+  if (TrackIsInactive(*stream_track_)) {
+    resolver->Reject(MakeGarbageCollected<DOMException>(
+        DOMExceptionCode::kOperationError,
+        "The associated Track is in an invalid state."));
+    service_requests_.erase(resolver);
+    return;
+  }
+
   photo_settings_ = PhotoSettings::Create();
   photo_settings_->setImageHeight(photo_state->height->current);
   photo_settings_->setImageWidth(photo_state->width->current);
   // TODO(mcasas): collect the remaining two entries https://crbug.com/732521.
 
   photo_capabilities_ = MakeGarbageCollected<PhotoCapabilities>();
-  photo_capabilities_->SetRedEyeReduction(photo_state->red_eye_reduction);
-  // TODO(mcasas): Remove the explicit MediaSettingsRange::create() when
-  // mojo::StructTraits supports garbage-collected mappings,
-  // https://crbug.com/700180.
+  photo_capabilities_->setRedEyeReduction(
+      ToString(photo_state->red_eye_reduction));
   if (photo_state->height->min != 0 || photo_state->height->max != 0) {
-    photo_capabilities_->SetImageHeight(
-        MediaSettingsRange::Create(std::move(photo_state->height)));
+    photo_capabilities_->setImageHeight(
+        ToMediaSettingsRange(*photo_state->height));
   }
   if (photo_state->width->min != 0 || photo_state->width->max != 0) {
-    photo_capabilities_->SetImageWidth(
-        MediaSettingsRange::Create(std::move(photo_state->width)));
+    photo_capabilities_->setImageWidth(
+        ToMediaSettingsRange(*photo_state->width));
   }
-  if (!photo_state->fill_light_mode.IsEmpty())
-    photo_capabilities_->SetFillLightMode(photo_state->fill_light_mode);
+
+#ifdef USE_BLINK_V8_BINDING_NEW_IDL_DICTIONARY
+  WTF::Vector<V8FillLightMode> fill_light_mode;
+#else
+  WTF::Vector<WTF::String> fill_light_mode;
+#endif
+  for (const auto& mode : photo_state->fill_light_mode) {
+    fill_light_mode.push_back(ToV8FillLightMode(mode));
+  }
+  if (!fill_light_mode.IsEmpty())
+    photo_capabilities_->setFillLightMode(fill_light_mode);
 
   // Update the local track photo_state cache.
-  UpdateMediaTrackCapabilities(std::move(photo_state));
+  UpdateMediaTrackCapabilities(base::DoNothing(), std::move(photo_state));
 
   if (trigger_take_photo) {
     service_->TakePhoto(
@@ -983,9 +1072,12 @@ void ImageCapture::OnMojoTakePhoto(ScriptPromiseResolver* resolver,
 }
 
 void ImageCapture::UpdateMediaTrackCapabilities(
+    base::OnceClosure initialized_callback,
     media::mojom::blink::PhotoStatePtr photo_state) {
-  if (!photo_state)
+  if (!photo_state) {
+    std::move(initialized_callback).Run();
     return;
+  }
 
   WTF::Vector<WTF::String> supported_white_balance_modes;
   supported_white_balance_modes.ReserveInitialCapacity(
@@ -1030,80 +1122,77 @@ void ImageCapture::UpdateMediaTrackCapabilities(
   }
   settings_->setPointsOfInterest(current_points_of_interest);
 
-  // TODO(mcasas): Remove the explicit MediaSettingsRange::create() when
-  // mojo::StructTraits supports garbage-collected mappings,
-  // https://crbug.com/700180.
   if (photo_state->exposure_compensation->max !=
       photo_state->exposure_compensation->min) {
     capabilities_->setExposureCompensation(
-        MediaSettingsRange::Create(*photo_state->exposure_compensation));
+        ToMediaSettingsRange(*photo_state->exposure_compensation));
     settings_->setExposureCompensation(
         photo_state->exposure_compensation->current);
   }
   if (photo_state->exposure_time->max != photo_state->exposure_time->min) {
     capabilities_->setExposureTime(
-        MediaSettingsRange::Create(*photo_state->exposure_time));
+        ToMediaSettingsRange(*photo_state->exposure_time));
     settings_->setExposureTime(photo_state->exposure_time->current);
   }
   if (photo_state->color_temperature->max !=
       photo_state->color_temperature->min) {
     capabilities_->setColorTemperature(
-        MediaSettingsRange::Create(*photo_state->color_temperature));
+        ToMediaSettingsRange(*photo_state->color_temperature));
     settings_->setColorTemperature(photo_state->color_temperature->current);
   }
   if (photo_state->iso->max != photo_state->iso->min) {
-    capabilities_->setIso(MediaSettingsRange::Create(*photo_state->iso));
+    capabilities_->setIso(ToMediaSettingsRange(*photo_state->iso));
     settings_->setIso(photo_state->iso->current);
   }
 
   if (photo_state->brightness->max != photo_state->brightness->min) {
     capabilities_->setBrightness(
-        MediaSettingsRange::Create(*photo_state->brightness));
+        ToMediaSettingsRange(*photo_state->brightness));
     settings_->setBrightness(photo_state->brightness->current);
   }
   if (photo_state->contrast->max != photo_state->contrast->min) {
-    capabilities_->setContrast(
-        MediaSettingsRange::Create(*photo_state->contrast));
+    capabilities_->setContrast(ToMediaSettingsRange(*photo_state->contrast));
     settings_->setContrast(photo_state->contrast->current);
   }
   if (photo_state->saturation->max != photo_state->saturation->min) {
     capabilities_->setSaturation(
-        MediaSettingsRange::Create(*photo_state->saturation));
+        ToMediaSettingsRange(*photo_state->saturation));
     settings_->setSaturation(photo_state->saturation->current);
   }
   if (photo_state->sharpness->max != photo_state->sharpness->min) {
-    capabilities_->setSharpness(
-        MediaSettingsRange::Create(*photo_state->sharpness));
+    capabilities_->setSharpness(ToMediaSettingsRange(*photo_state->sharpness));
     settings_->setSharpness(photo_state->sharpness->current);
   }
 
   if (photo_state->focus_distance->max != photo_state->focus_distance->min) {
     capabilities_->setFocusDistance(
-        MediaSettingsRange::Create(*photo_state->focus_distance));
+        ToMediaSettingsRange(*photo_state->focus_distance));
     settings_->setFocusDistance(photo_state->focus_distance->current);
   }
 
   if (HasPanTiltZoomPermissionGranted()) {
     if (photo_state->pan->max != photo_state->pan->min) {
-      capabilities_->setPan(MediaSettingsRange::Create(*photo_state->pan));
+      capabilities_->setPan(ToMediaSettingsRange(*photo_state->pan));
       settings_->setPan(photo_state->pan->current);
     }
     if (photo_state->tilt->max != photo_state->tilt->min) {
-      capabilities_->setTilt(MediaSettingsRange::Create(*photo_state->tilt));
+      capabilities_->setTilt(ToMediaSettingsRange(*photo_state->tilt));
       settings_->setTilt(photo_state->tilt->current);
     }
   }
-  // TODO(crbug.com/934063): Check HasPanTiltZoomPermissionGranted() as well if
-  // upcoming metrics show that zoom may be moved under this permission.
-  if (photo_state->zoom->max != photo_state->zoom->min) {
-    capabilities_->setZoom(MediaSettingsRange::Create(*photo_state->zoom));
-    settings_->setZoom(photo_state->zoom->current);
+  if (HasZoomPermissionGranted()) {
+    if (photo_state->zoom->max != photo_state->zoom->min) {
+      capabilities_->setZoom(ToMediaSettingsRange(*photo_state->zoom));
+      settings_->setZoom(photo_state->zoom->current);
+    }
   }
 
   if (photo_state->supports_torch)
     capabilities_->setTorch(photo_state->supports_torch);
   if (photo_state->supports_torch)
     settings_->setTorch(photo_state->torch);
+
+  std::move(initialized_callback).Run();
 }
 
 void ImageCapture::OnServiceConnectionError() {
@@ -1129,6 +1218,10 @@ void ImageCapture::ResolveWithPhotoCapabilities(
     ScriptPromiseResolver* resolver) {
   DCHECK(resolver);
   resolver->Resolve(photo_capabilities_);
+}
+
+bool ImageCapture::IsPageVisible() {
+  return DomWindow() ? DomWindow()->document()->IsPageVisible() : false;
 }
 
 void ImageCapture::Trace(Visitor* visitor) const {

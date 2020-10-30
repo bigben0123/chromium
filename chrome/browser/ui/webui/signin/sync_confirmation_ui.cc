@@ -12,6 +12,7 @@
 #include "chrome/browser/signin/account_consistency_mode_manager.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/webui/signin/sync_confirmation_handler.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
@@ -43,8 +44,9 @@ SyncConfirmationUI::SyncConfirmationUI(content::WebUI* web_ui)
   source->AddResourcePath("sync_confirmation.js", IDR_SYNC_CONFIRMATION_JS);
 
   if (is_sync_allowed) {
-    source->AddResourcePath("test_loader.js", IDR_WEBUI_JS_TEST_LOADER);
-    source->AddResourcePath("test_loader.html", IDR_WEBUI_HTML_TEST_LOADER);
+    source->AddResourcePath("test_loader.js", IDR_WEBUI_JS_TEST_LOADER_JS);
+    source->AddResourcePath("test_loader.html",
+                            IDR_WEBUI_HTML_TEST_LOADER_HTML);
     source->OverrideContentSecurityPolicy(
         network::mojom::CSPDirectiveName::ScriptSrc,
         "script-src chrome://resources chrome://test 'self';");
@@ -106,6 +108,8 @@ SyncConfirmationUI::SyncConfirmationUI(content::WebUI* web_ui)
                       IDS_SYNC_DISABLED_CONFIRMATION_UNDO_BUTTON_LABEL);
   }
 
+  source->DisableTrustedTypesCSP();
+
   base::DictionaryValue strings;
   webui::SetLoadTimeDataDefaults(
       g_browser_process->GetApplicationLocale(), &strings);
@@ -118,7 +122,12 @@ SyncConfirmationUI::~SyncConfirmationUI() {}
 
 void SyncConfirmationUI::InitializeMessageHandlerWithBrowser(Browser* browser) {
   web_ui()->AddMessageHandler(std::make_unique<SyncConfirmationHandler>(
-      browser, js_localized_string_to_ids_map_));
+      browser->profile(), js_localized_string_to_ids_map_, browser));
+}
+
+void SyncConfirmationUI::InitializeMessageHandlerWithProfile(Profile* profile) {
+  web_ui()->AddMessageHandler(std::make_unique<SyncConfirmationHandler>(
+      profile, js_localized_string_to_ids_map_));
 }
 
 void SyncConfirmationUI::AddStringResource(content::WebUIDataSource* source,

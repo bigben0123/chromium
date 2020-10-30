@@ -11,6 +11,7 @@
 #include "base/notreached.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "cc/paint/paint_canvas.h"
 #include "cc/paint/paint_flags.h"
 #include "third_party/skia/include/core/SkPath.h"
@@ -47,7 +48,7 @@ const SkScalar kScrollRadius =
 ////////////////////////////////////////////////////////////////////////////////
 // NativeTheme:
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_APPLE)
 // static
 NativeTheme* NativeTheme::GetInstanceForWeb() {
   return NativeThemeAura::web_instance();
@@ -65,7 +66,7 @@ NativeTheme* NativeTheme::GetInstanceForDarkUI() {
   return s_native_theme.get();
 }
 #endif  // OS_WIN
-#endif  // !OS_MACOSX
+#endif  // !OS_APPLE
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeThemeAura:
@@ -75,7 +76,7 @@ NativeThemeAura::NativeThemeAura(bool use_overlay_scrollbars,
     : NativeThemeBase(should_only_use_dark_colors),
       use_overlay_scrollbars_(use_overlay_scrollbars) {
 // We don't draw scrollbar buttons.
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || BUILDFLAG(IS_LACROS)
   set_scrollbar_button_length(0);
 #endif
 
@@ -98,6 +99,17 @@ NativeThemeAura* NativeThemeAura::web_instance() {
   static base::NoDestructor<NativeThemeAura> s_native_theme_for_web(
       IsOverlayScrollbarEnabled(), false);
   return s_native_theme_for_web.get();
+}
+
+SkColor NativeThemeAura::FocusRingColorForBaseColor(SkColor base_color) const {
+#if defined(OS_APPLE)
+  DCHECK(features::IsFormControlsRefreshEnabled());
+  // On Mac OSX, the system Accent Color setting is darkened a bit
+  // for better contrast.
+  return SkColorSetA(base_color, 166);
+#else
+  return base_color;
+#endif  // OS_APPLE
 }
 
 void NativeThemeAura::PaintMenuPopupBackground(
@@ -340,7 +352,10 @@ void NativeThemeAura::PaintScrollbarCorner(cc::PaintCanvas* canvas,
   // Overlay Scrollbar should never paint a scrollbar corner.
   DCHECK(!use_overlay_scrollbars_);
   cc::PaintFlags flags;
-  flags.setColor(SkColorSetRGB(0xDC, 0xDC, 0xDC));
+  SkColor bg_color = color_scheme == ui::NativeTheme::ColorScheme::kDark
+                         ? SkColorSetRGB(0x12, 0x12, 0x12)
+                         : SkColorSetRGB(0xDC, 0xDC, 0xDC);
+  flags.setColor(bg_color);
   canvas->drawIRect(RectToSkIRect(rect), flags);
 }
 

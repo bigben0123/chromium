@@ -9,7 +9,7 @@ import android.view.View;
 import androidx.annotation.DrawableRes;
 import androidx.annotation.VisibleForTesting;
 
-import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
 import org.chromium.chrome.browser.page_info.ChromePageInfoControllerDelegate;
 import org.chromium.chrome.browser.page_info.ChromePermissionParamsListBuilderDelegate;
@@ -102,10 +102,16 @@ public class PaymentHandlerToolbarCoordinator implements PaymentHandlerToolbarMe
         return mToolbarView.getView();
     }
 
-    /** @return The security icon of the PaymentHandlerToolbar. */
+    /** Simulates a click on the security icon of the payment handler toolbar. */
     @VisibleForTesting(otherwise = VisibleForTesting.NONE)
     public void clickSecurityIconForTest() {
         mToolbarView.mSecurityIconView.performClick();
+    }
+
+    /** Simulates a click on the close button of the payment handler toolbar. */
+    @VisibleForTesting(otherwise = VisibleForTesting.NONE)
+    public void clickCloseButtonForTest() {
+        mToolbarView.mCloseButton.performClick();
     }
 
     // Implement PaymentHandlerToolbarMediatorDelegate.

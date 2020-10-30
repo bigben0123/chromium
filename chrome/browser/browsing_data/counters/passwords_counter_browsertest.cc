@@ -8,24 +8,24 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
-#include "chrome/browser/password_manager/account_storage/account_password_store_factory.h"
+#include "chrome/browser/password_manager/account_password_store_factory.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/test/integration/passwords_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "components/autofill/core/common/password_form.h"
 #include "components/browsing_data/core/browsing_data_utils.h"
 #include "components/browsing_data/core/counters/passwords_counter.h"
 #include "components/browsing_data/core/pref_names.h"
+#include "components/password_manager/core/browser/password_form.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/browser_test.h"
 
 namespace {
 
-using autofill::PasswordForm;
 using browsing_data::BrowsingDataCounter;
+using password_manager::PasswordForm;
 
 class PasswordsCounterTest : public InProcessBrowserTest {
  public:

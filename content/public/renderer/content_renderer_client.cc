@@ -7,6 +7,7 @@
 #include "build/build_config.h"
 #include "media/base/demuxer.h"
 #include "media/base/renderer_factory.h"
+#include "third_party/blink/public/common/security/protocol_handler_security_level.h"
 #include "third_party/blink/public/platform/web_audio_device.h"
 #include "third_party/blink/public/platform/web_prescient_networking.h"
 #include "ui/gfx/icc_profile.h"
@@ -53,16 +54,6 @@ bool ContentRendererClient::HasErrorPage(int http_status_code) {
   return false;
 }
 
-bool ContentRendererClient::ShouldSuppressErrorPage(RenderFrame* render_frame,
-                                                    const GURL& url,
-                                                    int error_code) {
-  return false;
-}
-
-bool ContentRendererClient::ShouldTrackUseCounter(const GURL& url) {
-  return true;
-}
-
 bool ContentRendererClient::DeferMediaLoad(RenderFrame* render_frame,
                                            bool has_played_media_before,
                                            base::OnceClosure closure) {
@@ -98,6 +89,11 @@ bool ContentRendererClient::RunIdleHandlerWhenWidgetsHidden() {
 
 bool ContentRendererClient::AllowPopup() {
   return false;
+}
+
+blink::ProtocolHandlerSecurityLevel
+ContentRendererClient::GetProtocolHandlerSecurityLevel() {
+  return blink::ProtocolHandlerSecurityLevel::kStrict;
 }
 
 #if defined(OS_ANDROID)
@@ -200,16 +196,9 @@ bool ContentRendererClient::IsPluginAllowedToUseCameraDeviceAPI(
   return false;
 }
 
-bool ContentRendererClient::IsPluginAllowedToUseDevChannelAPIs() {
+bool ContentRendererClient::AllowScriptExtensionForServiceWorker(
+    const url::Origin& script_origin) {
   return false;
-}
-
-BrowserPluginDelegate* ContentRendererClient::CreateBrowserPluginDelegate(
-    RenderFrame* render_frame,
-    const WebPluginInfo& info,
-    const std::string& mime_type,
-    const GURL& original_url) {
-  return nullptr;
 }
 
 bool ContentRendererClient::IsExcludedHeaderForServiceWorkerFetchEvent(
@@ -262,7 +251,9 @@ ContentRendererClient::GetAudioRendererAlgorithmParameters(
   return base::nullopt;
 }
 
-void ContentRendererClient::BindReceiverOnMainThread(
-    mojo::GenericPendingReceiver receiver) {}
+void ContentRendererClient::MaybeProxyURLLoaderFactory(
+    RenderFrame* render_frame,
+    mojo::PendingReceiver<network::mojom::URLLoaderFactory>* factory_receiver) {
+}
 
 }  // namespace content

@@ -7,17 +7,17 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/style/computed_style_base_constants.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
+class Document;
 class Element;
-class DisplayLockScopedLogger;
 class StyleRecalcChange;
 
-enum class DisplayLockLifecycleTarget { kSelf, kChildren };
 enum class DisplayLockActivationReason {
   // Accessibility driven activation
   kAccessibility = 1 << 0,
@@ -64,8 +64,6 @@ static_assert(static_cast<uint32_t>(DisplayLockActivationReason::kAny) <
 class CORE_EXPORT DisplayLockContext final
     : public GarbageCollected<DisplayLockContext>,
       public LocalFrameView::LifecycleNotificationObserver {
-  USING_GARBAGE_COLLECTED_MIXIN(DisplayLockContext);
-
  public:
   // The type of style that was blocked by this display lock.
   enum StyleType {
@@ -89,15 +87,14 @@ class CORE_EXPORT DisplayLockContext final
   void NotifyIsIntersectingViewport();
   void NotifyIsNotIntersectingViewport();
 
-  // Lifecycle observation / state functions.
-  bool ShouldStyle(DisplayLockLifecycleTarget) const;
-  void DidStyle(DisplayLockLifecycleTarget);
-  bool ShouldLayout(DisplayLockLifecycleTarget) const;
-  void DidLayout(DisplayLockLifecycleTarget);
-  bool ShouldPrePaint(DisplayLockLifecycleTarget) const;
-  void DidPrePaint(DisplayLockLifecycleTarget);
-  bool ShouldPaint(DisplayLockLifecycleTarget) const;
-  void DidPaint(DisplayLockLifecycleTarget);
+  // Lifecycle state functions.
+  bool ShouldStyleChildren() const;
+  void DidStyleSelf();
+  void DidStyleChildren();
+  bool ShouldLayoutChildren() const;
+  void DidLayoutChildren();
+  bool ShouldPrePaintChildren() const;
+  bool ShouldPaintChildren() const;
 
   // Returns true if the last style recalc traversal was blocked at this
   // element, either for itself, its children or its descendants.
@@ -124,6 +121,8 @@ class CORE_EXPORT DisplayLockContext final
   // Returns true if this context is locked.
   bool IsLocked() const { return is_locked_; }
 
+  EContentVisibility GetState() { return state_; }
+
   bool UpdateForced() const { return update_forced_; }
 
   // This is called when the element with which this context is associated is
@@ -149,17 +148,20 @@ class CORE_EXPORT DisplayLockContext final
 
   void NotifyChildLayoutWasBlocked() { child_layout_was_blocked_ = true; }
 
-  // Inform the display lock that it needs a graphics layer collection when it
-  // needs to paint.
-  void NotifyNeedsGraphicsLayerCollection() {
-    needs_graphics_layer_collection_ = true;
-  }
-
   void NotifyCompositingRequirementsUpdateWasBlocked() {
     needs_compositing_requirements_update_ = true;
   }
   void NotifyCompositingDescendantDependentFlagUpdateWasBlocked() {
     needs_compositing_dependent_flag_update_ = true;
+  }
+
+  void NotifyGraphicsLayerRebuildBlocked() {
+    DCHECK(!RuntimeEnabledFeatures::CompositeAfterPaintEnabled());
+    needs_graphics_layer_rebuild_ = true;
+  }
+
+  void NotifyForcedGraphicsLayerUpdateBlocked() {
+    forced_graphics_layer_update_blocked_ = true;
   }
 
   // Notify this element will be disconnected.
@@ -176,9 +178,12 @@ class CORE_EXPORT DisplayLockContext final
   void NotifySubtreeGainedSelection();
 
   void SetNeedsPrePaintSubtreeWalk(
-      bool needs_effective_allowed_touch_action_update) {
+      bool needs_effective_allowed_touch_action_update,
+      bool needs_blocking_wheel_event_handler_update) {
     needs_effective_allowed_touch_action_update_ =
         needs_effective_allowed_touch_action_update;
+    needs_blocking_wheel_event_handler_update_ =
+        needs_blocking_wheel_event_handler_update;
     needs_prepaint_subtree_walk_ = true;
   }
 
@@ -195,11 +200,20 @@ class CORE_EXPORT DisplayLockContext final
     }
   }
 
+  bool HadAnyViewportIntersectionNotifications() const {
+    return had_any_viewport_intersection_notifications_;
+  }
+
   // GC functions.
   void Trace(Visitor*) const override;
 
   // Debugging functions.
   String RenderAffectingStateToString() const;
+
+  bool IsAuto() const { return state_ == EContentVisibility::kAuto; }
+  bool HadLifecycleUpdateSinceLastUnlock() const {
+    return had_lifecycle_update_since_last_unlock_;
+  }
 
  private:
   // Give access to |NotifyForcedUpdateScopeStarted()| and
@@ -246,7 +260,7 @@ class CORE_EXPORT DisplayLockContext final
   bool MarkForStyleRecalcIfNeeded();
   bool MarkForLayoutIfNeeded();
   bool MarkAncestorsForPrePaintIfNeeded();
-  bool MarkPaintLayerNeedsRepaint();
+  bool MarkNeedsRepaintAndPaintArtifactCompositorUpdate();
   bool MarkForCompositingUpdatesIfNeeded();
 
   bool IsElementDirtyForStyleRecalc() const;
@@ -328,8 +342,8 @@ class CORE_EXPORT DisplayLockContext final
   bool reattach_layout_tree_was_blocked_ = false;
 
   bool needs_effective_allowed_touch_action_update_ = false;
+  bool needs_blocking_wheel_event_handler_update_ = false;
   bool needs_prepaint_subtree_walk_ = false;
-  bool needs_graphics_layer_collection_ = false;
   bool needs_compositing_requirements_update_ = false;
   bool needs_compositing_dependent_flag_update_ = false;
 
@@ -363,6 +377,15 @@ class CORE_EXPORT DisplayLockContext final
   // again at the start of the lifecycle.
   bool keep_unlocked_until_lifecycle_ = false;
 
+  bool needs_graphics_layer_rebuild_ = false;
+
+  bool forced_graphics_layer_update_blocked_ = false;
+
+  // This is set to true if we're in the 'auto' mode and had our first
+  // intersection / non-intersection notification. This is reset to false if the
+  // 'auto' mode is added again (after being removed).
+  bool had_any_viewport_intersection_notifications_ = false;
+
   enum class RenderAffectingState : int {
     kLockRequested,
     kIntersectsViewport,
@@ -378,6 +401,8 @@ class CORE_EXPORT DisplayLockContext final
   bool render_affecting_state_[static_cast<int>(
       RenderAffectingState::kNumRenderAffectingStates)] = {false};
   int keep_unlocked_count_ = 0;
+
+  bool had_lifecycle_update_since_last_unlock_ = false;
 };
 
 }  // namespace blink

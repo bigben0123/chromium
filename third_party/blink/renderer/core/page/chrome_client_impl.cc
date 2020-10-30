@@ -41,7 +41,6 @@
 #include "cc/layers/picture_layer.h"
 #include "third_party/blink/public/common/page/page_zoom.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
-#include "third_party/blink/public/platform/web_float_rect.h"
 #include "third_party/blink/public/platform/web_rect.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/web/blink.h"
@@ -61,7 +60,6 @@
 #include "third_party/blink/renderer/core/events/web_input_event_conversion.h"
 #include "third_party/blink/renderer/core/exported/web_dev_tools_agent_impl.h"
 #include "third_party/blink/renderer/core/exported/web_plugin_container_impl.h"
-#include "third_party/blink/renderer/core/exported/web_remote_frame_impl.h"
 #include "third_party/blink/renderer/core/exported/web_settings_impl.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/frame/browser_controls.h"
@@ -69,8 +67,9 @@
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
-#include "third_party/blink/renderer/core/frame/web_frame_widget_base.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
+#include "third_party/blink/renderer/core/frame/web_remote_frame_impl.h"
+#include "third_party/blink/renderer/core/frame/web_view_frame_widget.h"
 #include "third_party/blink/renderer/core/fullscreen/fullscreen.h"
 #include "third_party/blink/renderer/core/html/forms/color_chooser.h"
 #include "third_party/blink/renderer/core/html/forms/color_chooser_client.h"
@@ -106,6 +105,7 @@
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/web_test_support.h"
+#include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/widget/frame_widget.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
@@ -188,16 +188,14 @@ void ChromeClientImpl::ChromeDestroyed() {
 
 void ChromeClientImpl::SetWindowRect(const IntRect& r, LocalFrame& frame) {
   DCHECK_EQ(&frame, web_view_->MainFrameImpl()->GetFrame());
-  WebWidgetClient* client = frame.GetWidgetForLocalRoot()->Client();
-  client->SetWindowRect(r);
+  web_view_->MainFrameViewWidget()->SetWindowRect(r);
 }
 
 IntRect ChromeClientImpl::RootWindowRect(LocalFrame& frame) {
   // The WindowRect() for each WebWidgetClient will be the same rect of the top
   // level window. Since there is not always a WebWidgetClient attached to the
   // WebView, we ask the WebWidget associated with the |frame|'s local root.
-  WebWidgetClient* client = frame.GetWidgetForLocalRoot()->Client();
-  return IntRect(client->WindowRect());
+  return IntRect(frame.GetWidgetForLocalRoot()->WindowRect());
 }
 
 void ChromeClientImpl::FocusPage() {
@@ -216,32 +214,25 @@ bool ChromeClientImpl::CanTakeFocus(mojom::blink::FocusType) {
 }
 
 void ChromeClientImpl::TakeFocus(mojom::blink::FocusType type) {
-  if (!web_view_->Client())
-    return;
-  if (type == mojom::blink::FocusType::kBackward)
-    web_view_->Client()->FocusPrevious();
-  else
-    web_view_->Client()->FocusNext();
+  web_view_->TakeFocus(type == mojom::blink::FocusType::kBackward);
 }
 
 void ChromeClientImpl::SetKeyboardFocusURL(Element* new_focus_element) {
-  WebURL focus_url;
+  KURL focus_url;
   if (new_focus_element && new_focus_element->IsLiveLink() &&
       new_focus_element->ShouldHaveFocusAppearance())
     focus_url = new_focus_element->HrefURL();
-  web_view_->Client()->SetKeyboardFocusURL(focus_url);
+  web_view_->SetKeyboardFocusURL(focus_url);
 }
 
 void ChromeClientImpl::StartDragging(LocalFrame* frame,
                                      const WebDragData& drag_data,
-                                     WebDragOperationsMask mask,
+                                     DragOperationsMask mask,
                                      const SkBitmap& drag_image,
                                      const gfx::Point& drag_image_offset) {
   WebLocalFrameImpl* web_frame = WebLocalFrameImpl::FromFrame(frame);
-  network::mojom::ReferrerPolicy policy =
-      web_frame->GetDocument().GetReferrerPolicy();
-  web_frame->LocalRootFrameWidget()->StartDragging(
-      policy, drag_data, mask, drag_image, drag_image_offset);
+  web_frame->LocalRootFrameWidget()->StartDragging(drag_data, mask, drag_image,
+                                                   drag_image_offset);
 }
 
 bool ChromeClientImpl::AcceptsLoadDrops() const {
@@ -254,8 +245,9 @@ Page* ChromeClientImpl::CreateWindowDelegate(
     const AtomicString& name,
     const WebWindowFeatures& features,
     network::mojom::blink::WebSandboxFlags sandbox_flags,
-    const FeaturePolicy::FeatureState& opener_feature_state,
-    const SessionStorageNamespaceId& session_storage_namespace_id) {
+    const FeaturePolicyFeatureState& opener_feature_state,
+    const SessionStorageNamespaceId& session_storage_namespace_id,
+    bool& consumed_user_gesture) {
   if (!web_view_->Client())
     return nullptr;
 
@@ -270,7 +262,8 @@ Page* ChromeClientImpl::CreateWindowDelegate(
           WebLocalFrameImpl::FromFrame(frame),
           WrappedResourceRequest(r.GetResourceRequest()), features, frame_name,
           static_cast<WebNavigationPolicy>(r.GetNavigationPolicy()),
-          sandbox_flags, opener_feature_state, session_storage_namespace_id));
+          sandbox_flags, opener_feature_state, session_storage_namespace_id,
+          consumed_user_gesture));
   if (!new_view)
     return nullptr;
   return new_view->GetPage();
@@ -311,13 +304,12 @@ void ChromeClientImpl::SetOverscrollBehavior(
       overscroll_behavior);
 }
 
-void ChromeClientImpl::Show(NavigationPolicy navigation_policy) {
-  // TODO(darin): Change caller to pass LocalFrame.
-  WebLocalFrameImpl* main_frame = web_view_->MainFrameImpl();
-  DCHECK(main_frame);
-  main_frame->FrameWidgetImpl()->Client()->Show(
-      static_cast<WebNavigationPolicy>(navigation_policy));
-  main_frame->DevToolsAgentImpl()->DidShowNewWindow();
+void ChromeClientImpl::Show(const base::UnguessableToken& opener_frame_token,
+                            NavigationPolicy navigation_policy,
+                            const IntRect& initial_rect,
+                            bool user_gesture) {
+  web_view_->Show(opener_frame_token, navigation_policy, initial_rect,
+                  user_gesture);
 }
 
 bool ChromeClientImpl::ShouldReportDetailedMessageForSource(
@@ -370,8 +362,7 @@ void ChromeClientImpl::SetBeforeUnloadConfirmPanelResultForTesting(
 }
 
 void ChromeClientImpl::CloseWindowSoon() {
-  if (web_view_->Client())
-    web_view_->Client()->CloseWindowSoon();
+  web_view_->CloseWindowSoon();
 }
 
 bool ChromeClientImpl::OpenJavaScriptAlertDelegate(LocalFrame* frame,
@@ -438,29 +429,15 @@ void ChromeClientImpl::ScheduleAnimation(const LocalFrameView* frame_view,
 IntRect ChromeClientImpl::ViewportToScreen(
     const IntRect& rect_in_viewport,
     const LocalFrameView* frame_view) const {
-  WebRect screen_rect(rect_in_viewport);
-
   LocalFrame& frame = frame_view->GetFrame();
 
-  WebWidgetClient* client = frame.GetWidgetForLocalRoot()->Client();
-  // TODO(dcheng): Is this null check needed?
-  if (client) {
-    client->ConvertViewportToWindow(&screen_rect);
-    WebRect view_rect = client->ViewRect();
+  gfx::Rect screen_rect =
+      frame.GetWidgetForLocalRoot()->BlinkSpaceToEnclosedDIPs(
+          gfx::Rect(rect_in_viewport));
+  gfx::Rect view_rect = frame.GetWidgetForLocalRoot()->ViewRect();
 
-    base::CheckedNumeric<int> screen_rect_x = screen_rect.x;
-    base::CheckedNumeric<int> screen_rect_y = screen_rect.y;
-
-    screen_rect_x += view_rect.x;
-    screen_rect_y += view_rect.y;
-
-    screen_rect.x =
-        screen_rect_x.ValueOrDefault(std::numeric_limits<int>::max());
-    screen_rect.y =
-        screen_rect_y.ValueOrDefault(std::numeric_limits<int>::max());
-  }
-
-  return screen_rect;
+  screen_rect.Offset(view_rect.x(), view_rect.y());
+  return IntRect(screen_rect);
 }
 
 float ChromeClientImpl::WindowToViewportScalar(LocalFrame* frame,
@@ -474,31 +451,19 @@ float ChromeClientImpl::WindowToViewportScalar(LocalFrame* frame,
     return scalar_value;
   }
 
-  WebFloatRect viewport_rect(0, 0, scalar_value, 0);
-  frame->GetWidgetForLocalRoot()->Client()->ConvertWindowToViewport(
-      &viewport_rect);
-  return viewport_rect.width;
+  return frame->GetWidgetForLocalRoot()->DIPsToBlinkSpace(scalar_value);
 }
 
-void ChromeClientImpl::WindowToViewportRect(LocalFrame& frame,
-                                            WebFloatRect* viewport_rect) const {
-  frame.GetWidgetForLocalRoot()->Client()->ConvertWindowToViewport(
-      viewport_rect);
-}
-
-WebScreenInfo ChromeClientImpl::GetScreenInfo(LocalFrame& frame) const {
-  WebWidgetClient* client = frame.GetWidgetForLocalRoot()->Client();
-  DCHECK(client);
-  return client->GetScreenInfo();
+ScreenInfo ChromeClientImpl::GetScreenInfo(LocalFrame& frame) const {
+  return frame.GetWidgetForLocalRoot()->GetScreenInfo();
 }
 
 void ChromeClientImpl::OverrideVisibleRectForMainFrame(
     LocalFrame& frame,
     IntRect* visible_rect) const {
   DCHECK(frame.IsMainFrame());
-  WebWidgetClient* client = frame.GetWidgetForLocalRoot()->Client();
   return web_view_->GetDevToolsEmulator()->OverrideVisibleRect(
-      IntRect(client->ViewRect()).Size(), visible_rect);
+      IntRect(frame.GetWidgetForLocalRoot()->ViewRect()).Size(), visible_rect);
 }
 
 float ChromeClientImpl::InputEventsScaleForEmulation() const {
@@ -551,7 +516,7 @@ void ChromeClientImpl::ShowMouseOverURL(const HitTestResult& result) {
   if (!web_view_->Client())
     return;
 
-  WebURL url;
+  KURL url;
 
   // Ignore URL if hitTest include scrollbar since we might have both a
   // scrollbar and an element in the case of overlay scrollbars.
@@ -575,7 +540,7 @@ void ChromeClientImpl::ShowMouseOverURL(const HitTestResult& result) {
     }
   }
 
-  web_view_->Client()->SetMouseOverURL(url);
+  web_view_->SetMouseOverURL(url);
 }
 
 void ChromeClientImpl::SetToolTip(LocalFrame& frame,
@@ -724,7 +689,7 @@ void ChromeClientImpl::SetCursorInternal(const ui::Cursor& cursor,
   if (cursor_overridden_)
     return;
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   // On Mac the mousemove event propagates to both the popup and main window.
   // If a popup is open we don't want the main window to change the cursor.
   if (web_view_->HasOpenedPopup())
@@ -807,8 +772,8 @@ void ChromeClientImpl::DetachCompositorAnimationTimeline(
 
 void ChromeClientImpl::EnterFullscreen(LocalFrame& frame,
                                        const FullscreenOptions* options,
-                                       bool for_cross_process_descendant) {
-  web_view_->EnterFullscreen(frame, options, for_cross_process_descendant);
+                                       FullscreenRequestType request_type) {
+  web_view_->EnterFullscreen(frame, options, request_type);
 }
 
 void ChromeClientImpl::ExitFullscreen(LocalFrame& frame) {
@@ -865,9 +830,9 @@ void ChromeClientImpl::SetBrowserControlsState(float top_height,
                                                float bottom_height,
                                                bool shrinks_layout) {
   DCHECK(web_view_->MainFrameWidget());
-  WebSize size = web_view_->MainFrameWidget()->Size();
+  gfx::Size size = web_view_->MainFrameWidget()->Size();
   if (shrinks_layout)
-    size.height -= top_height + bottom_height;
+    size -= gfx::Size(0, top_height + bottom_height);
 
   web_view_->ResizeWithBrowserControls(size, top_height, bottom_height,
                                        shrinks_layout);
@@ -883,13 +848,6 @@ bool ChromeClientImpl::ShouldOpenUIElementDuringPageDismissal(
     UIElementType ui_element_type,
     const String& dialog_message,
     Document::PageDismissalType dismissal_type) const {
-  // TODO(https://crbug.com/937569): Remove this in Chrome 88.
-  if (ui_element_type == ChromeClient::UIElementType::kPopup &&
-      web_view_->Client() &&
-      web_view_->Client()->AllowPopupsDuringPageUnload()) {
-    return true;
-  }
-
   StringBuilder builder;
   builder.Append("Blocked ");
   builder.Append(UIElementTypeToString(ui_element_type));
@@ -1062,36 +1020,6 @@ void ChromeClientImpl::SetTouchAction(LocalFrame* frame,
   widget->ProcessTouchAction(touch_action);
 }
 
-bool ChromeClientImpl::RequestPointerLock(
-    LocalFrame* frame,
-    WebWidgetClient::PointerLockCallback callback,
-    bool request_unadjusted_movement) {
-  return WebLocalFrameImpl::FromFrame(frame)
-      ->LocalRootFrameWidget()
-      ->Client()
-      ->RequestPointerLock(WebLocalFrameImpl::FromFrame(frame),
-                           std::move(callback), request_unadjusted_movement);
-}
-
-bool ChromeClientImpl::RequestPointerLockChange(
-    LocalFrame* frame,
-    WebWidgetClient::PointerLockCallback callback,
-    bool request_unadjusted_movement) {
-  return WebLocalFrameImpl::FromFrame(frame)
-      ->LocalRootFrameWidget()
-      ->Client()
-      ->RequestPointerLockChange(WebLocalFrameImpl::FromFrame(frame),
-                                 std::move(callback),
-                                 request_unadjusted_movement);
-}
-
-void ChromeClientImpl::RequestPointerUnlock(LocalFrame* frame) {
-  return WebLocalFrameImpl::FromFrame(frame)
-      ->LocalRootFrameWidget()
-      ->Client()
-      ->RequestPointerUnlock();
-}
-
 void ChromeClientImpl::DidAssociateFormControlsAfterLoad(LocalFrame* frame) {
   if (auto* fill_client = AutofillClientFromFrame(frame))
     fill_client->DidAssociateFormControlsDynamically();
@@ -1225,7 +1153,7 @@ WebAutofillClient* ChromeClientImpl::AutofillClientFromFrame(
 }
 
 void ChromeClientImpl::DidUpdateTextAutosizerPageInfo(
-    const WebTextAutosizerPageInfo& page_info) {
+    const mojom::blink::TextAutosizerPageInfo& page_info) {
   web_view_->TextAutosizerPageInfoChanged(page_info);
 }
 
@@ -1244,6 +1172,14 @@ void ChromeClientImpl::SetDelegatedInkMetadata(
     LocalFrame* frame,
     std::unique_ptr<viz::DelegatedInkMetadata> metadata) {
   frame->GetWidgetForLocalRoot()->SetDelegatedInkMetadata(std::move(metadata));
+}
+
+void ChromeClientImpl::BatterySavingsChanged(LocalFrame& main_frame,
+                                             WebBatterySavingsFlags savings) {
+  DCHECK(main_frame.IsMainFrame());
+  WebLocalFrameImpl::FromFrame(main_frame)
+      ->FrameWidgetImpl()
+      ->BatterySavingsChanged(savings);
 }
 
 }  // namespace blink

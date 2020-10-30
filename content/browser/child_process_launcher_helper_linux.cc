@@ -20,7 +20,7 @@
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
 #include "content/public/common/zygote/sandbox_support_linux.h"
 #include "content/public/common/zygote/zygote_handle.h"
-#include "services/service_manager/sandbox/linux/sandbox_linux.h"
+#include "sandbox/policy/linux/sandbox_linux.h"
 
 namespace content {
 namespace internal {
@@ -139,7 +139,7 @@ bool ChildProcessLauncherHelper::TerminateProcess(const base::Process& process,
 void ChildProcessLauncherHelper::ForceNormalProcessTerminationSync(
     ChildProcessLauncherHelper::Process process) {
   DCHECK(CurrentlyOnProcessLauncherTaskRunner());
-  process.process.Terminate(service_manager::RESULT_CODE_NORMAL_EXIT, false);
+  process.process.Terminate(RESULT_CODE_NORMAL_EXIT, false);
   // On POSIX, we must additionally reap the child.
   if (process.zygote) {
     // If the renderer was created via a zygote, we have to proxy the reaping

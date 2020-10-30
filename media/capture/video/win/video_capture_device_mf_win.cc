@@ -227,6 +227,7 @@ bool GetFrameRateFromMediaType(IMFMediaType* type, float* frame_rate) {
 
 bool GetFormatFromSourceMediaType(IMFMediaType* source_media_type,
                                   bool photo,
+                                  bool use_hardware_format,
                                   VideoCaptureFormat* format) {
   GUID major_type_guid;
   if (FAILED(source_media_type->GetGUID(MF_MT_MAJOR_TYPE, &major_type_guid)) ||
@@ -240,7 +241,7 @@ bool GetFormatFromSourceMediaType(IMFMediaType* source_media_type,
   if (FAILED(source_media_type->GetGUID(MF_MT_SUBTYPE, &sub_type_guid)) ||
       !GetFrameSizeFromMediaType(source_media_type, &format->frame_size) ||
       !VideoCaptureDeviceMFWin::GetPixelFormatFromMFSourceMediaSubtype(
-          sub_type_guid, &format->pixel_format)) {
+          sub_type_guid, use_hardware_format, &format->pixel_format)) {
     return false;
   }
 
@@ -269,7 +270,15 @@ struct MediaFormatConfiguration {
 
 bool GetMediaFormatConfigurationFromMFSourceMediaSubtype(
     const GUID& mf_source_media_subtype,
+    bool use_hardware_format,
     MediaFormatConfiguration* media_format_configuration) {
+  // Special case handling of the NV12 format when using hardware capture
+  // to ensure that captured buffers are passed through without copies
+  if (use_hardware_format && mf_source_media_subtype == MFVideoFormat_NV12) {
+    *media_format_configuration = {MFVideoFormat_NV12, MFVideoFormat_NV12,
+                                   PIXEL_FORMAT_NV12};
+    return true;
+  }
   static const MediaFormatConfiguration kMediaFormatConfigurationMap[] = {
       // IMFCaptureEngine inevitably performs the video frame decoding itself.
       // This means that the sink must always be set to an uncompressed video
@@ -313,6 +322,7 @@ bool GetMediaFormatConfigurationFromMFSourceMediaSubtype(
 // sink and source are the same and means that there should be no transcoding
 // done by IMFCaptureEngine.
 HRESULT GetMFSinkMediaSubtype(IMFMediaType* source_media_type,
+                              bool use_hardware_format,
                               GUID* mf_sink_media_subtype,
                               bool* passthrough) {
   GUID source_subtype;
@@ -321,7 +331,7 @@ HRESULT GetMFSinkMediaSubtype(IMFMediaType* source_media_type,
     return hr;
   MediaFormatConfiguration media_format_configuration;
   if (!GetMediaFormatConfigurationFromMFSourceMediaSubtype(
-          source_subtype, &media_format_configuration))
+          source_subtype, use_hardware_format, &media_format_configuration))
     return E_FAIL;
   *mf_sink_media_subtype = media_format_configuration.mf_sink_media_subtype;
   *passthrough =
@@ -338,8 +348,8 @@ HRESULT ConvertToPhotoSinkMediaType(IMFMediaType* source_media_type,
 
   bool passthrough = false;
   GUID mf_sink_media_subtype;
-  hr = GetMFSinkMediaSubtype(source_media_type, &mf_sink_media_subtype,
-                             &passthrough);
+  hr = GetMFSinkMediaSubtype(source_media_type, /*use_hardware_format=*/false,
+                             &mf_sink_media_subtype, &passthrough);
   if (FAILED(hr))
     return hr;
 
@@ -352,6 +362,7 @@ HRESULT ConvertToPhotoSinkMediaType(IMFMediaType* source_media_type,
 }
 
 HRESULT ConvertToVideoSinkMediaType(IMFMediaType* source_media_type,
+                                    bool use_hardware_format,
                                     IMFMediaType* sink_media_type) {
   HRESULT hr = sink_media_type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
   if (FAILED(hr))
@@ -359,8 +370,8 @@ HRESULT ConvertToVideoSinkMediaType(IMFMediaType* source_media_type,
 
   bool passthrough = false;
   GUID mf_sink_media_subtype;
-  hr = GetMFSinkMediaSubtype(source_media_type, &mf_sink_media_subtype,
-                             &passthrough);
+  hr = GetMFSinkMediaSubtype(source_media_type, use_hardware_format,
+                             &mf_sink_media_subtype, &passthrough);
   if (FAILED(hr))
     return hr;
 
@@ -426,6 +437,14 @@ HRESULT CreateCaptureEngine(IMFCaptureEngine** engine) {
                                                       IID_PPV_ARGS(engine));
 }
 
+bool GetCameraControlSupport(ComPtr<IAMCameraControl> camera_control,
+                             CameraControlProperty control_property) {
+  long min, max, step, default_value, flags;
+  HRESULT hr = camera_control->GetRange(control_property, &min, &max, &step,
+                                        &default_value, &flags);
+  return SUCCEEDED(hr) && min < max;
+}
+
 // Retrieves the control range and value, and
 // optionally returns the associated supported and current mode.
 template <typename ControlInterface, typename ControlProperty>
@@ -483,11 +502,19 @@ class MFVideoCallback final
   }
 
   IFACEMETHODIMP OnEvent(IMFMediaEvent* media_event) override {
+    base::AutoLock lock(lock_);
+    if (!observer_) {
+      return S_OK;
+    }
     observer_->OnEvent(media_event);
     return S_OK;
   }
 
   IFACEMETHODIMP OnSample(IMFSample* sample) override {
+    base::AutoLock lock(lock_);
+    if (!observer_) {
+      return S_OK;
+    }
     if (!sample) {
       observer_->OnFrameDropped(
           VideoCaptureFrameDropReason::kWinMediaFoundationReceivedSampleIsNull);
@@ -526,36 +553,48 @@ class MFVideoCallback final
     return S_OK;
   }
 
+  void Shutdown() {
+    base::AutoLock lock(lock_);
+    observer_ = nullptr;
+  }
+
  private:
   friend class base::RefCountedThreadSafe<MFVideoCallback>;
   ~MFVideoCallback() {}
-  VideoCaptureDeviceMFWin* observer_;
+
+  // Protects access to |observer_|.
+  base::Lock lock_;
+  VideoCaptureDeviceMFWin* observer_ GUARDED_BY(lock_);
 };
 
 // static
 bool VideoCaptureDeviceMFWin::GetPixelFormatFromMFSourceMediaSubtype(
     const GUID& mf_source_media_subtype,
+    bool use_hardware_format,
     VideoPixelFormat* pixel_format) {
   MediaFormatConfiguration media_format_configuration;
   if (!GetMediaFormatConfigurationFromMFSourceMediaSubtype(
-          mf_source_media_subtype, &media_format_configuration))
+          mf_source_media_subtype, use_hardware_format,
+          &media_format_configuration))
     return false;
 
   *pixel_format = media_format_configuration.pixel_format;
   return true;
 }
 
-// Check if the video capture device supports at least one of pan, tilt and zoom
-// controls.
+// Check if the video capture device supports pan, tilt and zoom controls.
 // static
-bool VideoCaptureDeviceMFWin::IsPanTiltZoomSupported(
+VideoCaptureControlSupport VideoCaptureDeviceMFWin::GetControlSupport(
     ComPtr<IMFMediaSource> source) {
+  VideoCaptureControlSupport control_support;
+
   ComPtr<IAMCameraControl> camera_control;
   HRESULT hr = source.As(&camera_control);
   DLOG_IF_FAILED_WITH_HRESULT("Failed to retrieve IAMCameraControl", hr);
   ComPtr<IAMVideoProcAmp> video_control;
   hr = source.As(&video_control);
   DLOG_IF_FAILED_WITH_HRESULT("Failed to retrieve IAMVideoProcAmp", hr);
+
   // On Windows platform, some Image Capture video constraints and settings are
   // get or set using IAMCameraControl interface while the rest are get or set
   // using IAMVideoProcAmp interface and most device drivers define both of
@@ -563,19 +602,16 @@ bool VideoCaptureDeviceMFWin::IsPanTiltZoomSupported(
   // Capture API constraints and settings only if both interfaces are available.
   // Therefore, if either of these interface is missing, this backend does not
   // really support pan, tilt nor zoom.
-  if (!camera_control || !video_control)
-    return false;
-
-  for (CameraControlProperty control_property :
-       {CameraControl_Pan, CameraControl_Tilt, CameraControl_Zoom}) {
-    long min, max, step, default_value, flags;
-    HRESULT hr = camera_control->GetRange(control_property, &min, &max, &step,
-                                          &default_value, &flags);
-    if (SUCCEEDED(hr) && min < max)
-      return true;
+  if (camera_control && video_control) {
+    control_support.pan =
+        GetCameraControlSupport(camera_control, CameraControl_Pan);
+    control_support.tilt =
+        GetCameraControlSupport(camera_control, CameraControl_Tilt);
+    control_support.zoom =
+        GetCameraControlSupport(camera_control, CameraControl_Zoom);
   }
 
-  return false;
+  return control_support;
 }
 
 HRESULT VideoCaptureDeviceMFWin::ExecuteHresultCallbackWithRetries(
@@ -679,7 +715,11 @@ HRESULT VideoCaptureDeviceMFWin::FillCapabilities(
     while (SUCCEEDED(hr = GetAvailableDeviceMediaType(
                          source, stream_index, media_type_index, &type))) {
       VideoCaptureFormat format;
-      if (GetFormatFromSourceMediaType(type.Get(), photo, &format))
+      if (GetFormatFromSourceMediaType(
+              type.Get(), photo,
+              /*use_hardware_format=*/!photo &&
+                  static_cast<bool>(dxgi_device_manager_),
+              &format))
         capabilities->emplace_back(media_type_index, format, stream_index);
       type.Reset();
       ++media_type_index;
@@ -697,12 +737,17 @@ HRESULT VideoCaptureDeviceMFWin::FillCapabilities(
 
 VideoCaptureDeviceMFWin::VideoCaptureDeviceMFWin(
     const VideoCaptureDeviceDescriptor& device_descriptor,
-    ComPtr<IMFMediaSource> source)
-    : VideoCaptureDeviceMFWin(device_descriptor, source, nullptr) {}
+    ComPtr<IMFMediaSource> source,
+    scoped_refptr<VideoCaptureDXGIDeviceManager> dxgi_device_manager)
+    : VideoCaptureDeviceMFWin(device_descriptor,
+                              source,
+                              std::move(dxgi_device_manager),
+                              nullptr) {}
 
 VideoCaptureDeviceMFWin::VideoCaptureDeviceMFWin(
     const VideoCaptureDeviceDescriptor& device_descriptor,
     ComPtr<IMFMediaSource> source,
+    scoped_refptr<VideoCaptureDXGIDeviceManager> dxgi_device_manager,
     ComPtr<IMFCaptureEngine> engine)
     : facing_mode_(device_descriptor.facing),
       create_mf_photo_callback_(base::BindRepeating(&CreateMFPhotoCallback)),
@@ -720,7 +765,8 @@ VideoCaptureDeviceMFWin::VideoCaptureDeviceMFWin(
                           base::WaitableEvent::InitialState::NOT_SIGNALED),
       // We never want to reset |capture_error_|.
       capture_error_(base::WaitableEvent::ResetPolicy::MANUAL,
-                     base::WaitableEvent::InitialState::NOT_SIGNALED) {
+                     base::WaitableEvent::InitialState::NOT_SIGNALED),
+      dxgi_device_manager_(std::move(dxgi_device_manager)) {
   DETACH_FROM_SEQUENCE(sequence_checker_);
 }
 
@@ -735,6 +781,9 @@ VideoCaptureDeviceMFWin::~VideoCaptureDeviceMFWin() {
               ? IsHighResolution(selected_video_capability_->supported_format)
               : false);
     }
+  }
+  if (video_callback_) {
+    video_callback_->Shutdown();
   }
 }
 
@@ -758,8 +807,21 @@ bool VideoCaptureDeviceMFWin::Init() {
   }
 
   ComPtr<IMFAttributes> attributes;
-  MFCreateAttributes(&attributes, 1);
-  DCHECK(attributes);
+  hr = MFCreateAttributes(&attributes, 1);
+  if (FAILED(hr)) {
+    LogError(FROM_HERE, hr);
+    return false;
+  }
+
+  hr = attributes->SetUINT32(MF_CAPTURE_ENGINE_USE_VIDEO_DEVICE_ONLY, TRUE);
+  if (FAILED(hr)) {
+    LogError(FROM_HERE, hr);
+    return false;
+  }
+
+  if (dxgi_device_manager_) {
+    dxgi_device_manager_->RegisterInCaptureEngineAttributes(attributes.Get());
+  }
 
   video_callback_ = new MFVideoCallback(this);
   hr = engine_->Initialize(video_callback_.get(), attributes.Get(), nullptr,
@@ -884,8 +946,10 @@ void VideoCaptureDeviceMFWin::AllocateAndStart(
     return;
   }
 
-  hr = ConvertToVideoSinkMediaType(source_video_media_type.Get(),
-                                   sink_video_media_type.Get());
+  hr = ConvertToVideoSinkMediaType(
+      source_video_media_type.Get(),
+      /*use_hardware_format=*/static_cast<bool>(dxgi_device_manager_),
+      sink_video_media_type.Get());
   if (FAILED(hr)) {
     OnError(
         VideoCaptureError::kWinMediaFoundationConvertToVideoSinkMediaTypeFailed,
@@ -994,7 +1058,8 @@ void VideoCaptureDeviceMFWin::TakePhoto(TakePhotoCallback callback) {
   }
 
   VideoCaptureFormat format;
-  hr = GetFormatFromSourceMediaType(sink_media_type.Get(), true, &format)
+  hr = GetFormatFromSourceMediaType(sink_media_type.Get(), true,
+                                    /*use_hardware_format=*/false, &format)
            ? S_OK
            : E_FAIL;
   if (FAILED(hr)) {
@@ -1317,12 +1382,17 @@ void VideoCaptureDeviceMFWin::OnIncomingCapturedData(
       client_->OnStarted();
     }
 
+    // We always calculate camera rotation for the first frame. We also cache
+    // the latest value to use when AutoRotation is turned off.
+    if (!camera_rotation_.has_value() || IsAutoRotationEnabled())
+      camera_rotation_ = GetCameraRotation(facing_mode_);
+
     // TODO(julien.isorce): retrieve the color space information using Media
     // Foundation api, MFGetAttributeSize/MF_MT_VIDEO_PRIMARIES,in order to
     // build a gfx::ColorSpace. See http://crbug.com/959988.
     client_->OnIncomingCapturedData(
         data, length, selected_video_capability_->supported_format,
-        gfx::ColorSpace(), GetCameraRotation(facing_mode_), false /* flip_y */,
+        gfx::ColorSpace(), camera_rotation_.value(), false /* flip_y */,
         reference_time, timestamp);
   }
 

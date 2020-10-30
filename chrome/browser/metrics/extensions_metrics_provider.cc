@@ -214,7 +214,7 @@ ExtensionInstallProto::BackgroundScriptType GetBackgroundScriptType(
   return ExtensionInstallProto::NO_BACKGROUND_SCRIPT;
 }
 
-static_assert(extensions::disable_reason::DISABLE_REASON_LAST == (1LL << 19),
+static_assert(extensions::disable_reason::DISABLE_REASON_LAST == (1LL << 20),
               "Adding a new disable reason? Be sure to include the new reason "
               "below, update the test to exercise it, and then adjust this "
               "value for DISABLE_REASON_LAST");
@@ -253,6 +253,8 @@ std::vector<ExtensionInstallProto::DisableReason> GetDisableReasons(
        ExtensionInstallProto::BLOCKED_BY_POLICY},
       {extensions::disable_reason::DISABLE_REMOTELY_FOR_MALWARE,
        ExtensionInstallProto::DISABLE_REMOTELY_FOR_MALWARE},
+      {extensions::disable_reason::DISABLE_REINSTALL,
+       ExtensionInstallProto::REINSTALL},
   };
 
   int disable_reasons = prefs->GetDisableReasons(id);
@@ -380,7 +382,7 @@ ExtensionsMetricsProvider::GetInstalledExtensions(Profile* profile) {
   return std::unique_ptr<extensions::ExtensionSet>();
 }
 
-uint64_t ExtensionsMetricsProvider::GetClientID() {
+uint64_t ExtensionsMetricsProvider::GetClientID() const {
   // TODO(blundell): Create a MetricsLog::ClientIDAsInt() API and call it
   // here as well as in MetricsLog's population of the client_id field of
   // the uma_proto.

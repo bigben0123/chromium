@@ -9,8 +9,6 @@
 #include "base/containers/queue.h"
 #include "base/run_loop.h"
 #include "base/test/bind_test_util.h"
-#include "base/test/scoped_feature_list.h"
-#include "content/browser/service_worker/embedded_worker_test_helper.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/browser/service_worker/service_worker_test_utils.h"
 #include "content/public/test/browser_task_environment.h"
@@ -71,13 +69,6 @@ class ServiceWorkerSingleScriptUpdateCheckerTest : public testing::Test {
   }
   ~ServiceWorkerSingleScriptUpdateCheckerTest() override = default;
 
-  ServiceWorkerStorage* storage() { return helper_->context()->storage(); }
-
-  void SetUp() override {
-    helper_ = std::make_unique<EmbeddedWorkerTestHelper>(base::FilePath());
-    storage()->LazyInitializeForTest();
-  }
-
   size_t TotalBytes(const std::vector<std::string>& data_chunks) {
     size_t bytes = 0;
     for (const auto& data : data_chunks)
@@ -90,9 +81,9 @@ class ServiceWorkerSingleScriptUpdateCheckerTest : public testing::Test {
   CreateSingleScriptUpdateCheckerWithoutHttpCache(
       const char* url,
       const GURL& scope,
-      std::unique_ptr<MockServiceWorkerResponseReader> compare_reader,
-      std::unique_ptr<MockServiceWorkerResponseReader> copy_reader,
-      std::unique_ptr<ServiceWorkerResponseWriter> writer,
+      std::unique_ptr<MockServiceWorkerResourceReader> compare_reader,
+      std::unique_ptr<MockServiceWorkerResourceReader> copy_reader,
+      std::unique_ptr<MockServiceWorkerResourceWriter> writer,
       network::TestURLLoaderFactory* loader_factory,
       base::Optional<CheckResult>* out_check_result) {
     return CreateSingleScriptUpdateChecker(
@@ -104,13 +95,26 @@ class ServiceWorkerSingleScriptUpdateCheckerTest : public testing::Test {
   }
 
   mojo::Remote<storage::mojom::ServiceWorkerResourceReader> WrapReader(
-      std::unique_ptr<MockServiceWorkerResponseReader> reader) {
+      std::unique_ptr<MockServiceWorkerResourceReader> reader) {
     mojo::Remote<storage::mojom::ServiceWorkerResourceReader> remote;
-    remote.Bind(reader->BindNewPipeAndPassRemote(base::BindOnce(
-        [](std::unique_ptr<MockServiceWorkerResponseReader>) {
+    MockServiceWorkerResourceReader* raw_reader = reader.get();
+    remote.Bind(raw_reader->BindNewPipeAndPassRemote(base::BindOnce(
+        [](std::unique_ptr<MockServiceWorkerResourceReader>) {
           // Keep |reader| until mojo connection is destroyed.
         },
         std::move(reader))));
+    return remote;
+  }
+
+  mojo::Remote<storage::mojom::ServiceWorkerResourceWriter> WrapWriter(
+      std::unique_ptr<MockServiceWorkerResourceWriter> writer) {
+    mojo::Remote<storage::mojom::ServiceWorkerResourceWriter> remote;
+    MockServiceWorkerResourceWriter* raw_writer = writer.get();
+    remote.Bind(raw_writer->BindNewPipeAndPassRemote(base::BindOnce(
+        [](std::unique_ptr<MockServiceWorkerResourceWriter>) {
+          // Keep |writer| until mojo connection is destroyed.
+        },
+        std::move(writer))));
     return remote;
   }
 
@@ -124,9 +128,9 @@ class ServiceWorkerSingleScriptUpdateCheckerTest : public testing::Test {
       bool force_bypass_cache,
       blink::mojom::ServiceWorkerUpdateViaCache update_via_cache,
       base::TimeDelta time_since_last_check,
-      std::unique_ptr<MockServiceWorkerResponseReader> compare_reader,
-      std::unique_ptr<MockServiceWorkerResponseReader> copy_reader,
-      std::unique_ptr<ServiceWorkerResponseWriter> writer,
+      std::unique_ptr<MockServiceWorkerResourceReader> compare_reader,
+      std::unique_ptr<MockServiceWorkerResourceReader> copy_reader,
+      std::unique_ptr<MockServiceWorkerResourceWriter> writer,
       network::TestURLLoaderFactory* loader_factory,
       base::Optional<CheckResult>* out_check_result) {
     auto fetch_client_settings_object =
@@ -143,7 +147,8 @@ class ServiceWorkerSingleScriptUpdateCheckerTest : public testing::Test {
         base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
             loader_factory),
         WrapReader(std::move(compare_reader)),
-        WrapReader(std::move(copy_reader)), std::move(writer),
+        WrapReader(std::move(copy_reader)), WrapWriter(std::move(writer)),
+        /*writer_resource_id=*/0,
         base::BindOnce(
             [](base::Optional<CheckResult>* out_check_result_param,
                const GURL& script_url,
@@ -179,7 +184,6 @@ class ServiceWorkerSingleScriptUpdateCheckerTest : public testing::Test {
 
  protected:
   BrowserTaskEnvironment task_environment_;
-  std::unique_ptr<EmbeddedWorkerTestHelper> helper_;
   std::unique_ptr<TestBrowserContext> browser_context_;
 
  private:
@@ -197,10 +201,10 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, Identical_SingleRead) {
       CreateLoaderFactoryWithRespone(GURL(kScriptURL), kSuccessHeader,
                                      body_from_net, net::OK);
 
-  auto compare_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto copy_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto writer = std::make_unique<MockServiceWorkerResponseWriter>();
-  MockServiceWorkerResponseReader* compare_reader_rawptr = compare_reader.get();
+  auto compare_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto copy_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto writer = std::make_unique<MockServiceWorkerResourceWriter>();
+  MockServiceWorkerResourceReader* compare_reader_rawptr = compare_reader.get();
   compare_reader->ExpectReadOk(body_from_storage,
                                TotalBytes(body_from_storage));
 
@@ -243,10 +247,10 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, Identical_MultipleRead) {
       CreateLoaderFactoryWithRespone(GURL(kScriptURL), kSuccessHeader,
                                      body_from_net, net::OK);
 
-  auto compare_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto copy_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto writer = std::make_unique<MockServiceWorkerResponseWriter>();
-  MockServiceWorkerResponseReader* compare_reader_rawptr = compare_reader.get();
+  auto compare_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto copy_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto writer = std::make_unique<MockServiceWorkerResourceWriter>();
+  MockServiceWorkerResourceReader* compare_reader_rawptr = compare_reader.get();
   compare_reader->ExpectReadOk(body_from_storage,
                                TotalBytes(body_from_storage));
 
@@ -294,10 +298,10 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, Identical_Empty) {
       CreateLoaderFactoryWithRespone(GURL(kScriptURL), kSuccessHeader,
                                      body_from_net, net::OK);
 
-  auto compare_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto copy_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto writer = std::make_unique<MockServiceWorkerResponseWriter>();
-  MockServiceWorkerResponseReader* compare_reader_rawptr = compare_reader.get();
+  auto compare_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto copy_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto writer = std::make_unique<MockServiceWorkerResourceWriter>();
+  MockServiceWorkerResourceReader* compare_reader_rawptr = compare_reader.get();
   compare_reader->ExpectReadOk(body_from_storage,
                                TotalBytes(body_from_storage));
 
@@ -338,10 +342,10 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest,
       CreateLoaderFactoryWithRespone(GURL(kScriptURL), kSuccessHeader,
                                      body_from_net, net::OK);
 
-  auto compare_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto copy_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto writer = std::make_unique<MockServiceWorkerResponseWriter>();
-  MockServiceWorkerResponseReader* compare_reader_rawptr = compare_reader.get();
+  auto compare_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto copy_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto writer = std::make_unique<MockServiceWorkerResourceWriter>();
+  MockServiceWorkerResourceReader* compare_reader_rawptr = compare_reader.get();
   compare_reader->ExpectReadOk(body_from_storage,
                                TotalBytes(body_from_storage));
 
@@ -391,10 +395,10 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest,
       CreateLoaderFactoryWithRespone(GURL(kScriptURL), kSuccessHeader,
                                      body_from_net, net::OK);
 
-  auto compare_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto copy_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto writer = std::make_unique<MockServiceWorkerResponseWriter>();
-  MockServiceWorkerResponseReader* compare_reader_rawptr = compare_reader.get();
+  auto compare_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto copy_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto writer = std::make_unique<MockServiceWorkerResourceWriter>();
+  MockServiceWorkerResourceReader* compare_reader_rawptr = compare_reader.get();
   compare_reader->ExpectReadOk(body_from_storage,
                                TotalBytes(body_from_storage));
 
@@ -441,10 +445,10 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest,
   // Stored data for |kScriptURL|.
   const std::vector<std::string> body_from_storage{"abc", "def"};
 
-  auto compare_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto copy_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto writer = std::make_unique<MockServiceWorkerResponseWriter>();
-  MockServiceWorkerResponseReader* compare_reader_rawptr = compare_reader.get();
+  auto compare_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto copy_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto writer = std::make_unique<MockServiceWorkerResourceWriter>();
+  MockServiceWorkerResourceReader* compare_reader_rawptr = compare_reader.get();
   compare_reader->ExpectReadOk(body_from_storage,
                                TotalBytes(body_from_storage));
 
@@ -529,10 +533,10 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest,
       CreateLoaderFactoryWithRespone(GURL(kScriptURL), kSuccessHeader,
                                      body_from_net, net::OK);
 
-  auto compare_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto copy_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto writer = std::make_unique<MockServiceWorkerResponseWriter>();
-  MockServiceWorkerResponseReader* compare_reader_rawptr = compare_reader.get();
+  auto compare_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto copy_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto writer = std::make_unique<MockServiceWorkerResourceWriter>();
+  MockServiceWorkerResourceReader* compare_reader_rawptr = compare_reader.get();
   compare_reader->ExpectReadOk(body_from_storage,
                                TotalBytes(body_from_storage));
 
@@ -576,10 +580,10 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest,
       CreateLoaderFactoryWithRespone(GURL(kScriptURL), kSuccessHeader,
                                      body_from_net, net::OK);
 
-  auto compare_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto copy_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto writer = std::make_unique<MockServiceWorkerResponseWriter>();
-  MockServiceWorkerResponseReader* compare_reader_rawptr = compare_reader.get();
+  auto compare_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto copy_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto writer = std::make_unique<MockServiceWorkerResourceWriter>();
+  MockServiceWorkerResourceReader* compare_reader_rawptr = compare_reader.get();
   compare_reader->ExpectReadOk(body_from_storage,
                                TotalBytes(body_from_storage));
 
@@ -635,10 +639,10 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest,
       CreateLoaderFactoryWithRespone(GURL(kScriptURL), kSuccessHeader,
                                      body_from_net, net::OK);
 
-  auto compare_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto copy_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto writer = std::make_unique<MockServiceWorkerResponseWriter>();
-  MockServiceWorkerResponseReader* compare_reader_rawptr = compare_reader.get();
+  auto compare_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto copy_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto writer = std::make_unique<MockServiceWorkerResourceWriter>();
+  MockServiceWorkerResourceReader* compare_reader_rawptr = compare_reader.get();
   compare_reader->ExpectReadOk(body_from_storage,
                                TotalBytes(body_from_storage));
 
@@ -691,10 +695,10 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest,
       CreateLoaderFactoryWithRespone(GURL(kScriptURL), kSuccessHeader,
                                      body_from_net, net::OK);
 
-  auto compare_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto copy_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto writer = std::make_unique<MockServiceWorkerResponseWriter>();
-  MockServiceWorkerResponseReader* compare_reader_rawptr = compare_reader.get();
+  auto compare_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto copy_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto writer = std::make_unique<MockServiceWorkerResourceWriter>();
+  MockServiceWorkerResourceReader* compare_reader_rawptr = compare_reader.get();
   compare_reader->ExpectReadOk(body_from_storage,
                                TotalBytes(body_from_storage));
 
@@ -741,10 +745,10 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest,
   const std::vector<std::string> body_from_storage{"ab", "c"};
 
   auto loader_factory = std::make_unique<network::TestURLLoaderFactory>();
-  auto compare_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto copy_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto writer = std::make_unique<MockServiceWorkerResponseWriter>();
-  MockServiceWorkerResponseReader* compare_reader_rawptr = compare_reader.get();
+  auto compare_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto copy_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto writer = std::make_unique<MockServiceWorkerResourceWriter>();
+  MockServiceWorkerResourceReader* compare_reader_rawptr = compare_reader.get();
   compare_reader->ExpectReadOk(body_from_storage,
                                TotalBytes(body_from_storage));
 
@@ -822,9 +826,9 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, UpdateViaCache_All) {
       CreateSingleScriptUpdateChecker(
           kScriptURL, kScriptURL, GURL(kScope), false /* force_bypass_cache */,
           blink::mojom::ServiceWorkerUpdateViaCache::kAll, base::TimeDelta(),
-          std::make_unique<MockServiceWorkerResponseReader>(),
-          std::make_unique<MockServiceWorkerResponseReader>(),
-          std::make_unique<MockServiceWorkerResponseWriter>(),
+          std::make_unique<MockServiceWorkerResourceReader>(),
+          std::make_unique<MockServiceWorkerResourceReader>(),
+          std::make_unique<MockServiceWorkerResourceWriter>(),
           loader_factory.get(), &check_result);
 
   const network::ResourceRequest* request = nullptr;
@@ -836,9 +840,9 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, UpdateViaCache_All) {
       kImportedScriptURL, kScriptURL, GURL(kScope),
       false /* force_bypass_cache */,
       blink::mojom::ServiceWorkerUpdateViaCache::kAll, base::TimeDelta(),
-      std::make_unique<MockServiceWorkerResponseReader>(),
-      std::make_unique<MockServiceWorkerResponseReader>(),
-      std::make_unique<MockServiceWorkerResponseWriter>(), loader_factory.get(),
+      std::make_unique<MockServiceWorkerResourceReader>(),
+      std::make_unique<MockServiceWorkerResourceReader>(),
+      std::make_unique<MockServiceWorkerResourceWriter>(), loader_factory.get(),
       &check_result);
 
   ASSERT_TRUE(loader_factory->IsPending(kImportedScriptURL, &request));
@@ -855,9 +859,9 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, UpdateViaCache_None) {
       CreateSingleScriptUpdateChecker(
           kScriptURL, kScriptURL, GURL(kScope), false /* force_bypass_cache */,
           blink::mojom::ServiceWorkerUpdateViaCache::kNone, base::TimeDelta(),
-          std::make_unique<MockServiceWorkerResponseReader>(),
-          std::make_unique<MockServiceWorkerResponseReader>(),
-          std::make_unique<MockServiceWorkerResponseWriter>(),
+          std::make_unique<MockServiceWorkerResourceReader>(),
+          std::make_unique<MockServiceWorkerResourceReader>(),
+          std::make_unique<MockServiceWorkerResourceWriter>(),
           loader_factory.get(), &check_result);
 
   const network::ResourceRequest* request = nullptr;
@@ -869,9 +873,9 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, UpdateViaCache_None) {
       kImportedScriptURL, kScriptURL, GURL(kScope),
       false /* force_bypass_cache */,
       blink::mojom::ServiceWorkerUpdateViaCache::kNone, base::TimeDelta(),
-      std::make_unique<MockServiceWorkerResponseReader>(),
-      std::make_unique<MockServiceWorkerResponseReader>(),
-      std::make_unique<MockServiceWorkerResponseWriter>(), loader_factory.get(),
+      std::make_unique<MockServiceWorkerResourceReader>(),
+      std::make_unique<MockServiceWorkerResourceReader>(),
+      std::make_unique<MockServiceWorkerResourceWriter>(), loader_factory.get(),
       &check_result);
 
   ASSERT_TRUE(loader_factory->IsPending(kImportedScriptURL, &request));
@@ -889,9 +893,9 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, UpdateViaCache_Imports) {
           kScriptURL, kScriptURL, GURL(kScope), false /* force_bypass_cache */,
           blink::mojom::ServiceWorkerUpdateViaCache::kImports,
           base::TimeDelta(),
-          std::make_unique<MockServiceWorkerResponseReader>(),
-          std::make_unique<MockServiceWorkerResponseReader>(),
-          std::make_unique<MockServiceWorkerResponseWriter>(),
+          std::make_unique<MockServiceWorkerResourceReader>(),
+          std::make_unique<MockServiceWorkerResourceReader>(),
+          std::make_unique<MockServiceWorkerResourceWriter>(),
           loader_factory.get(), &check_result);
 
   const network::ResourceRequest* request = nullptr;
@@ -903,9 +907,9 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, UpdateViaCache_Imports) {
       kImportedScriptURL, kScriptURL, GURL(kScope),
       false /* force_bypass_cache */,
       blink::mojom::ServiceWorkerUpdateViaCache::kImports, base::TimeDelta(),
-      std::make_unique<MockServiceWorkerResponseReader>(),
-      std::make_unique<MockServiceWorkerResponseReader>(),
-      std::make_unique<MockServiceWorkerResponseWriter>(), loader_factory.get(),
+      std::make_unique<MockServiceWorkerResourceReader>(),
+      std::make_unique<MockServiceWorkerResourceReader>(),
+      std::make_unique<MockServiceWorkerResourceWriter>(), loader_factory.get(),
       &check_result);
 
   ASSERT_TRUE(loader_factory->IsPending(kImportedScriptURL, &request));
@@ -923,9 +927,9 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, ForceBypassCache) {
       CreateSingleScriptUpdateChecker(
           kScriptURL, kScriptURL, GURL(kScope), true /* force_bypass_cache */,
           blink::mojom::ServiceWorkerUpdateViaCache::kAll, base::TimeDelta(),
-          std::make_unique<MockServiceWorkerResponseReader>(),
-          std::make_unique<MockServiceWorkerResponseReader>(),
-          std::make_unique<MockServiceWorkerResponseWriter>(),
+          std::make_unique<MockServiceWorkerResourceReader>(),
+          std::make_unique<MockServiceWorkerResourceReader>(),
+          std::make_unique<MockServiceWorkerResourceWriter>(),
           loader_factory.get(), &check_result);
 
   const network::ResourceRequest* request = nullptr;
@@ -937,9 +941,9 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, ForceBypassCache) {
       kImportedScriptURL, kScriptURL, GURL(kScope),
       true /* force_bypass_cache */,
       blink::mojom::ServiceWorkerUpdateViaCache::kAll, base::TimeDelta(),
-      std::make_unique<MockServiceWorkerResponseReader>(),
-      std::make_unique<MockServiceWorkerResponseReader>(),
-      std::make_unique<MockServiceWorkerResponseWriter>(), loader_factory.get(),
+      std::make_unique<MockServiceWorkerResourceReader>(),
+      std::make_unique<MockServiceWorkerResourceReader>(),
+      std::make_unique<MockServiceWorkerResourceWriter>(), loader_factory.get(),
       &check_result);
 
   ASSERT_TRUE(loader_factory->IsPending(kImportedScriptURL, &request));
@@ -957,9 +961,9 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, MoreThan24Hours) {
           kScriptURL, kScriptURL, GURL(kScope), false /* force_bypass_cache */,
           blink::mojom::ServiceWorkerUpdateViaCache::kAll,
           base::TimeDelta::FromDays(1) + base::TimeDelta::FromHours(1),
-          std::make_unique<MockServiceWorkerResponseReader>(),
-          std::make_unique<MockServiceWorkerResponseReader>(),
-          std::make_unique<MockServiceWorkerResponseWriter>(),
+          std::make_unique<MockServiceWorkerResourceReader>(),
+          std::make_unique<MockServiceWorkerResourceReader>(),
+          std::make_unique<MockServiceWorkerResourceWriter>(),
           loader_factory.get(), &check_result);
 
   const network::ResourceRequest* request = nullptr;
@@ -972,9 +976,9 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, MoreThan24Hours) {
       false /* force_bypass_cache */,
       blink::mojom::ServiceWorkerUpdateViaCache::kAll,
       base::TimeDelta::FromDays(1) + base::TimeDelta::FromHours(1),
-      std::make_unique<MockServiceWorkerResponseReader>(),
-      std::make_unique<MockServiceWorkerResponseReader>(),
-      std::make_unique<MockServiceWorkerResponseWriter>(), loader_factory.get(),
+      std::make_unique<MockServiceWorkerResourceReader>(),
+      std::make_unique<MockServiceWorkerResourceReader>(),
+      std::make_unique<MockServiceWorkerResourceWriter>(), loader_factory.get(),
       &check_result);
 
   ASSERT_TRUE(loader_factory->IsPending(kImportedScriptURL, &request));
@@ -998,9 +1002,9 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, MimeTypeError) {
         CreateLoaderFactoryWithRespone(GURL(kScriptURL), header, kBodyFromNet,
                                        net::OK);
 
-    auto compare_reader = std::make_unique<MockServiceWorkerResponseReader>();
-    auto copy_reader = std::make_unique<MockServiceWorkerResponseReader>();
-    auto writer = std::make_unique<MockServiceWorkerResponseWriter>();
+    auto compare_reader = std::make_unique<MockServiceWorkerResourceReader>();
+    auto copy_reader = std::make_unique<MockServiceWorkerResourceReader>();
+    auto writer = std::make_unique<MockServiceWorkerResourceWriter>();
 
     base::Optional<CheckResult> check_result;
     std::unique_ptr<ServiceWorkerSingleScriptUpdateChecker> checker =
@@ -1035,9 +1039,9 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, PathRestrictionError) {
       CreateLoaderFactoryWithRespone(GURL(kMainScriptURL), kHeader,
                                      kBodyFromNet, net::OK);
 
-  auto compare_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto copy_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto writer = std::make_unique<MockServiceWorkerResponseWriter>();
+  auto compare_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto copy_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto writer = std::make_unique<MockServiceWorkerResourceWriter>();
 
   base::Optional<CheckResult> check_result;
   std::unique_ptr<ServiceWorkerSingleScriptUpdateChecker> checker =
@@ -1076,10 +1080,10 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, PathRestrictionPass) {
       CreateLoaderFactoryWithRespone(GURL(kMainScriptURL), kHeader,
                                      body_from_net, net::OK);
 
-  auto compare_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto copy_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto writer = std::make_unique<MockServiceWorkerResponseWriter>();
-  MockServiceWorkerResponseReader* compare_reader_rawptr = compare_reader.get();
+  auto compare_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto copy_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto writer = std::make_unique<MockServiceWorkerResourceWriter>();
+  MockServiceWorkerResourceReader* compare_reader_rawptr = compare_reader.get();
   compare_reader->ExpectReadOk(body_from_storage,
                                TotalBytes(body_from_storage));
 
@@ -1120,9 +1124,9 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, NetworkError) {
       CreateLoaderFactoryWithRespone(GURL(kScriptURL), kFailHeader,
                                      kBodyFromNet, net::OK);
 
-  auto compare_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto copy_reader = std::make_unique<MockServiceWorkerResponseReader>();
-  auto writer = std::make_unique<MockServiceWorkerResponseWriter>();
+  auto compare_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto copy_reader = std::make_unique<MockServiceWorkerResourceReader>();
+  auto writer = std::make_unique<MockServiceWorkerResourceWriter>();
 
   base::Optional<CheckResult> check_result;
   std::unique_ptr<ServiceWorkerSingleScriptUpdateChecker> checker =
@@ -1151,9 +1155,9 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, RequestSSLInfo) {
       CreateSingleScriptUpdateChecker(
           kScriptURL, kScriptURL, GURL(kScope), false /* force_bypass_cache */,
           blink::mojom::ServiceWorkerUpdateViaCache::kNone, base::TimeDelta(),
-          std::make_unique<MockServiceWorkerResponseReader>(),
-          std::make_unique<MockServiceWorkerResponseReader>(),
-          std::make_unique<MockServiceWorkerResponseWriter>(),
+          std::make_unique<MockServiceWorkerResourceReader>(),
+          std::make_unique<MockServiceWorkerResourceReader>(),
+          std::make_unique<MockServiceWorkerResourceWriter>(),
           loader_factory.get(), &check_result);
   base::RunLoop().RunUntilIdle();
 
@@ -1171,9 +1175,9 @@ TEST_F(ServiceWorkerSingleScriptUpdateCheckerTest, RequestSSLInfo) {
       kImportedScriptURL, kScriptURL, GURL(kScope),
       false /* force_bypass_cache */,
       blink::mojom::ServiceWorkerUpdateViaCache::kNone, base::TimeDelta(),
-      std::make_unique<MockServiceWorkerResponseReader>(),
-      std::make_unique<MockServiceWorkerResponseReader>(),
-      std::make_unique<MockServiceWorkerResponseWriter>(), loader_factory.get(),
+      std::make_unique<MockServiceWorkerResourceReader>(),
+      std::make_unique<MockServiceWorkerResourceReader>(),
+      std::make_unique<MockServiceWorkerResourceWriter>(), loader_factory.get(),
       &check_result);
   base::RunLoop().RunUntilIdle();
 

@@ -30,6 +30,17 @@ const char kCompanyRe[] =
     "|单位|公司"                 // zh-CN
     "|شرکت"                      // fa
     "|회사|직장";                // ko-KR
+const char kStreetNameRe[] =
+    "stra(ss|ß)e"               // de
+    "|street"                   // en
+    "|улица|название.?улицы"    // ru
+    "|rua|avenida"              // pt-PT, pt-BR
+    "|((?<!do |de )endereço)";  // pt-BR
+const char kHouseNumberRe[] =
+    "(house.?|street.?|^)number"              // en
+    "|(haus|^)nummer"                         // de
+    "|^\\*?.?número(.?\\*?$| da residência)"  // pt-BR, pt-PT
+    "|дом|номер.?дома";                       // ru
 const char kAddressLine1Re[] =
     "^address$|address[_-]?line(one)?|address1|addr1|street"
     "|(?:shipping|billing)address$"
@@ -39,7 +50,7 @@ const char kAddressLine1Re[] =
     "|adresse"                                         // fr-FR
     "|indirizzo"                                       // it-IT
     "|^住所$|住所1"                                    // ja-JP
-    "|morada|((?<!identificação do )endereço)"         // pt-BR, pt-PT
+    "|morada|((?<!do |de )endereço)"                   // pt-BR, pt-PT
     "|Адрес"                                           // ru
     "|地址"                                            // zh-CN
     "|(\\b|_)adres(?! (başlığı(nız)?|tarifi))(\\b|_)"  // tr
@@ -116,8 +127,8 @@ const char kCityRe[] =
     "|ville|commune"                                    // fr-FR
     "|localita"                                         // it-IT
     "|市区町村"                                         // ja-JP
-    "|cidade"                                           // pt-BR, pt-PT
-    "|Город"                                            // ru
+    "|cidade|município"                                 // pt-BR, pt-PT
+    "|Город|Населённый.?пункт"                          // ru
     "|市"                                               // zh-CN
     "|分區"                                             // zh-TW
     "|شهر"                                              // fa
@@ -317,11 +328,9 @@ const char kFirstNameRe[] =
     "|(\\b|_|\\*)(isim|ad|ad(i|ı|iniz|ınız)?)(\\b|_|\\*)"  // tr
     "|नाम";                                                // hi
 const char kMiddleInitialRe[] = "middle.*initial|m\\.i\\.|mi$|\\bmi\\b";
-const char kMiddleNameRe[] =
-    "middle.*name|mname|middle$"
-    "|apellido.?materno|lastlastname";  // es
+const char kMiddleNameRe[] = "middle.*name|mname|middle$";
 const char kLastNameRe[] =
-    "last.*name|lname|surname|last$|secondname|family.*name"
+    "last.*name|lname|surname(?!\\d)|last$|secondname|family.*name"
     "|nachname"                                               // de-DE
     "|apellidos?"                                             // es
     "|famille|^nom(?!bre)"                                    // fr-FR
@@ -334,7 +343,26 @@ const char kLastNameRe[] =
     "|മറുപേര്"                                                  // ml
     "|(\\b|_|\\*)(soyisim|soyad(i|ı|iniz|ınız)?)(\\b|_|\\*)"  // tr
     "|\\b성(?:[^명]|\\b)";                                    // ko-KR
-
+const char kNameLastFirstRe[] =
+    "(primer.*apellido)"                 // es
+    "|(apellido1)"                       // es
+    "|(apellido.*paterno)"               // es
+    "|surname_?1|first(\\s|_)?surname";  // es
+const char kNameLastSecondRe[] =
+    "(segund.*apellido)"                  // es
+    "|(apellido2)"                        // es
+    "|(apellido.*materno)"                // es
+    "|surname_?2|second(\\s|_)?surname";  // es
+const char kHonorificPrefixRe[] =
+    "anrede|titel"                 // de-DE
+    "|tratamiento|encabezamiento"  // es
+    "|^title:?$"  // Matched only if there is no prefix or suffix.
+    "|(salutation(?! and given name))"  // en
+    "|titolo"                           // it-IT
+    "|titre"                            // fr-FR
+    "|обраще́ние|зва́ние"                 // ru
+    "|προσφώνηση"                       // el
+    "|hitap";                           // tr
 /////////////////////////////////////////////////////////////////////////////
 // phone_field.cc
 /////////////////////////////////////////////////////////////////////////////

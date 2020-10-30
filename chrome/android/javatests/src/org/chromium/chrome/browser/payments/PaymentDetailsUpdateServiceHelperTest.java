@@ -24,10 +24,9 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.browser.Features.EnableFeatures;
 import org.chromium.components.payments.Address;
 import org.chromium.components.payments.ErrorStrings;
@@ -41,7 +40,6 @@ import org.chromium.components.payments.intent.WebPaymentIntentHelperType.Paymen
 import org.chromium.components.payments.intent.WebPaymentIntentHelperType.PaymentHandlerMethodData;
 import org.chromium.components.payments.intent.WebPaymentIntentHelperType.PaymentRequestDetailsUpdate;
 import org.chromium.components.payments.intent.WebPaymentIntentHelperType.PaymentShippingOption;
-import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.payments.mojom.PaymentAddress;
@@ -59,8 +57,7 @@ public class PaymentDetailsUpdateServiceHelperTest {
     private static final int DECODER_STARTUP_TIMEOUT_IN_MS = 10000;
 
     @Rule
-    public ChromeActivityTestRule<ChromeActivity> mRule =
-            new ChromeActivityTestRule<>(ChromeActivity.class);
+    public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
 
     @Rule
     public ExpectedException thrown = ExpectedException.none();
@@ -109,8 +106,8 @@ public class PaymentDetailsUpdateServiceHelperTest {
 
     @Before
     public void setUp() throws Throwable {
-        mRule.startMainActivityOnBlankPage();
-        mContext = mRule.getActivity();
+        mActivityTestRule.startMainActivityOnBlankPage();
+        mContext = mActivityTestRule.getActivity();
     }
 
     private void installPaymentApp() {
@@ -122,7 +119,7 @@ public class PaymentDetailsUpdateServiceHelperTest {
 
     private void installAndInvokePaymentApp() throws Throwable {
         installPaymentApp();
-        mRule.runOnUiThread(() -> {
+        mActivityTestRule.runOnUiThread(() -> {
             PaymentDetailsUpdateServiceHelper.getInstance().initialize(
                     mPackageManager, /*packageName=*/"com.bobpay", mUpdateListener);
         });
@@ -134,8 +131,8 @@ public class PaymentDetailsUpdateServiceHelperTest {
 
         // Populate shipping options.
         List<PaymentShippingOption> shippingOptions = new ArrayList<PaymentShippingOption>();
-        shippingOptions.add(new PaymentShippingOption(
-                "shippingId", "Free shipping", "CAD", "0.00", /*selected=*/true));
+        shippingOptions.add(new PaymentShippingOption("shippingId", "Free shipping",
+                new PaymentCurrencyAmount("CAD", "0.00"), /*selected=*/true));
 
         // Populate address errors.
         Bundle bundledShippingAddressErrors = new Bundle();
@@ -179,11 +176,10 @@ public class PaymentDetailsUpdateServiceHelperTest {
                 shippingOption.getString(PaymentShippingOption.EXTRA_SHIPPING_OPTION_ID));
         Assert.assertEquals("Free shipping",
                 shippingOption.getString(PaymentShippingOption.EXTRA_SHIPPING_OPTION_LABEL));
-        Assert.assertEquals("CAD",
-                shippingOption.getString(
-                        PaymentShippingOption.EXTRA_SHIPPING_OPTION_AMOUNT_CURRENCY));
-        Assert.assertEquals("0.00",
-                shippingOption.getString(PaymentShippingOption.EXTRA_SHIPPING_OPTION_AMOUNT_VALUE));
+        Bundle amount =
+                shippingOption.getBundle(PaymentShippingOption.EXTRA_SHIPPING_OPTION_AMOUNT);
+        Assert.assertEquals("CAD", amount.getString(PaymentCurrencyAmount.EXTRA_CURRENCY));
+        Assert.assertEquals("0.00", amount.getString(PaymentCurrencyAmount.EXTRA_VALUE));
         Assert.assertTrue(
                 shippingOption.getBoolean(PaymentShippingOption.EXTRA_SHIPPING_OPTION_SELECTED));
 
@@ -215,11 +211,8 @@ public class PaymentDetailsUpdateServiceHelperTest {
         intent.setAction(IPaymentDetailsUpdateService.class.getName());
         mContext.bindService(intent, mConnection, Context.BIND_AUTO_CREATE);
 
-        CriteriaHelper.pollUiThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return mBound;
-            }
+        CriteriaHelper.pollUiThread(() -> {
+            return mBound;
         }, DECODER_STARTUP_TIMEOUT_IN_MS, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
     }
 

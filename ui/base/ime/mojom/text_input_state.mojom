@@ -11,6 +11,12 @@ import "ui/base/ime/mojom/virtual_keyboard_types.mojom";
 import "ui/gfx/geometry/mojom/geometry.mojom";
 import "ui/gfx/range/mojom/range.mojom";
 
+// This structure contains ime text span and its bounds.
+struct ImeTextSpanInfo {
+  ui.mojom.ImeTextSpan span;
+  gfx.mojom.Rect bounds;
+};
+
 // This structure represents the current editing state.
 struct TextInputState {
   // Type of the input field.
@@ -27,7 +33,7 @@ struct TextInputState {
   uint32 flags;
 
   // The value of input field.
-  mojo_base.mojom.String16? value;
+  mojo_base.mojom.BigString16? value;
 
   // The current selection range, or the caret position if nothing is selected.
   gfx.mojom.Range selection;
@@ -64,5 +70,8 @@ struct TextInputState {
   // authors when the virtualkeyboardpolicy is manual.
   ui.mojom.VirtualKeyboardVisibilityRequest last_vk_visibility_request =
     ui.mojom.VirtualKeyboardVisibilityRequest.NONE;
+
+  // Information of ime text spans at the cursor position.
+  array<ImeTextSpanInfo> ime_text_spans_info;
 };
 

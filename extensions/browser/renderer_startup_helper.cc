@@ -128,10 +128,10 @@ void RendererStartupHelper::InitializeProcess(
   process->Send(new ExtensionMsg_SetSystemFont(webui::GetFontFamily(),
                                                webui::GetFontSize()));
 
-  // Scripting whitelist. This is modified by tests and must be communicated
+  // Scripting allowlist. This is modified by tests and must be communicated
   // to renderers.
-  process->Send(new ExtensionMsg_SetScriptingWhitelist(
-      extensions::ExtensionsClient::Get()->GetScriptingWhitelist()));
+  process->Send(new ExtensionMsg_SetScriptingAllowlist(
+      extensions::ExtensionsClient::Get()->GetScriptingAllowlist()));
 
   // If the new render process is a WebView guest process, propagate the WebView
   // partition ID to it.
@@ -158,7 +158,7 @@ void RendererStartupHelper::InitializeProcess(
   const ExtensionSet& extensions =
       ExtensionRegistry::Get(browser_context_)->enabled_extensions();
   for (const auto& ext : extensions) {
-    // OnLoadedExtension should have already been called for the extension.
+    // OnExtensionLoaded should have already been called for the extension.
     DCHECK(base::Contains(extension_process_map_, ext->id()));
     DCHECK(!base::Contains(extension_process_map_[ext->id()], process));
 

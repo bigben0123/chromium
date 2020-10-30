@@ -4,6 +4,7 @@
 
 package org.chromium.weblayer_private.test_interfaces;
 
+import android.os.Bundle;
 import org.chromium.weblayer_private.interfaces.IObjectWrapper;
 import org.chromium.weblayer_private.interfaces.ITab;
 
@@ -38,10 +39,28 @@ interface ITestWebLayer {
   void addInfoBar(in ITab tab, in IObjectWrapper runnable) = 10;
 
   // Gets the infobar container view associated with |tab|.
-  IObjectWrapper getInfoBarContainerView(in ITab tab) = 11;
+  IObjectWrapper /* View */ getInfoBarContainerView(in ITab tab) = 11;
 
   void setIgnoreMissingKeyForTranslateManager(in boolean ignore) = 12;
   void forceNetworkConnectivityState(in boolean networkAvailable) = 13;
 
   boolean canInfoBarContainerScroll(in ITab tab) = 14;
+
+  String getDisplayedUrl(IObjectWrapper /* View */ urlBarView) = 15;
+
+  // Returns the target language of the currently-showing translate infobar, or null if no translate
+  // infobar is currently showing.
+  String getTranslateInfoBarTargetLanguage(in ITab tab) = 16;
+
+  // Returns true if a fullscreen toast was shown for |tab|.
+  boolean didShowFullscreenToast(in ITab tab) = 17;
+
+  // Does setup for MediaRouter tests, mocking out Chromecast devices.
+  void initializeMockMediaRouteProvider(
+      boolean closeRouteWithErrorOnSend, boolean disableIsSupportsSource,
+      in String createRouteErrorMessage, in String joinRouteErrorMessage) = 18;
+
+  // Gets a button from the currently visible media route selection dialog. The button represents a
+  // route and contains the text |name|. Returns null if no such dialog or button exists.
+  IObjectWrapper /* View */ getMediaRouteButton(String name) = 19;
 }

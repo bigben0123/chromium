@@ -783,12 +783,12 @@ void PageLoadTracker::UpdateFeaturesUsage(
   }
 }
 
-void PageLoadTracker::UpdateThroughput(
-    mojom::ThroughputUkmDataPtr throughput_data) {
-  if (!throughput_data)
-    return;
-  for (const auto& observer : observers_)
-    observer->OnThroughputUpdate(throughput_data);
+void PageLoadTracker::SetUpSharedMemoryForSmoothness(
+    base::ReadOnlySharedMemoryRegion shared_memory) {
+  DCHECK(shared_memory.IsValid());
+  for (auto& observer : observers_) {
+    observer->SetUpSharedMemoryForSmoothness(shared_memory);
+  }
 }
 
 void PageLoadTracker::UpdateResourceDataUse(
@@ -902,6 +902,10 @@ const PageRenderData& PageLoadTracker::GetPageRenderData() const {
 const mojom::InputTiming& PageLoadTracker::GetPageInputTiming() const {
   return metrics_update_dispatcher_.page_input_timing();
 }
+const blink::MobileFriendliness& PageLoadTracker::GetMobileFriendliness()
+    const {
+  return metrics_update_dispatcher_.mobile_friendliness();
+}
 
 const PageRenderData& PageLoadTracker::GetMainFrameRenderData() const {
   return metrics_update_dispatcher_.main_frame_render_data();
@@ -926,7 +930,7 @@ PageLoadTracker::GetExperimentalLargestContentfulPaintHandler() const {
   return experimental_largest_contentful_paint_handler_;
 }
 
-ukm::SourceId PageLoadTracker::GetSourceId() const {
+ukm::SourceId PageLoadTracker::GetPageUkmSourceId() const {
   return source_id_;
 }
 
@@ -959,8 +963,8 @@ void PageLoadTracker::OnRestoreFromBackForwardCache(
     PageShown();
 
   for (const auto& observer : observers_) {
-    observer->OnRestoreFromBackForwardCache(
-        metrics_update_dispatcher_.timing());
+    observer->OnRestoreFromBackForwardCache(metrics_update_dispatcher_.timing(),
+                                            navigation_handle);
   }
 }
 

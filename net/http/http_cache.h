@@ -272,6 +272,18 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
   // Function to generate cache key for testing.
   static std::string GenerateCacheKeyForTest(const HttpRequestInfo* request);
 
+  // Enable split cache feature if not already overridden in the feature list.
+  // Should only be invoked during process initialization before the HTTP
+  // cache is initialized.
+  static void SplitCacheFeatureEnableByDefault();
+
+  // Returns true if split cache is enabled either by default or by other means
+  // like command line or field trials.
+  static bool IsSplitCacheEnabled();
+
+  // Resets g_init_cache and g_enable_split_cache for tests.
+  static void ClearGlobalsForTesting();
+
  private:
   // Types --------------------------------------------------------------------
 
@@ -317,7 +329,7 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
   FRIEND_TEST_ALL_PREFIXES(HttpCacheTest, SplitCacheWithFrameOrigin);
   FRIEND_TEST_ALL_PREFIXES(HttpCacheTest, NonSplitCache);
   FRIEND_TEST_ALL_PREFIXES(HttpCacheTest, SplitCache);
-  FRIEND_TEST_ALL_PREFIXES(HttpCacheTest, SplitCacheWithRegistrableDomain);
+  FRIEND_TEST_ALL_PREFIXES(HttpCacheTest, SplitCacheUsesRegistrableDomain);
 
   using TransactionList = std::list<Transaction*>;
   using TransactionSet = std::unordered_set<Transaction*>;
@@ -396,7 +408,6 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
       std::unordered_map<std::string, std::unique_ptr<ActiveEntry>>;
   using PendingOpsMap = std::unordered_map<std::string, PendingOp*>;
   using ActiveEntriesSet = std::map<ActiveEntry*, std::unique_ptr<ActiveEntry>>;
-  using PlaybackCacheMap = std::unordered_map<std::string, int>;
 
   // Methods ------------------------------------------------------------------
 
@@ -665,8 +676,6 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
 
   // The set of entries "under construction".
   PendingOpsMap pending_ops_;
-
-  std::unique_ptr<PlaybackCacheMap> playback_cache_map_;
 
   // A clock that can be swapped out for testing.
   base::Clock* clock_;

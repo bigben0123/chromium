@@ -14,16 +14,16 @@ import 'chrome://resources/cr_elements/shared_vars_css.m.js';
 import 'chrome://resources/polymer/v3_0/iron-list/iron-list.js';
 
 import {getToastManager} from 'chrome://resources/cr_elements/cr_toast/cr_toast_manager.m.js';
+import {FindShortcutBehavior} from 'chrome://resources/cr_elements/find_shortcut_behavior.m.js';
 import {assert} from 'chrome://resources/js/assert.m.js';
-import {FindShortcutBehavior} from 'chrome://resources/js/find_shortcut_behavior.m.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {PromiseResolver} from 'chrome://resources/js/promise_resolver.m.js';
 import {queryRequiredElement} from 'chrome://resources/js/util.m.js';
-import {IronA11yAnnouncer} from 'chrome://resources/polymer/v3_0/iron-a11y-announcer/iron-a11y-announcer.js';
-import {afterNextRender, html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {BrowserProxy} from './browser_proxy.js';
 import {States} from './constants.js';
+import {PageCallbackRouter, PageHandlerInterface} from './downloads.mojom-webui.js';
 import {SearchService} from './search_service.js';
 
 Polymer({
@@ -85,10 +85,10 @@ Polymer({
     'itemsChanged_(items_.*)',
   ],
 
-  /** @private {downloads.mojom.PageCallbackRouter} */
+  /** @private {PageCallbackRouter} */
   mojoEventTarget_: null,
 
-  /** @private {downloads.mojom.PageHandlerInterface} */
+  /** @private {PageHandlerInterface} */
   mojoHandler_: null,
 
   /** @private {?SearchService} */
@@ -143,10 +143,6 @@ Polymer({
     });
 
     this.searchService_.loadMore();
-
-    afterNextRender(this, function() {
-      IronA11yAnnouncer.requestAvailability();
-    });
   },
 
   /** @override */
@@ -266,10 +262,10 @@ Polymer({
     }
 
     this.mojoHandler_.clearAll();
-    getToastManager().show(loadTimeData.getString('toastClearedAll'));
-    this.fire('iron-announce', {
-      text: loadTimeData.getString('undoDescription'),
-    });
+    const canUndo =
+        this.items_.some(data => !data.isDangerous && !data.isMixedContent);
+    getToastManager().show(loadTimeData.getString('toastClearedAll'),
+        /* hideSlotted= */ !canUndo);
   },
 
   /** @private */

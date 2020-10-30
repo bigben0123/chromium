@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 #include "base/logging.h"
@@ -46,12 +47,14 @@
 #include "gpu/command_buffer/common/shared_image_trace_utils.h"
 #include "gpu/command_buffer/common/shared_image_usage.h"
 #include "gpu/config/gpu_feature_info.h"
+#include "skia/ext/legacy_display_globals.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
 #include "third_party/skia/include/core/SkFont.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkTypeface.h"
+#include "third_party/skia/include/gpu/GrDirectContext.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/geometry/size_conversions.h"
@@ -166,8 +169,9 @@ bool HeadsUpDisplayLayerImpl::WillDraw(
   return true;
 }
 
-void HeadsUpDisplayLayerImpl::AppendQuads(viz::RenderPass* render_pass,
-                                          AppendQuadsData* append_quads_data) {
+void HeadsUpDisplayLayerImpl::AppendQuads(
+    viz::CompositorRenderPass* render_pass,
+    AppendQuadsData* append_quads_data) {
   viz::SharedQuadState* shared_quad_state =
       render_pass->CreateAndAppendSharedQuadState();
   PopulateScaledSharedQuadState(shared_quad_state, internal_contents_scale_,
@@ -191,7 +195,7 @@ void HeadsUpDisplayLayerImpl::UpdateHudTexture(
     LayerTreeFrameSink* layer_tree_frame_sink,
     viz::ClientResourceProvider* resource_provider,
     bool gpu_raster,
-    const viz::RenderPassList& list) {
+    const viz::CompositorRenderPassList& list) {
   if (draw_mode == DRAW_MODE_RESOURCELESS_SOFTWARE)
     return;
 
@@ -270,9 +274,10 @@ void HeadsUpDisplayLayerImpl::UpdateHudTexture(
       }
       if (backing->overlay_candidate)
         flags |= gpu::SHARED_IMAGE_USAGE_SCANOUT;
-      backing->mailbox =
-          sii->CreateSharedImage(pool_resource.format(), pool_resource.size(),
-                                 pool_resource.color_space(), flags);
+      backing->mailbox = sii->CreateSharedImage(
+          pool_resource.format(), pool_resource.size(),
+          pool_resource.color_space(), kTopLeft_GrSurfaceOrigin,
+          kPremul_SkAlphaType, flags, gpu::kNullSurfaceHandle);
       if (raster_context_provider) {
         auto* ri = raster_context_provider->RasterInterface();
         ri->WaitSyncTokenCHROMIUM(sii->GenUnverifiedSyncToken().GetConstData());
@@ -364,7 +369,9 @@ void HeadsUpDisplayLayerImpl::UpdateHudTexture(
             context_provider->GrContext(),
             pool_resource.color_space().ToSkColorSpace(), mailbox_texture_id,
             backing->texture_target, pool_resource.size(),
-            pool_resource.format(), false /* can_use_lcd_text */,
+            pool_resource.format(),
+            skia::LegacyDisplayGlobals::ComputeSurfaceProps(
+                false /* can_use_lcd_text */),
             0 /* msaa_sample_count */);
         SkSurface* surface = scoped_surface.surface();
         if (!surface) {
@@ -391,8 +398,9 @@ void HeadsUpDisplayLayerImpl::UpdateHudTexture(
     if (!staging_surface_ ||
         gfx::SkISizeToSize(staging_surface_->getCanvas()->getBaseLayerSize()) !=
             pool_resource.size()) {
+      SkSurfaceProps props = skia::LegacyDisplayGlobals::GetSkSurfaceProps();
       staging_surface_ = SkSurface::MakeRasterN32Premul(
-          pool_resource.size().width(), pool_resource.size().height());
+          pool_resource.size().width(), pool_resource.size().height(), &props);
     }
 
     SkiaPaintCanvas canvas(staging_surface_->getCanvas());
@@ -431,8 +439,9 @@ void HeadsUpDisplayLayerImpl::UpdateHudTexture(
         pool_resource.size().width(), pool_resource.size().height());
     auto* backing =
         static_cast<HudSoftwareBacking*>(pool_resource.software_backing());
+    SkSurfaceProps props = skia::LegacyDisplayGlobals::GetSkSurfaceProps();
     sk_sp<SkSurface> surface = SkSurface::MakeRasterDirect(
-        info, backing->shared_mapping.memory(), info.minRowBytes());
+        info, backing->shared_mapping.memory(), info.minRowBytes(), &props);
 
     SkiaPaintCanvas canvas(surface->getCanvas());
     DrawHudContents(&canvas);
@@ -664,9 +673,9 @@ SkRect HeadsUpDisplayLayerImpl::DrawFrameThroughputDisplay(
       SkRect::MakeXYWH(left + kPadding, text_bounds.bottom() + 2 * kPadding,
                        kGraphWidth, kGraphHeight);
 
-  // Draw the fps meter.
+  // Draw the frame rendering stats.
   const std::string title("Frames");
-  const std::string value_text = base::StringPrintf("%d %%", throughput_value_);
+  const std::string value_text = base::StringPrintf("%d%%", throughput_value_);
   const std::string dropped_frames_text =
       base::StringPrintf("%zu (%zu m) dropped of %zu",
                          dropped_frame_counter->total_compositor_dropped(),
@@ -708,13 +717,13 @@ SkRect HeadsUpDisplayLayerImpl::DrawFrameThroughputDisplay(
   flags.setStyle(PaintFlags::kStroke_Style);
   flags.setStrokeWidth(1);
 
-  flags.setColor(SkColorSetA(SK_ColorGREEN, 128));
+  flags.setColor(DebugColors::FPSDisplaySuccessfulFrame());
   canvas->drawPath(good_path, flags);
 
-  flags.setColor(SkColorSetA(SK_ColorRED, 128));
+  flags.setColor(DebugColors::FPSDisplayDroppedFrame());
   canvas->drawPath(dropped_path, flags);
 
-  flags.setColor(SkColorSetA(SK_ColorYELLOW, 255));
+  flags.setColor(DebugColors::FPSDisplayMissedFrame());
   canvas->drawPath(partial_path, flags);
 
   return area;
@@ -732,7 +741,7 @@ SkRect HeadsUpDisplayLayerImpl::DrawMemoryDisplay(PaintCanvas* canvas,
   const int left = 0;
   const SkRect area = SkRect::MakeXYWH(left, top, width, height);
 
-  const double kMegabyte = 1024.0 * 1024.0;
+  const double kMegabyte = 1000.0 * 1000.0;
 
   PaintFlags flags;
   DrawGraphBackground(canvas, &flags, area);
@@ -745,7 +754,7 @@ SkRect HeadsUpDisplayLayerImpl::DrawMemoryDisplay(PaintCanvas* canvas,
                                     top + 2 * kPadding + 3 * kFontHeight);
 
   flags.setColor(DebugColors::HUDTitleColor());
-  DrawText(canvas, flags, "GPU Memory", TextAlign::kLeft, kTitleFontHeight,
+  DrawText(canvas, flags, "GPU memory", TextAlign::kLeft, kTitleFontHeight,
            title_pos);
 
   flags.setColor(DebugColors::MemoryDisplayTextColor());
@@ -774,7 +783,7 @@ SkRect HeadsUpDisplayLayerImpl::DrawMemoryDisplay(PaintCanvas* canvas,
   int radius = length / 2;
   int cx = oval.left() + radius;
   int cy = oval.top() + radius;
-  double angle = ((double)memory_entry_.total_bytes_used /
+  double angle = (static_cast<double>(memory_entry_.total_bytes_used) /
                   memory_entry_.total_budget_in_bytes) *
                  180;
 
@@ -839,7 +848,7 @@ SkRect HeadsUpDisplayLayerImpl::DrawGpuRasterizationStatus(PaintCanvas* canvas,
   SkPoint gpu_status_pos = SkPoint::Make(left + width - kPadding,
                                          top + 2 * kFontHeight + 2 * kPadding);
   flags.setColor(DebugColors::HUDTitleColor());
-  DrawText(canvas, flags, "GPU Raster", TextAlign::kLeft, kTitleFontHeight,
+  DrawText(canvas, flags, "GPU raster", TextAlign::kLeft, kTitleFontHeight,
            left + kPadding, top + kFontHeight + kPadding);
   flags.setColor(color);
   DrawText(canvas, flags, status, TextAlign::kRight, kFontHeight,

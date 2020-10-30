@@ -32,10 +32,10 @@
 
 namespace views {
 
-LabelButton::LabelButton(ButtonListener* listener,
+LabelButton::LabelButton(PressedCallback callback,
                          const base::string16& text,
                          int button_context)
-    : Button(listener),
+    : Button(std::move(callback)),
       cached_normal_font_list_(
           style::GetFont(button_context, style::STYLE_PRIMARY)),
       cached_default_button_font_list_(
@@ -44,10 +44,10 @@ LabelButton::LabelButton(ButtonListener* listener,
   ink_drop_container_->SetVisible(false);
 
   image_ = AddChildView(std::make_unique<ImageView>());
-  image_->set_can_process_events_within_subtree(false);
+  image_->SetCanProcessEventsWithinSubtree(false);
 
-  label_ =
-      AddChildView(std::make_unique<LabelButtonLabel>(text, button_context));
+  label_ = AddChildView(
+      std::make_unique<internal::LabelButtonLabel>(text, button_context));
   label_->SetAutoColorReadabilityEnabled(false);
   label_->SetHorizontalAlignment(gfx::ALIGN_TO_HEAD);
 
@@ -55,13 +55,15 @@ LabelButton::LabelButton(ButtonListener* listener,
   SetTextInternal(text);
 }
 
+LabelButton::LabelButton(ButtonListener* listener,
+                         const base::string16& text,
+                         int button_context)
+    : LabelButton(PressedCallback(listener, this), text, button_context) {}
+
 LabelButton::~LabelButton() = default;
 
 gfx::ImageSkia LabelButton::GetImage(ButtonState for_state) const {
-  if (for_state != STATE_NORMAL &&
-      button_state_image_models_[for_state].IsEmpty()) {
-    for_state = STATE_NORMAL;
-  }
+  for_state = ImageStateForState(for_state);
 
   const auto& image_model = button_state_image_models_[for_state];
   if (image_model.IsImage())
@@ -81,8 +83,16 @@ void LabelButton::SetImage(ButtonState for_state, const gfx::ImageSkia& image) {
 
 void LabelButton::SetImageModel(ButtonState for_state,
                                 const ui::ImageModel& image_model) {
+  if (button_state_image_models_[for_state] == image_model)
+    return;
+
+  const auto old_image_state = ImageStateForState(GetVisualState());
+
   button_state_image_models_[for_state] = image_model;
-  UpdateImage();
+
+  if (for_state == old_image_state ||
+      for_state == ImageStateForState(GetVisualState()))
+    UpdateImage();
 }
 
 const base::string16& LabelButton::GetText() const {
@@ -107,7 +117,7 @@ void LabelButton::SetTextColor(ButtonState for_state, SkColor color) {
   button_state_colors_[for_state] = color;
   if (for_state == STATE_DISABLED)
     label_->SetDisabledColor(color);
-  else if (for_state == state())
+  else if (for_state == GetState())
     label_->SetEnabledColor(color);
   explicitly_set_colors_[for_state] = true;
 }
@@ -122,6 +132,10 @@ void LabelButton::SetEnabledTextColors(base::Optional<SkColor> color) {
   for (auto state : states)
     explicitly_set_colors_[state] = false;
   ResetColorsFromNativeTheme();
+}
+
+SkColor LabelButton::GetCurrentTextColor() const {
+  return label_->GetEnabledColor();
 }
 
 void LabelButton::SetTextShadows(const gfx::ShadowValues& shadows) {
@@ -156,8 +170,7 @@ void LabelButton::SetMinSize(const gfx::Size& min_size) {
   if (GetMinSize() == min_size)
     return;
   min_size_ = min_size;
-  ResetCachedPreferredSize();
-  OnPropertyChanged(&min_size_, kPropertyEffectsNone);
+  OnPropertyChanged(&min_size_, kPropertyEffectsPreferredSizeChanged);
 }
 
 gfx::Size LabelButton::GetMaxSize() const {
@@ -168,8 +181,7 @@ void LabelButton::SetMaxSize(const gfx::Size& max_size) {
   if (GetMaxSize() == max_size)
     return;
   max_size_ = max_size;
-  ResetCachedPreferredSize();
-  OnPropertyChanged(&max_size_, kPropertyEffectsNone);
+  OnPropertyChanged(&max_size_, kPropertyEffectsPreferredSizeChanged);
 }
 
 bool LabelButton::GetIsDefault() const {
@@ -181,6 +193,11 @@ void LabelButton::SetIsDefault(bool is_default) {
   if (GetIsDefault() == is_default)
     return;
   is_default_ = is_default;
+
+  // The default button has an accelerator for VKEY_RETURN, which clicks it.
+  // Note that if PlatformStyle::kReturnClicksFocusedControl is true and another
+  // button is focused, that button's VKEY_RETURN handler will take precedence.
+  // See Button::GetKeyClickActionForEvent().
   ui::Accelerator accel(ui::VKEY_RETURN, ui::EF_NONE);
   if (is_default)
     AddAccelerator(accel);
@@ -197,8 +214,8 @@ void LabelButton::SetImageLabelSpacing(int spacing) {
   if (GetImageLabelSpacing() == spacing)
     return;
   image_label_spacing_ = spacing;
-  ResetCachedPreferredSize();
-  OnPropertyChanged(&image_label_spacing_, kPropertyEffectsLayout);
+  OnPropertyChanged(&image_label_spacing_,
+                    kPropertyEffectsPreferredSizeChanged);
 }
 
 bool LabelButton::GetImageCentered() const {
@@ -221,7 +238,6 @@ std::unique_ptr<LabelButtonBorder> LabelButton::CreateDefaultBorder() const {
 void LabelButton::SetBorder(std::unique_ptr<Border> border) {
   border_is_themed_border_ = false;
   View::SetBorder(std::move(border));
-  ResetCachedPreferredSize();
 }
 
 void LabelButton::OnBoundsChanged(const gfx::Rect& previous_bounds) {
@@ -230,34 +246,27 @@ void LabelButton::OnBoundsChanged(const gfx::Rect& previous_bounds) {
 }
 
 gfx::Size LabelButton::CalculatePreferredSize() const {
-  // Cache the computed size, as recomputing it is an expensive operation.
-  if (!cached_preferred_size_) {
-    gfx::Size size = GetUnclampedSizeWithoutLabel();
+  gfx::Size size = GetUnclampedSizeWithoutLabel();
 
-    // Disregard label in the preferred size if the button is shrinking down to
-    // show no label soon.
-    if (!shrinking_down_label_) {
-      const gfx::Size preferred_label_size = label_->GetPreferredSize();
-      size.Enlarge(preferred_label_size.width(), 0);
-
-      // Increase the height of the label (with insets) if larger.
-      size.set_height(std::max(
-          preferred_label_size.height() + GetInsets().height(), size.height()));
-    }
-
-    size.SetToMax(GetMinSize());
-
-    // Clamp size to max size (if valid).
-    const gfx::Size max_size = GetMaxSize();
-    if (max_size.width() > 0)
-      size.set_width(std::min(max_size.width(), size.width()));
-    if (max_size.height() > 0)
-      size.set_height(std::min(max_size.height(), size.height()));
-
-    cached_preferred_size_ = size;
+  // Account for the label only when the button is not shrinking down to hide
+  // the label entirely.
+  if (!shrinking_down_label_) {
+    const gfx::Size preferred_label_size = label_->GetPreferredSize();
+    size.Enlarge(preferred_label_size.width(), 0);
+    size.SetToMax(
+        gfx::Size(0, preferred_label_size.height() + GetInsets().height()));
   }
 
-  return cached_preferred_size_.value();
+  size.SetToMax(GetMinSize());
+
+  // Clamp size to max size (if valid).
+  const gfx::Size max_size = GetMaxSize();
+  if (max_size.width() > 0)
+    size.set_width(std::min(max_size.width(), size.width()));
+  if (max_size.height() > 0)
+    size.set_height(std::min(max_size.height(), size.height()));
+
+  return size;
 }
 
 gfx::Size LabelButton::GetMinimumSize() const {
@@ -368,11 +377,6 @@ void LabelButton::Layout() {
   Button::Layout();
 }
 
-void LabelButton::EnableCanvasFlippingForRTLUI(bool flip) {
-  Button::EnableCanvasFlippingForRTLUI(flip);
-  image_->EnableCanvasFlippingForRTLUI(flip);
-}
-
 void LabelButton::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   if (GetIsDefault())
     node_data->AddState(ax::mojom::State::kDefault);
@@ -390,7 +394,7 @@ gfx::Rect LabelButton::GetThemePaintRect() const {
 ui::NativeTheme::State LabelButton::GetThemeState(
     ui::NativeTheme::ExtraParams* params) const {
   GetExtraParams(params);
-  switch (state()) {
+  switch (GetState()) {
     case STATE_NORMAL:
       return ui::NativeTheme::kNormal;
     case STATE_HOVERED:
@@ -400,7 +404,7 @@ ui::NativeTheme::State LabelButton::GetThemeState(
     case STATE_DISABLED:
       return ui::NativeTheme::kDisabled;
     case STATE_COUNT:
-      NOTREACHED() << "Unknown state: " << state();
+      NOTREACHED();
   }
   return ui::NativeTheme::kNormal;
 }
@@ -422,19 +426,7 @@ ui::NativeTheme::State LabelButton::GetForegroundThemeState(
 }
 
 void LabelButton::UpdateImage() {
-  const gfx::Size old_preferred_size = image_->GetPreferredSize();
   image_->SetImage(GetImage(GetVisualState()));
-  if (old_preferred_size != image_->GetPreferredSize())
-    ResetCachedPreferredSize();
-}
-
-void LabelButton::UpdateThemedBorder() {
-  // Don't override borders set by others.
-  if (!border_is_themed_border_)
-    return;
-
-  SetBorder(PlatformStyle::CreateThemedLabelButtonBorder(this));
-  border_is_themed_border_ = true;
 }
 
 void LabelButton::AddLayerBeneathView(ui::Layer* new_layer) {
@@ -471,16 +463,25 @@ PropertyEffects LabelButton::UpdateStyleToIndicateDefaultStatus() {
   label_->SetFontList(GetIsDefault() ? cached_default_button_font_list_
                                      : cached_normal_font_list_);
   ResetLabelEnabledColor();
-  return kPropertyEffectsLayout;
+  return kPropertyEffectsPreferredSizeChanged;
 }
 
 void LabelButton::ChildPreferredSizeChanged(View* child) {
   PreferredSizeChanged();
 }
 
-void LabelButton::PreferredSizeChanged() {
-  ResetCachedPreferredSize();
-  Button::PreferredSizeChanged();
+void LabelButton::AddedToWidget() {
+  if (PlatformStyle::kInactiveWidgetControlsAppearDisabled) {
+    paint_as_active_subscription_ =
+        GetWidget()->RegisterPaintAsActiveChangedCallback(base::BindRepeating(
+            &LabelButton::VisualStateChanged, base::Unretained(this)));
+    // Set the initial state correctly.
+    VisualStateChanged();
+  }
+}
+
+void LabelButton::RemovedFromWidget() {
+  paint_as_active_subscription_.reset();
 }
 
 void LabelButton::OnFocus() {
@@ -499,23 +500,18 @@ void LabelButton::OnThemeChanged() {
   Button::OnThemeChanged();
   ResetColorsFromNativeTheme();
   UpdateImage();
-  UpdateThemedBorder();
+  if (border_is_themed_border_)
+    View::SetBorder(PlatformStyle::CreateThemedLabelButtonBorder(this));
   ResetLabelEnabledColor();
-  // Invalidate the layout to pickup the new insets from the border.
-  InvalidateLayout();
   // The entire button has to be repainted here, since the native theme can
   // define the tint for the entire background/border/focus ring.
   SchedulePaint();
 }
 
 void LabelButton::StateChanged(ButtonState old_state) {
-  const gfx::Size previous_image_size(image_->GetPreferredSize());
-  UpdateImage();
-  ResetLabelEnabledColor();
-  label_->SetEnabled(state() != STATE_DISABLED);
-  if (image_->GetPreferredSize() != previous_image_size)
-    InvalidateLayout();
   Button::StateChanged(old_state);
+  ResetLabelEnabledColor();
+  VisualStateChanged();
 }
 
 void LabelButton::SetTextInternal(const base::string16& text) {
@@ -523,30 +519,24 @@ void LabelButton::SetTextInternal(const base::string16& text) {
   label_->SetText(text);
 
   // Setting text cancels ShrinkDownThenClearText().
-  if (shrinking_down_label_) {
-    shrinking_down_label_ = false;
-    PreferredSizeChanged();
-  }
+  const auto effects = shrinking_down_label_
+                           ? kPropertyEffectsPreferredSizeChanged
+                           : kPropertyEffectsNone;
+  shrinking_down_label_ = false;
 
   // TODO(pkasting): Remove this and forward callback subscriptions to the
   // underlying label property when Label is converted to properties.
-  OnPropertyChanged(label_, kPropertyEffectsNone);
+  OnPropertyChanged(label_, effects);
 }
 
 void LabelButton::ClearTextIfShrunkDown() {
-  if (!cached_preferred_size_)
-    CalculatePreferredSize();
-  if (shrinking_down_label_ && width() <= cached_preferred_size_->width() &&
-      height() <= cached_preferred_size_->height()) {
+  const gfx::Size preferred_size = GetPreferredSize();
+  if (shrinking_down_label_ && width() <= preferred_size.width() &&
+      height() <= preferred_size.height()) {
     // Once the button shrinks down to its preferred size (that disregards the
     // current text), we finish the operation by clearing the text.
-    shrinking_down_label_ = false;
     SetText(base::string16());
   }
-}
-
-void LabelButton::ResetCachedPreferredSize() {
-  cached_preferred_size_ = base::nullopt;
 }
 
 gfx::Size LabelButton::GetUnclampedSizeWithoutLabel() const {
@@ -564,6 +554,20 @@ gfx::Size LabelButton::GetUnclampedSizeWithoutLabel() const {
     size.SetToMax(border()->GetMinimumSize());
 
   return size;
+}
+
+Button::ButtonState LabelButton::GetVisualState() const {
+  const auto* widget = GetWidget();
+  if (PlatformStyle::kInactiveWidgetControlsAppearDisabled && widget &&
+      widget->CanActivate() && !widget->ShouldPaintAsActive())
+    return STATE_DISABLED;
+  return GetState();
+}
+
+void LabelButton::VisualStateChanged() {
+  UpdateImage();
+  UpdateBackgroundColor();
+  label_->SetEnabled(GetVisualState() != STATE_DISABLED);
 }
 
 void LabelButton::ResetColorsFromNativeTheme() {
@@ -588,22 +592,29 @@ void LabelButton::ResetColorsFromNativeTheme() {
 }
 
 void LabelButton::ResetLabelEnabledColor() {
-  const SkColor color = button_state_colors_[state()];
-  if (state() != STATE_DISABLED && label_->GetEnabledColor() != color)
+  const SkColor color = button_state_colors_[GetState()];
+  if (GetState() != STATE_DISABLED && label_->GetEnabledColor() != color)
     label_->SetEnabledColor(color);
 }
 
-BEGIN_METADATA(LabelButton)
-METADATA_PARENT_CLASS(Button)
-ADD_PROPERTY_METADATA(LabelButton, base::string16, Text)
-ADD_PROPERTY_METADATA(LabelButton,
-                      gfx::HorizontalAlignment,
-                      HorizontalAlignment)
-ADD_PROPERTY_METADATA(LabelButton, gfx::Size, MinSize)
-ADD_PROPERTY_METADATA(LabelButton, gfx::Size, MaxSize)
-ADD_PROPERTY_METADATA(LabelButton, bool, IsDefault)
-ADD_PROPERTY_METADATA(LabelButton, int, ImageLabelSpacing)
-ADD_PROPERTY_METADATA(LabelButton, bool, ImageCentered)
-END_METADATA()
+Button::ButtonState LabelButton::ImageStateForState(
+    ButtonState for_state) const {
+  return button_state_image_models_[for_state].IsEmpty() ? STATE_NORMAL
+                                                         : for_state;
+}
+
+void LabelButton::FlipCanvasOnPaintForRTLUIChanged() {
+  image_->SetFlipCanvasOnPaintForRTLUI(GetFlipCanvasOnPaintForRTLUI());
+}
+
+BEGIN_METADATA(LabelButton, Button)
+ADD_PROPERTY_METADATA(base::string16, Text)
+ADD_PROPERTY_METADATA(gfx::HorizontalAlignment, HorizontalAlignment)
+ADD_PROPERTY_METADATA(gfx::Size, MinSize)
+ADD_PROPERTY_METADATA(gfx::Size, MaxSize)
+ADD_PROPERTY_METADATA(bool, IsDefault)
+ADD_PROPERTY_METADATA(int, ImageLabelSpacing)
+ADD_PROPERTY_METADATA(bool, ImageCentered)
+END_METADATA
 
 }  // namespace views

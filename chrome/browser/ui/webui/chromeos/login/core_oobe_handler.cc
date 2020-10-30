@@ -27,10 +27,7 @@
 #include "chrome/browser/chromeos/login/screens/reset_screen.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "chrome/browser/chromeos/policy/enrollment_requisition_manager.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
-#include "chrome/browser/chromeos/system/timezone_resolver_manager.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/ash/keyboard/chrome_keyboard_controller_client.h"
 #include "chrome/browser/ui/webui/chromeos/login/demo_setup_screen_handler.h"
@@ -111,13 +108,6 @@ void CoreOobeHandler::DeclareLocalizedValues(
   builder->Add("deviceRequisitionSharkPromptText",
                IDS_ENTERPRISE_DEVICE_REQUISITION_SHARK_PROMPT_TEXT);
 
-  // Strings for enable demo mode dialog.
-  builder->Add("enableDemoModeDialogTitle", IDS_ENABLE_DEMO_MODE_DIALOG_TITLE);
-  builder->Add("enableDemoModeDialogText", IDS_ENABLE_DEMO_MODE_DIALOG_TEXT);
-  builder->Add("enableDemoModeDialogConfirm",
-               IDS_ENABLE_DEMO_MODE_DIALOG_CONFIRM);
-  builder->Add("enableDemoModeDialogCancel",
-               IDS_ENABLE_DEMO_MODE_DIALOG_CANCEL);
 
   // Strings for Asset Identifier shown in version string.
   builder->Add("assetIdLabel", IDS_OOBE_ASSET_ID_LABEL);
@@ -133,7 +123,6 @@ void CoreOobeHandler::Initialize() {
 #else
   version_info_updater_.StartUpdate(false);
 #endif
-  UpdateDeviceRequisition();
   UpdateKeyboardState();
   UpdateClientAreaSize();
 }
@@ -149,27 +138,20 @@ void CoreOobeHandler::GetAdditionalParameters(base::DictionaryValue* dict) {
 
 void CoreOobeHandler::RegisterMessages() {
   AddCallback("screenStateInitialize", &CoreOobeHandler::HandleInitialized);
-  AddCallback("skipUpdateEnrollAfterEula",
-              &CoreOobeHandler::HandleSkipUpdateEnrollAfterEula);
   AddCallback("updateCurrentScreen",
               &CoreOobeHandler::HandleUpdateCurrentScreen);
-  AddCallback("setDeviceRequisition",
-              &CoreOobeHandler::HandleSetDeviceRequisition);
   AddCallback("skipToLoginForTesting",
               &CoreOobeHandler::HandleSkipToLoginForTesting);
   AddCallback("skipToUpdateForTesting",
               &CoreOobeHandler::HandleSkipToUpdateForTesting);
   AddCallback("launchHelpApp", &CoreOobeHandler::HandleLaunchHelpApp);
   AddCallback("toggleResetScreen", &CoreOobeHandler::HandleToggleResetScreen);
-  AddCallback("toggleEnableDebuggingScreen",
-              &CoreOobeHandler::HandleEnableDebuggingScreen);
   AddCallback("raiseTabKeyEvent", &CoreOobeHandler::HandleRaiseTabKeyEvent);
   // Note: Used by enterprise_RemoraRequisitionDisplayUsage.py:
   // TODO(felixe): Use chrome.system.display or cros_display_config.mojom,
   // https://crbug.com/858958.
   AddRawCallback("getPrimaryDisplayNameForTesting",
                  &CoreOobeHandler::HandleGetPrimaryDisplayNameForTesting);
-  AddCallback("setupDemoMode", &CoreOobeHandler::HandleSetupDemoMode);
   AddCallback("startDemoModeSetupForTesting",
               &CoreOobeHandler::HandleStartDemoModeSetupForTesting);
 
@@ -189,12 +171,6 @@ void CoreOobeHandler::ShowSignInError(
 
 void CoreOobeHandler::ShowDeviceResetScreen() {
   LaunchResetScreen();
-}
-
-void CoreOobeHandler::ShowEnableDebuggingScreen() {
-  DCHECK(LoginDisplayHost::default_host());
-  LoginDisplayHost::default_host()->StartWizard(
-      EnableDebuggingScreenView::kScreenId);
 }
 
 void CoreOobeHandler::ShowEnableAdbSideloadingScreen() {
@@ -252,13 +228,6 @@ void CoreOobeHandler::HandleInitialized() {
   AllowJavascript();
 }
 
-void CoreOobeHandler::HandleSkipUpdateEnrollAfterEula() {
-  WizardController* controller = WizardController::default_controller();
-  DCHECK(controller);
-  if (controller)
-    controller->SkipUpdateEnrollAfterEula();
-}
-
 void CoreOobeHandler::HandleUpdateCurrentScreen(
     const std::string& screen_name) {
   const OobeScreenId screen(screen_name);
@@ -270,27 +239,6 @@ void CoreOobeHandler::HandleUpdateCurrentScreen(
 void CoreOobeHandler::HandleHideOobeDialog() {
   if (LoginDisplayHost::default_host())
     LoginDisplayHost::default_host()->HideOobeDialog();
-}
-
-void CoreOobeHandler::HandleSetDeviceRequisition(
-    const std::string& requisition) {
-  std::string initial_requisition =
-      policy::EnrollmentRequisitionManager::GetDeviceRequisition();
-  policy::EnrollmentRequisitionManager::SetDeviceRequisition(requisition);
-
-  if (policy::EnrollmentRequisitionManager::IsRemoraRequisition()) {
-    // CfM devices default to static timezone.
-    g_browser_process->local_state()->SetInteger(
-        prefs::kResolveDeviceTimezoneByGeolocationMethod,
-        static_cast<int>(chromeos::system::TimeZoneResolverManager::
-                             TimeZoneResolveMethod::DISABLED));
-  }
-
-  // Exit Chrome to force the restart as soon as a new requisition is set.
-  if (initial_requisition !=
-      policy::EnrollmentRequisitionManager::GetDeviceRequisition()) {
-    chrome::AttemptRestart();
-  }
 }
 
 void CoreOobeHandler::HandleSkipToLoginForTesting() {
@@ -325,10 +273,6 @@ void CoreOobeHandler::HandleToggleResetScreenCallback(
         static_cast<int>(tpm_firmware_update_mode.value()));
   }
   LaunchResetScreen();
-}
-
-void CoreOobeHandler::HandleEnableDebuggingScreen() {
-  ShowEnableDebuggingScreen();
 }
 
 void CoreOobeHandler::ShowOobeUI(bool show) {
@@ -391,11 +335,6 @@ ui::EventSink* CoreOobeHandler::GetEventSink() {
 void CoreOobeHandler::UpdateLabel(const std::string& id,
                                   const std::string& text) {
   CallJS("cr.ui.Oobe.setLabelText", id, text);
-}
-
-void CoreOobeHandler::UpdateDeviceRequisition() {
-  CallJS("cr.ui.Oobe.updateDeviceRequisition",
-         policy::EnrollmentRequisitionManager::GetDeviceRequisition());
 }
 
 void CoreOobeHandler::UpdateKeyboardState() {
@@ -489,13 +428,6 @@ void CoreOobeHandler::GetPrimaryDisplayNameCallback(
   ResolveJavascriptCallback(callback_id, base::Value(display_name));
 }
 
-void CoreOobeHandler::HandleSetupDemoMode() {
-  WizardController* wizard_controller = WizardController::default_controller();
-  if (wizard_controller && !wizard_controller->login_screen_started()) {
-    wizard_controller->StartDemoModeSetup();
-  }
-}
-
 void CoreOobeHandler::HandleStartDemoModeSetupForTesting(
     const std::string& demo_config) {
   DemoSession::DemoModeConfig config;
@@ -519,14 +451,6 @@ void CoreOobeHandler::HandleUpdateOobeUIState(int state) {
     auto dialog_state = static_cast<ash::OobeDialogState>(state);
     LoginDisplayHost::default_host()->UpdateOobeDialogState(dialog_state);
   }
-}
-
-void CoreOobeHandler::InitDemoModeDetection() {
-  demo_mode_detector_.InitDetection();
-}
-
-void CoreOobeHandler::StopDemoModeDetection() {
-  demo_mode_detector_.StopDetection();
 }
 
 }  // namespace chromeos

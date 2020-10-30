@@ -69,10 +69,19 @@ autofill::AddressNormalizer* AutofillClientImpl::GetAddressNormalizer() {
   return nullptr;
 }
 
+const GURL& AutofillClientImpl::GetLastCommittedURL() {
+  NOTREACHED();
+  return GURL::EmptyGURL();
+}
+
 security_state::SecurityLevel
 AutofillClientImpl::GetSecurityLevelForUmaHistograms() {
   NOTREACHED();
   return security_state::SecurityLevel::SECURITY_LEVEL_COUNT;
+}
+
+const translate::LanguageState* AutofillClientImpl::GetLanguageState() {
+  return nullptr;
 }
 
 void AutofillClientImpl::ShowAutofillSettings(bool show_credit_card_settings) {

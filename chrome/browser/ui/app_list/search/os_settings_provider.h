@@ -10,6 +10,7 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "chrome/browser/ui/app_list/search/chrome_search_result.h"
 #include "chrome/browser/ui/app_list/search/search_provider.h"
 #include "chrome/browser/ui/webui/settings/chromeos/search/search.mojom.h"
@@ -52,7 +53,6 @@ class OsSettingsResult : public ChromeSearchResult {
 
   // ChromeSearchResult:
   void Open(int event_flags) override;
-  ash::SearchResultType GetSearchResultType() const override;
 
  private:
   Profile* profile_;
@@ -88,6 +88,7 @@ class OsSettingsProvider
  private:
   void OnSearchReturned(
       const base::string16& query,
+      const base::TimeTicks& start_time,
       std::vector<chromeos::settings::mojom::SearchResultPtr> results);
 
   // Given a vector of results from the SearchHandler, filters them down to a
@@ -127,6 +128,9 @@ class OsSettingsProvider
   const chromeos::settings::Hierarchy* hierarchy_;
   apps::AppServiceProxy* app_service_proxy_;
   gfx::ImageSkia icon_;
+
+  // Whether the app service has signalled the settings app as ready.
+  bool settings_app_ready_ = false;
 
   // Last query. It is reset when view is closed.
   base::string16 last_query_;

@@ -17,6 +17,7 @@
 #include "base/test/bind_test_util.h"
 #include "base/test/task_environment.h"
 #include "base/time/time.h"
+#include "net/cookies/cookie_access_result.h"
 #include "net/cookies/cookie_constants.h"
 #include "net/cookies/cookie_inclusion_status.h"
 #include "net/cookies/cookie_monster.h"
@@ -25,6 +26,7 @@
 #include "net/cookies/cookie_store_test_helpers.h"
 #include "net/cookies/cookie_util.h"
 #include "net/cookies/test_cookie_access_delegate.h"
+#include "net/url_request/url_request_context.h"
 #include "services/network/public/mojom/cookie_manager.mojom.h"
 #include "services/network/session_cleanup_cookie_store.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -152,8 +154,8 @@ class SynchronousCookieManager {
         cookie, net::cookie_util::SimulatedCookieSource(cookie, source_scheme),
         options,
         base::BindLambdaForTesting(
-            [&run_loop, &result_out](net::CookieInclusionStatus result) {
-              result_out = result;
+            [&run_loop, &result_out](net::CookieAccessResult result) {
+              result_out = result.status;
               run_loop.Quit();
             }));
 
@@ -161,7 +163,7 @@ class SynchronousCookieManager {
     return result_out.IsInclude();
   }
 
-  net::CookieInclusionStatus SetCanonicalCookieWithStatus(
+  net::CookieAccessResult SetCanonicalCookieWithAccessResult(
       const net::CanonicalCookie& cookie,
       std::string source_scheme,
       bool modify_http_only) {
@@ -171,13 +173,13 @@ class SynchronousCookieManager {
         net::CookieOptions::SameSiteCookieContext::MakeInclusive());
     if (modify_http_only)
       options.set_include_httponly();
-    net::CookieInclusionStatus result_out(
-        net::CookieInclusionStatus::EXCLUDE_UNKNOWN_ERROR);
+    auto result_out = net::CookieAccessResult(net::CookieInclusionStatus(
+        net::CookieInclusionStatus::EXCLUDE_UNKNOWN_ERROR));
     cookie_service_->SetCanonicalCookie(
         cookie, net::cookie_util::SimulatedCookieSource(cookie, source_scheme),
         options,
         base::BindLambdaForTesting(
-            [&run_loop, &result_out](net::CookieInclusionStatus result) {
+            [&run_loop, &result_out](net::CookieAccessResult result) {
               result_out = result;
               run_loop.Quit();
             }));
@@ -242,7 +244,6 @@ class SynchronousCookieManager {
   // No need to wrap Add*Listener and CloneInterface, since their use
   // is purely async.
  private:
-
   mojom::CookieManager* cookie_service_;
   uint32_t callback_counter_;
 
@@ -262,7 +263,7 @@ class CookieManagerTest : public testing::Test {
   bool SetCanonicalCookie(const net::CanonicalCookie& cookie,
                           std::string source_scheme,
                           bool can_modify_httponly) {
-    net::ResultSavingCookieCallback<net::CookieInclusionStatus> callback;
+    net::ResultSavingCookieCallback<net::CookieAccessResult> callback;
     net::CookieOptions options;
     options.set_same_site_cookie_context(
         net::CookieOptions::SameSiteCookieContext::MakeInclusive());
@@ -272,11 +273,9 @@ class CookieManagerTest : public testing::Test {
     cookie_monster_->SetCanonicalCookieAsync(
         std::make_unique<net::CanonicalCookie>(cookie),
         net::cookie_util::SimulatedCookieSource(cookie, source_scheme), options,
-        base::BindOnce(
-            &net::ResultSavingCookieCallback<net::CookieInclusionStatus>::Run,
-            base::Unretained(&callback)));
+        callback.MakeCallback());
     callback.WaitUntilDone();
-    return callback.result().IsInclude();
+    return callback.result().status.IsInclude();
   }
 
   std::string DumpAllCookies() {
@@ -341,8 +340,11 @@ class CookieManagerTest : public testing::Test {
     connection_error_seen_ = false;
     cookie_monster_ = std::make_unique<net::CookieMonster>(
         std::move(store), nullptr /* netlog */);
+    url_request_context_ = std::make_unique<net::URLRequestContext>();
+    url_request_context_->set_cookie_store(cookie_monster_.get());
     cookie_service_ = std::make_unique<CookieManager>(
-        cookie_monster_.get(), std::move(cleanup_store), nullptr);
+        url_request_context_.get(), nullptr /* preloaded_first_party_sets */,
+        std::move(cleanup_store), nullptr);
     cookie_service_->AddReceiver(
         cookie_service_remote_.BindNewPipeAndPassReceiver());
     service_wrapper_ = std::make_unique<SynchronousCookieManager>(
@@ -360,6 +362,7 @@ class CookieManagerTest : public testing::Test {
   bool connection_error_seen_;
 
   std::unique_ptr<net::CookieMonster> cookie_monster_;
+  std::unique_ptr<net::URLRequestContext> url_request_context_;
   std::unique_ptr<CookieManager> cookie_service_;
   mojo::Remote<mojom::CookieManager> cookie_service_remote_;
   std::unique_ptr<SynchronousCookieManager> service_wrapper_;
@@ -832,17 +835,19 @@ TEST_F(CookieManagerTest, DeleteThroughSet) {
 }
 
 TEST_F(CookieManagerTest, ConfirmSecureSetFails) {
-  EXPECT_TRUE(
-      service_wrapper()
-          ->SetCanonicalCookieWithStatus(
-              net::CanonicalCookie("N", "O", kCookieDomain, "/", base::Time(),
-                                   base::Time(), base::Time(),
-                                   /*secure=*/true, /*httponly=*/false,
-                                   net::CookieSameSite::NO_RESTRICTION,
-                                   net::COOKIE_PRIORITY_MEDIUM),
-              "http", false)
-          .HasExactlyExclusionReasonsForTesting(
-              {net::CookieInclusionStatus::EXCLUDE_SECURE_ONLY}));
+  net::CookieAccessResult access_result =
+      service_wrapper()->SetCanonicalCookieWithAccessResult(
+          net::CanonicalCookie("N", "O", kCookieDomain, "/", base::Time(),
+                               base::Time(), base::Time(),
+                               /*secure=*/true, /*httponly=*/false,
+                               net::CookieSameSite::NO_RESTRICTION,
+                               net::COOKIE_PRIORITY_MEDIUM),
+          "http", false);
+
+  EXPECT_TRUE(access_result.status.HasExactlyExclusionReasonsForTesting(
+      {net::CookieInclusionStatus::EXCLUDE_SECURE_ONLY}));
+  EXPECT_EQ(access_result.effective_same_site,
+            net::CookieEffectiveSameSite::NO_RESTRICTION);
   std::vector<net::CanonicalCookie> cookies =
       service_wrapper()->GetAllCookies();
 
@@ -850,17 +855,19 @@ TEST_F(CookieManagerTest, ConfirmSecureSetFails) {
 }
 
 TEST_F(CookieManagerTest, ConfirmHttpOnlySetFails) {
-  EXPECT_TRUE(
-      service_wrapper()
-          ->SetCanonicalCookieWithStatus(
-              net::CanonicalCookie("N", "O", kCookieDomain, "/", base::Time(),
-                                   base::Time(), base::Time(),
-                                   /*secure=*/false, /*httponly=*/true,
-                                   net::CookieSameSite::LAX_MODE,
-                                   net::COOKIE_PRIORITY_MEDIUM),
-              "http", false)
-          .HasExactlyExclusionReasonsForTesting(
-              {net::CookieInclusionStatus::EXCLUDE_HTTP_ONLY}));
+  net::CookieAccessResult access_result =
+      service_wrapper()->SetCanonicalCookieWithAccessResult(
+          net::CanonicalCookie("N", "O", kCookieDomain, "/", base::Time(),
+                               base::Time(), base::Time(),
+                               /*secure=*/false, /*httponly=*/true,
+                               net::CookieSameSite::LAX_MODE,
+                               net::COOKIE_PRIORITY_MEDIUM),
+          "http", false);
+
+  EXPECT_TRUE(access_result.status.HasExactlyExclusionReasonsForTesting(
+      {net::CookieInclusionStatus::EXCLUDE_HTTP_ONLY}));
+  EXPECT_EQ(access_result.effective_same_site,
+            net::CookieEffectiveSameSite::LAX_MODE);
   std::vector<net::CanonicalCookie> cookies =
       service_wrapper()->GetAllCookies();
 
@@ -876,17 +883,19 @@ TEST_F(CookieManagerTest, ConfirmSecureOverwriteFails) {
                            net::COOKIE_PRIORITY_MEDIUM),
       "https", true));
 
-  EXPECT_TRUE(
-      service_wrapper()
-          ->SetCanonicalCookieWithStatus(
-              net::CanonicalCookie(
-                  "Secure", "Nope", kCookieDomain, "/with/path", base::Time(),
-                  base::Time(), base::Time(), /*secure=*/false,
-                  /*httponly=*/false, net::CookieSameSite::LAX_MODE,
-                  net::COOKIE_PRIORITY_MEDIUM),
-              "http", false)
-          .HasExactlyExclusionReasonsForTesting(
-              {net::CookieInclusionStatus::EXCLUDE_OVERWRITE_SECURE}));
+  net::CookieAccessResult access_result =
+      service_wrapper()->SetCanonicalCookieWithAccessResult(
+          net::CanonicalCookie(
+              "Secure", "Nope", kCookieDomain, "/with/path", base::Time(),
+              base::Time(), base::Time(), /*secure=*/false,
+              /*httponly=*/false, net::CookieSameSite::LAX_MODE,
+              net::COOKIE_PRIORITY_MEDIUM),
+          "http", false);
+
+  EXPECT_TRUE(access_result.status.HasExactlyExclusionReasonsForTesting(
+      {net::CookieInclusionStatus::EXCLUDE_OVERWRITE_SECURE}));
+  EXPECT_EQ(access_result.effective_same_site,
+            net::CookieEffectiveSameSite::LAX_MODE);
 
   std::vector<net::CanonicalCookie> cookies =
       service_wrapper()->GetAllCookies();
@@ -905,17 +914,19 @@ TEST_F(CookieManagerTest, ConfirmHttpOnlyOverwriteFails) {
                            net::COOKIE_PRIORITY_MEDIUM),
       "http", true));
 
-  EXPECT_TRUE(
-      service_wrapper()
-          ->SetCanonicalCookieWithStatus(
-              net::CanonicalCookie(
-                  "HttpOnly", "Nope", kCookieDomain, "/with/path", base::Time(),
-                  base::Time(), base::Time(), /*secure=*/false,
-                  /*httponly=*/false, net::CookieSameSite::LAX_MODE,
-                  net::COOKIE_PRIORITY_MEDIUM),
-              "https", false)
-          .HasExactlyExclusionReasonsForTesting(
-              {net::CookieInclusionStatus::EXCLUDE_OVERWRITE_HTTP_ONLY}));
+  net::CookieAccessResult access_result =
+      service_wrapper()->SetCanonicalCookieWithAccessResult(
+          net::CanonicalCookie(
+              "HttpOnly", "Nope", kCookieDomain, "/with/path", base::Time(),
+              base::Time(), base::Time(), /*secure=*/false,
+              /*httponly=*/false, net::CookieSameSite::LAX_MODE,
+              net::COOKIE_PRIORITY_MEDIUM),
+          "https", false);
+
+  EXPECT_TRUE(access_result.status.HasExactlyExclusionReasonsForTesting(
+      {net::CookieInclusionStatus::EXCLUDE_OVERWRITE_HTTP_ONLY}));
+  EXPECT_EQ(access_result.effective_same_site,
+            net::CookieEffectiveSameSite::LAX_MODE);
 
   std::vector<net::CanonicalCookie> cookies =
       service_wrapper()->GetAllCookies();

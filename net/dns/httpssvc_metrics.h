@@ -81,6 +81,9 @@ class NET_EXPORT_PRIVATE HttpssvcMetrics {
                         enum HttpssvcDnsRcode rcode,
                         const std::vector<bool>& condensed_records,
                         base::TimeDelta integrity_resolve_time);
+  void SaveForHttps(base::Optional<std::string> doh_provider_id,
+                    enum HttpssvcDnsRcode rcode,
+                    base::TimeDelta https_resolve_time);
 
  private:
   std::string BuildMetricName(base::StringPiece leaf_name) const;
@@ -93,10 +96,10 @@ class NET_EXPORT_PRIVATE HttpssvcMetrics {
 
   void set_doh_provider_id(base::Optional<std::string> doh_provider_id);
 
+  const bool expect_intact_;
   // RecordIntegrityMetrics() will do nothing when |disqualified_| is true.
   bool disqualified_ = false;
-  const bool expect_intact_;
-  bool in_progress_ = true;
+  bool already_recorded_ = false;
   base::Optional<std::string> doh_provider_id_;
   base::Optional<enum HttpssvcDnsRcode> rcode_integrity_;
   size_t num_integrity_records_ = 0;

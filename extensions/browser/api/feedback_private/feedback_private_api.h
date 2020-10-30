@@ -43,7 +43,8 @@ class FeedbackPrivateAPI : public BrowserContextKeyedAPI {
                               const GURL& page_url,
                               api::feedback_private::FeedbackFlow flow,
                               bool from_assistant = false,
-                              bool include_bluetooth_logs = false);
+                              bool include_bluetooth_logs = false,
+                              bool from_kaleidoscope = false);
 
   // BrowserContextKeyedAPI implementation.
   static BrowserContextKeyedAPIFactory<FeedbackPrivateAPI>*
@@ -149,6 +150,19 @@ class FeedbackPrivateSendFeedbackFunction : public ExtensionFunction {
                         bool send_tab_titles,
                         scoped_refptr<feedback::FeedbackData> feedback_data);
   void OnCompleted(api::feedback_private::LandingPageType type, bool success);
+
+#if defined(OS_CHROMEOS)
+  void OnAshLogsFetched(bool send_histograms,
+                        bool send_bluetooth_logs,
+                        bool send_tab_titles,
+                        scoped_refptr<feedback::FeedbackData> feedback_data);
+  void OnLacrosHistogramsFetched(
+      bool send_histograms,
+      bool send_bluetooth_logs,
+      bool send_tab_titles,
+      scoped_refptr<feedback::FeedbackData> feedback_data,
+      const std::string& compressed_histograms);
+#endif  // OS_CHROMEOS
 };
 
 class FeedbackPrivateLoginFeedbackCompleteFunction : public ExtensionFunction {

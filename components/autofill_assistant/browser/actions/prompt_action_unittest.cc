@@ -22,7 +22,6 @@ namespace {
 using ::base::test::RunOnceCallback;
 using ::testing::_;
 using ::testing::ElementsAre;
-using ::testing::Eq;
 using ::testing::Invoke;
 using ::testing::IsEmpty;
 using ::testing::IsNull;
@@ -31,6 +30,7 @@ using ::testing::Property;
 using ::testing::SizeIs;
 using ::testing::StrEq;
 using ::testing::UnorderedElementsAre;
+using ::testing::WithArgs;
 
 class PromptActionTest : public testing::Test {
  public:
@@ -38,20 +38,19 @@ class PromptActionTest : public testing::Test {
       : task_env_(base::test::TaskEnvironment::TimeSource::MOCK_TIME) {}
 
   void SetUp() override {
-    ON_CALL(mock_web_controller_, OnElementCheck(_, _))
-        .WillByDefault(RunOnceCallback<1>(ClientStatus()));
-    ON_CALL(mock_web_controller_, OnGetFieldValue(_, _))
-        .WillByDefault(RunOnceCallback<1>(ClientStatus(), ""));
-
+    ON_CALL(mock_web_controller_, OnFindElement(_, _))
+        .WillByDefault(RunOnceCallback<1>(
+            ClientStatus(ELEMENT_RESOLUTION_FAILED), nullptr));
     EXPECT_CALL(mock_action_delegate_, OnWaitForDom(_, _, _, _))
         .WillRepeatedly(Invoke(this, &PromptActionTest::FakeWaitForDom));
-    ON_CALL(mock_action_delegate_, Prompt(_, _, _, _))
-        .WillByDefault(Invoke(
+    ON_CALL(mock_action_delegate_, Prompt(_, _, _, _, _))
+        .WillByDefault(
             [this](std::unique_ptr<std::vector<UserAction>> user_actions,
                    bool disable_force_expand_sheet,
-                   base::OnceCallback<void()> callback, bool browse_mode) {
+                   base::OnceCallback<void()> callback, bool browse_mode,
+                   bool browse_mode_invisible) {
               user_actions_ = std::move(user_actions);
-            }));
+            });
     prompt_proto_ = proto_.mutable_prompt();
   }
 
@@ -217,15 +216,17 @@ TEST_F(PromptActionTest, ShowOnlyIfElementExists) {
 
   ASSERT_THAT(user_actions_, Pointee(IsEmpty()));
 
-  EXPECT_CALL(mock_web_controller_,
-              OnElementCheck(Eq(Selector({"element"})), _))
-      .WillRepeatedly(RunOnceCallback<1>(OkClientStatus()));
+  EXPECT_CALL(mock_web_controller_, OnFindElement(Selector({"element"}), _))
+      .WillRepeatedly(WithArgs<1>([](auto&& callback) {
+        std::move(callback).Run(OkClientStatus(),
+                                std::make_unique<ElementFinder::Result>());
+      }));
   task_env_.FastForwardBy(base::TimeDelta::FromSeconds(1));
   ASSERT_THAT(user_actions_, Pointee(SizeIs(1)));
 
-  EXPECT_CALL(mock_web_controller_,
-              OnElementCheck(Eq(Selector({"element"})), _))
-      .WillRepeatedly(RunOnceCallback<1>(ClientStatus()));
+  EXPECT_CALL(mock_web_controller_, OnFindElement(Selector({"element"}), _))
+      .WillRepeatedly(
+          RunOnceCallback<1>(ClientStatus(ELEMENT_RESOLUTION_FAILED), nullptr));
   task_env_.FastForwardBy(base::TimeDelta::FromSeconds(1));
   ASSERT_THAT(user_actions_, Pointee(IsEmpty()));
 }
@@ -242,16 +243,18 @@ TEST_F(PromptActionTest, DisabledUnlessElementExists) {
   PromptAction action(&mock_action_delegate_, proto_);
   action.ProcessAction(callback_.Get());
 
-  EXPECT_CALL(mock_web_controller_,
-              OnElementCheck(Eq(Selector({"element"})), _))
-      .WillRepeatedly(RunOnceCallback<1>(OkClientStatus()));
+  EXPECT_CALL(mock_web_controller_, OnFindElement(Selector({"element"}), _))
+      .WillRepeatedly(WithArgs<1>([](auto&& callback) {
+        std::move(callback).Run(OkClientStatus(),
+                                std::make_unique<ElementFinder::Result>());
+      }));
   task_env_.FastForwardBy(base::TimeDelta::FromSeconds(1));
   ASSERT_THAT(user_actions_, Pointee(SizeIs(1)));
   EXPECT_TRUE((*user_actions_)[0].enabled());
 
-  EXPECT_CALL(mock_web_controller_,
-              OnElementCheck(Eq(Selector({"element"})), _))
-      .WillRepeatedly(RunOnceCallback<1>(ClientStatus()));
+  EXPECT_CALL(mock_web_controller_, OnFindElement(Selector({"element"}), _))
+      .WillRepeatedly(
+          RunOnceCallback<1>(ClientStatus(ELEMENT_RESOLUTION_FAILED), nullptr));
   task_env_.FastForwardBy(base::TimeDelta::FromSeconds(1));
   ASSERT_THAT(user_actions_, Pointee(SizeIs(1)));
   EXPECT_FALSE((*user_actions_)[0].enabled());
@@ -268,9 +271,11 @@ TEST_F(PromptActionTest, AutoSelectWhenElementExists) {
   action.ProcessAction(callback_.Get());
   EXPECT_THAT(user_actions_, Pointee(SizeIs(0)));
 
-  EXPECT_CALL(mock_web_controller_,
-              OnElementCheck(Eq(Selector({"element"})), _))
-      .WillRepeatedly(RunOnceCallback<1>(OkClientStatus()));
+  EXPECT_CALL(mock_web_controller_, OnFindElement(Selector({"element"}), _))
+      .WillRepeatedly(WithArgs<1>([](auto&& callback) {
+        std::move(callback).Run(OkClientStatus(),
+                                std::make_unique<ElementFinder::Result>());
+      }));
 
   EXPECT_CALL(mock_action_delegate_, CleanUpAfterPrompt());
   EXPECT_CALL(
@@ -298,9 +303,11 @@ TEST_F(PromptActionTest, AutoSelectWithButton) {
 
   ASSERT_THAT(user_actions_, Pointee(SizeIs(1)));
 
-  EXPECT_CALL(mock_web_controller_,
-              OnElementCheck(Eq(Selector({"element"})), _))
-      .WillRepeatedly(RunOnceCallback<1>(OkClientStatus()));
+  EXPECT_CALL(mock_web_controller_, OnFindElement(Selector({"element"}), _))
+      .WillRepeatedly(WithArgs<1>([](auto&& callback) {
+        std::move(callback).Run(OkClientStatus(),
+                                std::make_unique<ElementFinder::Result>());
+      }));
   EXPECT_CALL(
       callback_,
       Run(Pointee(AllOf(Property(&ProcessedActionProto::status, ACTION_APPLIED),
@@ -370,7 +377,7 @@ TEST_F(PromptActionTest, ForceExpandSheetDefault) {
   ok_proto->mutable_chip()->set_type(HIGHLIGHTED_ACTION);
   ok_proto->set_server_payload("ok");
 
-  EXPECT_CALL(mock_action_delegate_, Prompt(_, Eq(false), _, Eq(false)));
+  EXPECT_CALL(mock_action_delegate_, Prompt(_, false, _, false, false));
   PromptAction action(&mock_action_delegate_, proto_);
   action.ProcessAction(callback_.Get());
 }
@@ -382,7 +389,7 @@ TEST_F(PromptActionTest, ForceExpandSheetDisable) {
   ok_proto->set_server_payload("ok");
 
   prompt_proto_->set_disable_force_expand_sheet(true);
-  EXPECT_CALL(mock_action_delegate_, Prompt(_, Eq(true), _, Eq(false)));
+  EXPECT_CALL(mock_action_delegate_, Prompt(_, true, _, false, false));
   PromptAction action(&mock_action_delegate_, proto_);
   action.ProcessAction(callback_.Get());
 }
@@ -394,7 +401,20 @@ TEST_F(PromptActionTest, RunPromptInBrowseMode) {
   ok_proto->set_server_payload("ok");
 
   prompt_proto_->set_browse_mode(true);
-  EXPECT_CALL(mock_action_delegate_, Prompt(_, Eq(false), _, Eq(true)));
+  EXPECT_CALL(mock_action_delegate_, Prompt(_, false, _, true, false));
+  PromptAction action(&mock_action_delegate_, proto_);
+  action.ProcessAction(callback_.Get());
+}
+
+TEST_F(PromptActionTest, RunPromptInInvisibleBrowseMode) {
+  auto* ok_proto = prompt_proto_->add_choices();
+  ok_proto->mutable_chip()->set_text("Ok");
+  ok_proto->mutable_chip()->set_type(HIGHLIGHTED_ACTION);
+  ok_proto->set_server_payload("ok");
+
+  prompt_proto_->set_browse_mode(true);
+  prompt_proto_->set_browse_mode_invisible(true);
+  EXPECT_CALL(mock_action_delegate_, Prompt(_, false, _, true, true));
   PromptAction action(&mock_action_delegate_, proto_);
   action.ProcessAction(callback_.Get());
 }
@@ -427,14 +447,14 @@ TEST_F(PromptActionTest, ForwardInterruptFailure) {
 }
 
 TEST_F(PromptActionTest, EndActionOnNavigation) {
-  EXPECT_CALL(mock_action_delegate_, Prompt(_, _, _, _))
-      .WillOnce(
-          Invoke([this](std::unique_ptr<std::vector<UserAction>> user_actions,
-                        bool disable_force_expand_sheet,
-                        base::OnceCallback<void()> callback, bool browse_mode) {
-            user_actions_ = std::move(user_actions);
-            std::move(callback).Run();
-          }));
+  EXPECT_CALL(mock_action_delegate_, Prompt(_, _, _, _, _))
+      .WillOnce([this](std::unique_ptr<std::vector<UserAction>> user_actions,
+                       bool disable_force_expand_sheet,
+                       base::OnceCallback<void()> callback, bool browse_mode,
+                       bool browse_mode_invisible) {
+        user_actions_ = std::move(user_actions);
+        std::move(callback).Run();
+      });
 
   prompt_proto_->set_end_on_navigation(true);
   prompt_proto_->add_choices()->mutable_chip()->set_text("ok");

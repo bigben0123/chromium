@@ -33,8 +33,10 @@
 #include "base/allocator/partition_allocator/memory_reclaimer.h"
 #include "base/allocator/partition_allocator/oom.h"
 #include "base/allocator/partition_allocator/page_allocator.h"
+#include "base/allocator/partition_allocator/partition_alloc_features.h"
 #include "base/debug/alias.h"
 #include "base/strings/safe_sprintf.h"
+#include "base/thread_annotations.h"
 #include "components/crash/core/common/crash_key.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partition_allocator.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
@@ -68,15 +70,43 @@ bool Partitions::InitializeOnce() {
 
   base::PartitionAllocGlobalInit(&Partitions::HandleOutOfMemory);
 
-  fast_malloc_allocator.init();
-  array_buffer_allocator.init();
-  buffer_allocator.init();
-  layout_allocator.init();
+  // Restrictions:
+  // - DCHECK_IS_ON(): Memory usage of the thread cache is not optimized yet,
+  //   don't ship this.
+  // - BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC): Only one thread cache at a time
+  //   is supported, in this case it is already claimed by malloc().
+#if DCHECK_IS_ON() && !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
+  fast_malloc_allocator.init(
+      {base::PartitionOptions::Alignment::kRegular,
+       base::PartitionOptions::ThreadCache::kEnabled,
+       base::PartitionOptions::PCScan::kDisabledByDefault});
+#else
+  fast_malloc_allocator.init(
+      {base::PartitionOptions::Alignment::kRegular,
+       base::PartitionOptions::ThreadCache::kDisabled,
+       base::PartitionOptions::PCScan::kDisabledByDefault});
+#endif
+  array_buffer_allocator.init(
+      {base::PartitionOptions::Alignment::kRegular,
+       base::PartitionOptions::ThreadCache::kDisabled,
+       base::PartitionOptions::PCScan::kAlwaysDisabled});
+  buffer_allocator.init({base::PartitionOptions::Alignment::kRegular,
+                         base::PartitionOptions::ThreadCache::kDisabled,
+                         base::PartitionOptions::PCScan::kDisabledByDefault});
+  layout_allocator.init({base::PartitionOptions::Alignment::kRegular,
+                         base::PartitionOptions::ThreadCache::kDisabled,
+                         base::PartitionOptions::PCScan::kDisabledByDefault});
 
   fast_malloc_root_ = fast_malloc_allocator.root();
   array_buffer_root_ = array_buffer_allocator.root();
   buffer_root_ = buffer_allocator.root();
   layout_root_ = layout_allocator.root();
+
+  if (base::features::IsPartitionAllocPCScanEnabled()) {
+    fast_malloc_root_->EnablePCScan();
+    buffer_root_->EnablePCScan();
+    layout_root_->EnablePCScan();
+  }
 
   initialized_ = true;
   return initialized_;
@@ -135,10 +165,15 @@ class LightPartitionStatsDumperImpl : public base::PartitionStatsDumper {
 size_t Partitions::TotalSizeOfCommittedPages() {
   DCHECK(initialized_);
   size_t total_size = 0;
-  total_size += FastMallocPartition()->total_size_of_committed_pages;
-  total_size += ArrayBufferPartition()->total_size_of_committed_pages;
-  total_size += BufferPartition()->total_size_of_committed_pages;
-  total_size += LayoutPartition()->total_size_of_committed_pages;
+  // Racy reads below: this is fine to collect statistics.
+  total_size +=
+      TS_UNCHECKED_READ(FastMallocPartition()->total_size_of_committed_pages);
+  total_size +=
+      TS_UNCHECKED_READ(ArrayBufferPartition()->total_size_of_committed_pages);
+  total_size +=
+      TS_UNCHECKED_READ(BufferPartition()->total_size_of_committed_pages);
+  total_size +=
+      TS_UNCHECKED_READ(LayoutPartition()->total_size_of_committed_pages);
   return total_size;
 }
 

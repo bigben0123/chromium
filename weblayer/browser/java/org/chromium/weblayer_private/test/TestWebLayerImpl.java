@@ -5,11 +5,21 @@
 package org.chromium.weblayer_private.test;
 
 import android.os.IBinder;
+import android.view.View;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+
+import androidx.fragment.app.FragmentManager;
 
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.annotations.UsedByReflection;
+import org.chromium.components.infobars.InfoBarAnimationListener;
+import org.chromium.components.infobars.InfoBarUiItem;
 import org.chromium.components.location.LocationUtils;
+import org.chromium.components.media_router.BrowserMediaRouter;
+import org.chromium.components.media_router.MockMediaRouteProvider;
+import org.chromium.components.media_router.RouterTestUtils;
 import org.chromium.components.permissions.PermissionDialogController;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.device.geolocation.LocationProviderOverrider;
@@ -17,12 +27,12 @@ import org.chromium.device.geolocation.MockLocationProvider;
 import org.chromium.net.NetworkChangeNotifier;
 import org.chromium.ui.modaldialog.ModalDialogProperties;
 import org.chromium.weblayer_private.InfoBarContainer;
-import org.chromium.weblayer_private.InfoBarUiItem;
 import org.chromium.weblayer_private.TabImpl;
 import org.chromium.weblayer_private.WebLayerAccessibilityUtil;
 import org.chromium.weblayer_private.interfaces.IObjectWrapper;
 import org.chromium.weblayer_private.interfaces.ITab;
 import org.chromium.weblayer_private.interfaces.ObjectWrapper;
+import org.chromium.weblayer_private.media.MediaRouteDialogFragmentImpl;
 import org.chromium.weblayer_private.test_interfaces.ITestWebLayer;
 
 import java.util.concurrent.ExecutionException;
@@ -116,7 +126,7 @@ public final class TestWebLayerImpl extends ITestWebLayer.Stub {
         TabImpl tabImpl = (TabImpl) tab;
 
         InfoBarContainer infoBarContainer = tabImpl.getInfoBarContainerForTesting();
-        infoBarContainer.addAnimationListener(new InfoBarContainer.InfoBarAnimationListener() {
+        infoBarContainer.addAnimationListener(new InfoBarAnimationListener() {
             @Override
             public void notifyAnimationFinished(int animationType) {}
             @Override
@@ -161,5 +171,59 @@ public final class TestWebLayerImpl extends ITestWebLayer.Stub {
     @Override
     public boolean canInfoBarContainerScroll(ITab tab) {
         return ((TabImpl) tab).canInfoBarContainerScrollForTesting();
+    }
+
+    @Override
+    public String getDisplayedUrl(IObjectWrapper /* View */ view) {
+        View urlBarView = ObjectWrapper.unwrap(view, View.class);
+        assert (urlBarView instanceof LinearLayout);
+        LinearLayout urlBarLayout = (LinearLayout) urlBarView;
+        assert (urlBarLayout.getChildCount() == 2);
+
+        View textView = urlBarLayout.getChildAt(1);
+        assert (textView instanceof TextView);
+        TextView urlBarTextView = (TextView) textView;
+        return urlBarTextView.getText().toString();
+    }
+
+    @Override
+    public String getTranslateInfoBarTargetLanguage(ITab tab) {
+        TabImpl tabImpl = (TabImpl) tab;
+        return tabImpl.getTranslateInfoBarTargetLanguageForTesting();
+    }
+
+    @Override
+    public boolean didShowFullscreenToast(ITab tab) {
+        TabImpl tabImpl = (TabImpl) tab;
+        return tabImpl.didShowFullscreenToast();
+    }
+
+    @Override
+    public void initializeMockMediaRouteProvider(boolean closeRouteWithErrorOnSend,
+            boolean disableIsSupportsSource, String createRouteErrorMessage,
+            String joinRouteErrorMessage) {
+        BrowserMediaRouter.setRouteProviderFactoryForTest(new MockMediaRouteProvider.Factory());
+
+        if (closeRouteWithErrorOnSend) {
+            MockMediaRouteProvider.Factory.sProvider.setCloseRouteWithErrorOnSend(true);
+        }
+        if (disableIsSupportsSource) {
+            MockMediaRouteProvider.Factory.sProvider.setIsSupportsSource(false);
+        }
+        if (createRouteErrorMessage != null) {
+            MockMediaRouteProvider.Factory.sProvider.setCreateRouteErrorMessage(
+                    createRouteErrorMessage);
+        }
+        if (joinRouteErrorMessage != null) {
+            MockMediaRouteProvider.Factory.sProvider.setJoinRouteErrorMessage(
+                    joinRouteErrorMessage);
+        }
+    }
+
+    @Override
+    public IObjectWrapper getMediaRouteButton(String name) {
+        FragmentManager fm =
+                MediaRouteDialogFragmentImpl.getInstanceForTest().getSupportFragmentManager();
+        return ObjectWrapper.wrap(RouterTestUtils.waitForRouteButton(fm, name));
     }
 }

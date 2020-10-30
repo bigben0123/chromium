@@ -5,11 +5,14 @@ include_rules = [
   "+chrome/services/ipp_parser/public/mojom",
   "+chrome/services/file_util/file_util_service.h",
   "+chrome/services/file_util/public/mojom",
+  "+chrome/services/machine_learning/machine_learning_service.h",
+  "+chrome/services/machine_learning/public/mojom",
   "+chrome/services/media_gallery_util",
   # TODO(crbug.com/798782): remove dependency to pdf_to_emf_converter_factory.h
   # when Cloud print chrome/service is removed.
   "+chrome/services/printing/pdf_to_emf_converter_factory.h",
   "+chrome/services/printing/printing_service.h",
+  "+chrome/services/printing/print_backend_service_impl.h",
   "+chrome/services/printing/public/mojom",
   "+chrome/services/qrcode_generator",
   "+chrome/services/removable_storage_writer",
@@ -22,6 +25,7 @@ include_rules = [
   "+chromeos/services/assistant",
   "+chromeos/services/ime/ime_service.h",
   "+chromeos/services/ime/public/mojom",
+  "+chromeos/services/nearby",
   "+chromeos/services/tts",
   "+components/crash/core/common/crash_keys.h",
   "+components/mirroring/mojom",

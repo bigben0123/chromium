@@ -26,6 +26,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/renderer_host/chrome_navigation_ui_data.h"
+#include "chrome/browser/subresource_redirect/https_image_compression_bypass_decider.h"
 #include "chrome/browser/subresource_redirect/https_image_compression_infobar_decider.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/pref_names.h"
@@ -53,6 +54,7 @@
 #include "net/proxy_resolution/proxy_list.h"
 #include "services/network/public/cpp/network_quality_tracker.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "third_party/blink/public/common/features.h"
 
 namespace {
 
@@ -234,7 +236,7 @@ void DataReductionProxyChromeSettings::InitDataReductionProxySettings(
       InitDataReductionProxySettings(profile_prefs, std::move(service));
 
   data_reduction_proxy::DataReductionProxySettings::
-      SetCallbackToRegisterSyntheticFieldTrial(base::Bind(
+      SetCallbackToRegisterSyntheticFieldTrial(base::BindRepeating(
           &ChromeMetricsServiceAccessor::RegisterSyntheticFieldTrial));
   // In M35 and earlier, the Data Reduction Proxy enabled/disabled setting was
   // stored in prefs, so this setting needs to be migrated to the new way of
@@ -243,20 +245,12 @@ void DataReductionProxyChromeSettings::InitDataReductionProxySettings(
   // unable to browse non-SSL sites for the most part (see
   // http://crbug.com/476610).
   MigrateDataReductionProxyOffProxyPrefs(profile_prefs);
-  https_image_compression_infobar_decider_ =
-      std::make_unique<HttpsImageCompressionInfoBarDecider>(profile_prefs,
-                                                            this);
-}
-
-void DataReductionProxyChromeSettings::SetIgnoreLongTermBlockListRules(
-    bool ignore_long_term_block_list_rules) {
-  // |previews_service| is null if |profile_| is off the record.
-  PreviewsService* previews_service =
-      PreviewsServiceFactory::GetForProfile(profile_);
-  if (previews_service && previews_service->previews_ui_service()) {
-    previews_service->previews_ui_service()
-        ->SetIgnoreLongTermBlockListForServerPreviews(
-            ignore_long_term_block_list_rules);
+  if (base::FeatureList::IsEnabled(blink::features::kSubresourceRedirect)) {
+    https_image_compression_infobar_decider_ =
+        std::make_unique<HttpsImageCompressionInfoBarDecider>(profile_prefs,
+                                                              this);
+    https_image_compression_bypass_decider_ =
+        std::make_unique<HttpsImageCompressionBypassDecider>();
   }
 }
 
@@ -291,11 +285,11 @@ DataReductionProxyChromeSettings::CreateDataFromNavigationHandle(
 data_reduction_proxy::Client DataReductionProxyChromeSettings::GetClient() {
 #if defined(OS_ANDROID)
   return data_reduction_proxy::Client::CHROME_ANDROID;
-#elif defined(OS_MACOSX)
+#elif defined(OS_MAC)
   return data_reduction_proxy::Client::CHROME_MAC;
 #elif defined(OS_CHROMEOS)
   return data_reduction_proxy::Client::CHROME_CHROMEOS;
-#elif defined(OS_LINUX)
+#elif defined(OS_LINUX) || defined(OS_CHROMEOS)
   return data_reduction_proxy::Client::CHROME_LINUX;
 #elif defined(OS_WIN)
   return data_reduction_proxy::Client::CHROME_WINDOWS;

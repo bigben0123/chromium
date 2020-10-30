@@ -63,12 +63,11 @@ void AccessibilityTreeFormatterMacBrowserTest::TestAndCheck(
   std::unique_ptr<AccessibilityTreeFormatter> formatter =
       AccessibilityTreeFormatter::Create();
 
-  std::vector<AccessibilityTreeFormatter::PropertyFilter> property_filters;
+  std::vector<ui::AXPropertyFilter> property_filters;
 
   for (const char* filter : filters) {
-    property_filters.push_back(AccessibilityTreeFormatter::PropertyFilter(
-        base::UTF8ToUTF16(filter),
-        AccessibilityTreeFormatter::PropertyFilter::ALLOW_EMPTY));
+    property_filters.push_back(
+        ui::AXPropertyFilter(filter, ui::AXPropertyFilter::ALLOW_EMPTY));
   }
 
   formatter->AddDefaultFilters(&property_filters);
@@ -78,10 +77,9 @@ void AccessibilityTreeFormatterMacBrowserTest::TestAndCheck(
   BrowserAccessibility* root = GetManager()->GetRoot();
   CHECK(root);
 
-  base::string16 contents;
-  formatter->FormatAccessibilityTreeForTesting(root, &contents);
+  std::string got;
+  formatter->FormatAccessibilityTreeForTesting(root, &got);
 
-  auto got = base::UTF16ToUTF8(contents);
   EXPECT_EQ(got, expected);
 }
 
@@ -122,7 +120,18 @@ IN_PROC_BROWSER_TEST_F(AccessibilityTreeFormatterMacBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(AccessibilityTreeFormatterMacBrowserTest,
-                       LineIndexFilter) {
+                       Filters_NoWildcardProperty) {
+  TestAndCheck(R"~~(data:text/html,
+                    <input class='classolasso'>)~~",
+               {"AXDOMClassList"},
+               R"~~(AXWebArea AXDOMClassList=[]
+++AXGroup AXDOMClassList=[]
+++++AXTextField AXDOMClassList=['classolasso']
+)~~");
+}
+
+IN_PROC_BROWSER_TEST_F(AccessibilityTreeFormatterMacBrowserTest,
+                       Filters_LineIndex) {
   TestAndCheck(R"~~(data:text/html,
                     <input class='input_at_3rd_line'>
                     <input class='input_at_4th_line'>
@@ -154,7 +163,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityTreeFormatterMacBrowserTest,
                     </script>)~~",
                {":3;AXSelectedTextMarkerRange=*"}, R"~~(AXWebArea
 ++AXGroup
-++++AXStaticText AXSelectedTextMarkerRange={anchor: {:3, 0, down}, focus: {:2, -1, down}} AXValue='Paragraph'
+++++AXStaticText AXSelectedTextMarkerRange={anchor: {:2, -1, down}, focus: {:3, 0, down}} AXValue='Paragraph'
 )~~");
 }
 
@@ -285,6 +294,44 @@ IN_PROC_BROWSER_TEST_F(AccessibilityTreeFormatterMacBrowserTest,
       {"1, 2", "2", "{2, 1, down}", "{:2, NaN, down}", "{:2, 1, hoho}"},
       ":1;AXIndexForTextMarker(Argument)=*",
       R"~~(AXWebArea AXIndexForTextMarker(Argument)=ERROR:FAILED_TO_PARSE_ARGS
+++AXGroup
+++++AXStaticText AXValue='Text'
+)~~");
+}
+
+IN_PROC_BROWSER_TEST_F(AccessibilityTreeFormatterMacBrowserTest,
+                       ParameterizedAttributes_TextMarkerRange) {
+  TestAndCheck(R"~~(data:text/html,
+                    <p>Text</p>)~~",
+               {":2;AXStringForTextMarkerRange({anchor: {:2, 1, down}, focus: "
+                "{:2, 3, down}})=*"},
+               R"~~(AXWebArea
+++AXGroup AXStringForTextMarkerRange({anchor: {:2, 1, down}, focus: {:2, 3, down}})='ex'
+++++AXStaticText AXValue='Text'
+)~~");
+}
+
+IN_PROC_BROWSER_TEST_F(
+    AccessibilityTreeFormatterMacBrowserTest,
+    ParameterizedAttributes_TextMarkerRange_WrongParameters) {
+  TestWrongParameters(
+      R"~~(data:text/html,
+                           <p>Text</p>)~~",
+      {"1, 2", "2", "{focus: {:2, 1, down}}", "{anchor: {:2, 1, down}}",
+       "{anchor: {2, 1, down}, focus: {2, 1, down}}"},
+      ":1;AXStringForTextMarkerRange(Argument)=*",
+      R"~~(AXWebArea AXStringForTextMarkerRange(Argument)=ERROR:FAILED_TO_PARSE_ARGS
+++AXGroup
+++++AXStaticText AXValue='Text'
+)~~");
+}
+
+IN_PROC_BROWSER_TEST_F(AccessibilityTreeFormatterMacBrowserTest,
+                       NestedCalls_Attributes) {
+  TestAndCheck(R"~~(data:text/html,
+                    <p>Text</p>)~~",
+               {":1;AXIndexForTextMarker(AXTextMarkerForIndex(0))"},
+               R"~~(AXWebArea AXIndexForTextMarker(AXTextMarkerForIndex(0))=0
 ++AXGroup
 ++++AXStaticText AXValue='Text'
 )~~");

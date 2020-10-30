@@ -1,5 +1,5 @@
 This is a testharness.js-based test.
-Found 1249 tests; 1226 PASS, 23 FAIL, 0 TIMEOUT, 0 NOTRUN.
+Found 1252 tests; 1232 PASS, 20 FAIL, 0 TIMEOUT, 0 NOTRUN.
 PASS idl_test setup
 PASS idl_test validation
 PASS Partial interface Window: original interface defined
@@ -261,7 +261,7 @@ PASS Document interface object length
 PASS Document interface object name
 PASS Document interface: existence and properties of interface prototype object
 PASS Document interface: existence and properties of interface prototype object's "constructor" property
-FAIL Document interface: existence and properties of interface prototype object's @@unscopables property assert_false: Document.prototype[Symbol.unscopables] should not be writable expected false got true
+FAIL Document interface: existence and properties of interface prototype object's @@unscopables property assert_not_equals: Document.prototype[Symbol.unscopables] has unexpected property "fullscreen" got disallowed value -1
 PASS Document interface: attribute implementation
 PASS Document interface: attribute URL
 PASS Document interface: attribute documentURI
@@ -481,7 +481,7 @@ PASS DocumentType interface object length
 PASS DocumentType interface object name
 PASS DocumentType interface: existence and properties of interface prototype object
 PASS DocumentType interface: existence and properties of interface prototype object's "constructor" property
-FAIL DocumentType interface: existence and properties of interface prototype object's @@unscopables property assert_false: DocumentType.prototype[Symbol.unscopables] should not be writable expected false got true
+PASS DocumentType interface: existence and properties of interface prototype object's @@unscopables property
 PASS DocumentType interface: attribute name
 PASS DocumentType interface: attribute publicId
 PASS DocumentType interface: attribute systemId
@@ -512,7 +512,7 @@ PASS DocumentFragment interface object length
 PASS DocumentFragment interface object name
 PASS DocumentFragment interface: existence and properties of interface prototype object
 PASS DocumentFragment interface: existence and properties of interface prototype object's "constructor" property
-FAIL DocumentFragment interface: existence and properties of interface prototype object's @@unscopables property assert_false: DocumentFragment.prototype[Symbol.unscopables] should not be writable expected false got true
+PASS DocumentFragment interface: existence and properties of interface prototype object's @@unscopables property
 PASS DocumentFragment interface: operation getElementById(DOMString)
 PASS DocumentFragment interface: attribute children
 PASS DocumentFragment interface: attribute firstElementChild
@@ -561,7 +561,7 @@ PASS Element interface object length
 PASS Element interface object name
 PASS Element interface: existence and properties of interface prototype object
 PASS Element interface: existence and properties of interface prototype object's "constructor" property
-FAIL Element interface: existence and properties of interface prototype object's @@unscopables property assert_false: Element.prototype[Symbol.unscopables] should not be writable expected false got true
+PASS Element interface: existence and properties of interface prototype object's @@unscopables property
 PASS Element interface: attribute namespaceURI
 PASS Element interface: attribute prefix
 PASS Element interface: attribute localName
@@ -750,7 +750,7 @@ PASS CharacterData interface object length
 PASS CharacterData interface object name
 PASS CharacterData interface: existence and properties of interface prototype object
 PASS CharacterData interface: existence and properties of interface prototype object's "constructor" property
-FAIL CharacterData interface: existence and properties of interface prototype object's @@unscopables property assert_false: CharacterData.prototype[Symbol.unscopables] should not be writable expected false got true
+PASS CharacterData interface: existence and properties of interface prototype object's @@unscopables property
 PASS CharacterData interface: attribute data
 PASS CharacterData interface: attribute length
 PASS CharacterData interface: operation substringData(unsigned long, unsigned long)
@@ -1231,6 +1231,11 @@ PASS XPathNSResolver interface: existence and properties of interface prototype 
 PASS XPathNSResolver interface: existence and properties of interface prototype object's "constructor" property
 PASS XPathNSResolver interface: existence and properties of interface prototype object's @@unscopables property
 PASS XPathNSResolver interface: operation lookupNamespaceURI(DOMString?)
+PASS Stringification of document.createNSResolver(document.body)
+PASS XPathNSResolver interface: document.createNSResolver(document.body) must inherit property "lookupNamespaceURI(DOMString?)" with the proper type
+FAIL XPathNSResolver interface: calling lookupNamespaceURI(DOMString?) on document.createNSResolver(document.body) with too few arguments must throw TypeError assert_throws_js: Called with 0 arguments function "function() {
+            fn.apply(obj, args);
+        }" did not throw
 PASS XPathEvaluator interface: existence and properties of interface object
 PASS XPathEvaluator interface object length
 PASS XPathEvaluator interface object name

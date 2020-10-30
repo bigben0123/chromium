@@ -59,19 +59,6 @@ cr.define('settings', function() {
         }
       },
 
-      /** @private */
-      allowDlcSubpage_: {
-        type: Boolean,
-        value: () => loadTimeData.getBoolean('allowDlcSubpage'),
-        readOnly: true,
-      },
-
-      /** @private */
-      dlcsExist_: {
-        type: Boolean,
-        value: false,
-      },
-
       /** @private {settings.StorageSizeStat} */
       sizeStat_: Object,
     },
@@ -107,9 +94,6 @@ cr.define('settings', function() {
             'storage-other-users-size-changed',
             this.handleOtherUsersSizeChanged_.bind(this));
         this.addWebUIListener(
-            'storage-dlcs-size-changed',
-            this.handleDlcsSizeChanged_.bind(this));
-        this.addWebUIListener(
             'storage-system-size-changed',
             this.handleSystemSizeChanged_.bind(this));
       }
@@ -121,7 +105,6 @@ cr.define('settings', function() {
       this.addFocusConfig_(r.ACCOUNTS, '#otherUsersSize');
       this.addFocusConfig_(
           r.EXTERNAL_STORAGE_PREFERENCES, '#externalStoragePreferences');
-      this.addFocusConfig_(r.DOWNLOADED_CONTENT, '#downloadedContent');
     },
 
     /**
@@ -134,7 +117,7 @@ cr.define('settings', function() {
       settings.RouteOriginBehaviorImpl.currentRouteChanged.call(
           this, newRoute, oldRoute);
 
-      if (settings.Router.getInstance().getCurrentRoute() !=
+      if (settings.Router.getInstance().getCurrentRoute() !==
           settings.routes.STORAGE) {
         return;
       }
@@ -204,23 +187,6 @@ cr.define('settings', function() {
     },
 
     /**
-     * Handler for clicking the "Manage downloaded content" item.
-     * @private
-     */
-    onDownloadedContentClick_() {
-      settings.Router.getInstance().navigateTo(
-          settings.routes.DOWNLOADED_CONTENT);
-    },
-
-    /**
-     * @return {boolean} Shows the "Manage downloaded content" item if true.
-     * @private
-     */
-    shouldShowDlcSubpage_() {
-      return this.dlcsExist_ && this.allowDlcSubpage_;
-    },
-
-    /**
      * @param {!settings.StorageSizeStat} sizeStat
      * @private
      */
@@ -285,20 +251,6 @@ cr.define('settings', function() {
     },
 
     /**
-     * @param {boolean} dlcsExist True if there are DLCs.
-     * @param {string=} opt_size Formatted string representing the size of all
-     *     DLCs.
-     * @private
-     */
-    handleDlcsSizeChanged_(dlcsExist, opt_size) {
-      this.dlcsExist_ = dlcsExist;
-      if (this.shouldShowDlcSubpage_()) {
-        Polymer.dom.flush();
-        this.$$('#downloadedContentSize').subLabel = opt_size;
-      }
-    },
-
-    /**
      * @param {string} size Formatted string representing the System size.
      * @private
      */
@@ -320,9 +272,9 @@ cr.define('settings', function() {
      */
     startPeriodicUpdate_() {
       // We update the storage usage every 5 seconds.
-      if (this.updateTimerId_ == -1) {
+      if (this.updateTimerId_ === -1) {
         this.updateTimerId_ = window.setInterval(() => {
-          if (settings.Router.getInstance().getCurrentRoute() !=
+          if (settings.Router.getInstance().getCurrentRoute() !==
               settings.routes.STORAGE) {
             this.stopPeriodicUpdate_();
             return;
@@ -337,7 +289,7 @@ cr.define('settings', function() {
      * @private
      */
     stopPeriodicUpdate_() {
-      if (this.updateTimerId_ != -1) {
+      if (this.updateTimerId_ !== -1) {
         window.clearInterval(this.updateTimerId_);
         this.updateTimerId_ = -1;
       }
@@ -350,7 +302,7 @@ cr.define('settings', function() {
      * @private
      */
     isSpaceLow_(spaceState) {
-      return spaceState == settings.StorageSpaceState.LOW;
+      return spaceState === settings.StorageSpaceState.LOW;
     },
 
     /**
@@ -360,7 +312,7 @@ cr.define('settings', function() {
      * @private
      */
     isSpaceCriticallyLow_(spaceState) {
-      return spaceState == settings.StorageSpaceState.CRITICALLY_LOW;
+      return spaceState === settings.StorageSpaceState.CRITICALLY_LOW;
     },
 
     /**

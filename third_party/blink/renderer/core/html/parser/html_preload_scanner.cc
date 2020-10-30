@@ -287,7 +287,7 @@ class TokenPreloadScanner::StartTagScanner {
     if ((Match(tag_impl_, html_names::kScriptTag) &&
          type_attribute_value_ == "module") ||
         IsLinkRelModulePreload()) {
-      request->SetScriptType(mojom::ScriptType::kModule);
+      request->SetScriptType(mojom::blink::ScriptType::kModule);
     }
 
     request->SetCrossOrigin(cross_origin_);
@@ -499,8 +499,7 @@ class TokenPreloadScanner::StartTagScanner {
       // FIXME - Don't match media multiple times.
       matched_ &= MediaAttributeMatches(*media_values_, attribute_value);
     } else if (Match(attribute_name, html_names::kTypeAttr)) {
-      matched_ &= MIMETypeRegistry::IsSupportedImagePrefixedMIMEType(
-          ContentType(attribute_value).GetType());
+      matched_ &= HTMLImageElement::SupportedImageType(attribute_value);
     }
   }
 
@@ -633,14 +632,13 @@ class TokenPreloadScanner::StartTagScanner {
              MIMETypeRegistry::IsSupportedStyleSheetMIMEType(
                  ContentType(type_attribute_value_).GetType());
     } else if (link_is_preload_) {
+      if (type == ResourceType::kImage)
+        return HTMLImageElement::SupportedImageType(type_attribute_value_);
       if (type_attribute_value_.IsEmpty())
         return true;
       String type_from_attribute = ContentType(type_attribute_value_).GetType();
       if ((type == ResourceType::kFont &&
            !MIMETypeRegistry::IsSupportedFontMIMEType(type_from_attribute)) ||
-          (type == ResourceType::kImage &&
-           !MIMETypeRegistry::IsSupportedImagePrefixedMIMEType(
-               type_from_attribute)) ||
           (type == ResourceType::kCSSStyleSheet &&
            !MIMETypeRegistry::IsSupportedStyleSheetMIMEType(
                type_from_attribute))) {
@@ -665,7 +663,7 @@ class TokenPreloadScanner::StartTagScanner {
     if (Match(tag_impl_, html_names::kInputTag) && !input_is_image_)
       return false;
     if (Match(tag_impl_, html_names::kScriptTag)) {
-      mojom::ScriptType script_type = mojom::ScriptType::kClassic;
+      mojom::blink::ScriptType script_type = mojom::blink::ScriptType::kClassic;
       bool is_import_map = false;
       if (!ScriptLoader::IsValidScriptTypeAndLanguage(
               type_attribute_value_, language_attribute_value_,
@@ -962,9 +960,8 @@ void TokenPreloadScanner::ScanCommon(
             const typename Token::Attribute* content_attribute =
                 token.GetAttributeItem(html_names::kContentAttr);
             if (content_attribute) {
-              client_hints_preferences_.UpdateFromAcceptClientHintsHeader(
-                  content_attribute->Value(), document_url_,
-                  ClientHintsPreferences::UpdateMode::kMerge, nullptr);
+              client_hints_preferences_.UpdateFromHttpEquivAcceptCH(
+                  content_attribute->Value(), document_url_, nullptr);
             }
           }
           return;

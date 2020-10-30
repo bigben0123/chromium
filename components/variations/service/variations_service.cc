@@ -103,7 +103,7 @@ std::string GetPlatformString() {
   return "win";
 #elif defined(OS_IOS)
   return "ios";
-#elif defined(OS_MACOSX)
+#elif defined(OS_APPLE)
   return "mac";
 #elif defined(OS_CHROMEOS)
   return "chromeos";
@@ -152,13 +152,6 @@ void RecordRequestsAllowedHistogram(ResourceRequestsAllowedState state) {
   UMA_HISTOGRAM_ENUMERATION("Variations.ResourceRequestsAllowed", state,
                             RESOURCE_REQUESTS_ALLOWED_ENUM_SIZE);
 }
-
-enum VariationsSeedExpiry {
-  VARIATIONS_SEED_EXPIRY_NOT_EXPIRED,
-  VARIATIONS_SEED_EXPIRY_FETCH_TIME_MISSING,
-  VARIATIONS_SEED_EXPIRY_EXPIRED,
-  VARIATIONS_SEED_EXPIRY_ENUM_SIZE,
-};
 
 // Converts ResourceRequestAllowedNotifier::State to the corresponding
 // ResourceRequestsAllowedState value.
@@ -1006,7 +999,8 @@ bool VariationsService::SetupFieldTrials(
   return field_trial_creator_.SetupFieldTrials(
       kEnableGpuBenchmarking, kEnableFeatures, kDisableFeatures, variation_ids,
       extra_overrides, CreateLowEntropyProvider(), std::move(feature_list),
-      platform_field_trials, &safe_seed_manager_);
+      platform_field_trials, &safe_seed_manager_,
+      state_manager_->GetLowEntropySource());
 }
 
 void VariationsService::OverrideCachedUIStrings() {

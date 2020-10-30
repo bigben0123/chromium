@@ -16,7 +16,7 @@ GpuMemoryBufferConfigurationSet GetNativeGpuMemoryBufferConfigurations(
     GpuMemoryBufferSupport* support) {
   GpuMemoryBufferConfigurationSet configurations;
 
-#if defined(USE_OZONE) || defined(OS_MACOSX) || defined(OS_WIN) || \
+#if defined(USE_OZONE) || defined(OS_MAC) || defined(OS_WIN) || \
     defined(OS_ANDROID)
 #if defined(USE_OZONE)
   if (!features::IsUsingOzonePlatform())
@@ -40,6 +40,7 @@ GpuMemoryBufferConfigurationSet GetNativeGpuMemoryBufferConfigurations(
       gfx::BufferUsage::SCANOUT_CPU_READ_WRITE,
       gfx::BufferUsage::SCANOUT_VDA_WRITE,
       gfx::BufferUsage::GPU_READ_CPU_READ_WRITE,
+      gfx::BufferUsage::SCANOUT_VEA_CPU_READ,
       gfx::BufferUsage::SCANOUT_VEA_READ_CAMERA_AND_CPU_READ_WRITE,
   };
 
@@ -49,7 +50,7 @@ GpuMemoryBufferConfigurationSet GetNativeGpuMemoryBufferConfigurations(
         configurations.insert(gfx::BufferUsageAndFormat(usage, format));
     }
   }
-#endif  // defined(USE_OZONE) || defined(OS_MACOSX) || defined(OS_WIN) ||
+#endif  // defined(USE_OZONE) || defined(OS_MAC) || defined(OS_WIN) ||
         // defined(OS_ANDROID)
 
   return configurations;
@@ -59,7 +60,7 @@ bool GetImageNeedsPlatformSpecificTextureTarget(gfx::BufferFormat format,
                                                 gfx::BufferUsage usage) {
   if (!NativeBufferNeedsPlatformSpecificTextureTarget(format))
     return false;
-#if defined(USE_OZONE) || defined(OS_MACOSX) || defined(OS_WIN) || \
+#if defined(USE_OZONE) || defined(OS_MAC) || defined(OS_WIN) || \
     defined(OS_ANDROID)
   GpuMemoryBufferSupport support;
   GpuMemoryBufferConfigurationSet native_configurations =

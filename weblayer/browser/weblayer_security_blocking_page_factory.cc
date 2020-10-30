@@ -6,10 +6,13 @@
 
 #include "components/captive_portal/core/buildflags.h"
 #include "components/security_interstitials/content/content_metrics_helper.h"
+#include "components/security_interstitials/content/insecure_form_blocking_page.h"
+#include "components/security_interstitials/content/settings_page_helper.h"
 #include "components/security_interstitials/content/ssl_blocking_page.h"
 #include "components/security_interstitials/core/metrics_helper.h"
 #include "content/public/browser/web_contents.h"
 #include "weblayer/browser/captive_portal_service_factory.h"
+#include "weblayer/browser/insecure_form_controller_client.h"
 #include "weblayer/browser/ssl_error_controller_client.h"
 
 #if defined(OS_ANDROID)
@@ -67,6 +70,13 @@ CreateMetricsHelperAndStartRecording(content::WebContents* web_contents,
   return metrics_helper;
 }
 
+std::unique_ptr<security_interstitials::SettingsPageHelper>
+CreateSettingsPageHelper() {
+  // TODO(crbug.com/1080748): Set settings_page_helper once enhanced protection
+  // is supported on weblayer.
+  return nullptr;
+}
+
 }  // namespace
 
 std::unique_ptr<SSLBlockingPage>
@@ -85,7 +95,8 @@ WebLayerSecurityBlockingPageFactory::CreateSSLPage(
       web_contents, cert_error, ssl_info, request_url,
       CreateMetricsHelperAndStartRecording(
           web_contents, request_url,
-          overridable ? "ssl_overridable" : "ssl_nonoverridable", overridable));
+          overridable ? "ssl_overridable" : "ssl_nonoverridable", overridable),
+      CreateSettingsPageHelper());
 
   auto interstitial_page = std::make_unique<SSLBlockingPage>(
       web_contents, cert_error, ssl_info, request_url, options_mask,
@@ -106,7 +117,8 @@ WebLayerSecurityBlockingPageFactory::CreateCaptivePortalBlockingPage(
   auto controller_client = std::make_unique<SSLErrorControllerClient>(
       web_contents, cert_error, ssl_info, request_url,
       CreateMetricsHelperAndStartRecording(web_contents, request_url,
-                                           "captive_portal", false));
+                                           "captive_portal", false),
+      CreateSettingsPageHelper());
 
   auto interstitial_page = std::make_unique<CaptivePortalBlockingPage>(
       web_contents, request_url, login_url, std::move(ssl_cert_reporter),
@@ -128,7 +140,8 @@ WebLayerSecurityBlockingPageFactory::CreateBadClockBlockingPage(
   auto controller_client = std::make_unique<SSLErrorControllerClient>(
       web_contents, cert_error, ssl_info, request_url,
       CreateMetricsHelperAndStartRecording(web_contents, request_url,
-                                           "bad_clock", false));
+                                           "bad_clock", false),
+      CreateSettingsPageHelper());
 
   auto interstitial_page = std::make_unique<BadClockBlockingPage>(
       web_contents, cert_error, ssl_info, request_url,
@@ -148,7 +161,8 @@ WebLayerSecurityBlockingPageFactory::CreateLegacyTLSBlockingPage(
   auto controller_client = std::make_unique<SSLErrorControllerClient>(
       web_contents, cert_error, ssl_info, request_url,
       CreateMetricsHelperAndStartRecording(web_contents, request_url,
-                                           "legacy_tls", false));
+                                           "legacy_tls", false),
+      CreateSettingsPageHelper());
 
   auto interstitial_page = std::make_unique<LegacyTLSBlockingPage>(
       web_contents, cert_error, request_url, std::move(ssl_cert_reporter),
@@ -168,7 +182,8 @@ WebLayerSecurityBlockingPageFactory::CreateMITMSoftwareBlockingPage(
   auto controller_client = std::make_unique<SSLErrorControllerClient>(
       web_contents, cert_error, ssl_info, request_url,
       CreateMetricsHelperAndStartRecording(web_contents, request_url,
-                                           "mitm_software", false));
+                                           "mitm_software", false),
+      CreateSettingsPageHelper());
 
   auto interstitial_page = std::make_unique<MITMSoftwareBlockingPage>(
       web_contents, cert_error, request_url, std::move(ssl_cert_reporter),
@@ -188,7 +203,8 @@ WebLayerSecurityBlockingPageFactory::CreateBlockedInterceptionBlockingPage(
   auto controller_client = std::make_unique<SSLErrorControllerClient>(
       web_contents, cert_error, ssl_info, request_url,
       CreateMetricsHelperAndStartRecording(web_contents, request_url,
-                                           "blocked_interception", false));
+                                           "blocked_interception", false),
+      CreateSettingsPageHelper());
 
   auto interstitial_page = std::make_unique<BlockedInterceptionBlockingPage>(
       web_contents, cert_error, request_url, std::move(ssl_cert_reporter),
@@ -201,10 +217,12 @@ std::unique_ptr<security_interstitials::InsecureFormBlockingPage>
 WebLayerSecurityBlockingPageFactory::CreateInsecureFormBlockingPage(
     content::WebContents* web_contents,
     const GURL& request_url) {
-  // TODO(crbug.com/1093102): Insecure form warnings are not yet implemented in
-  // Weblayer.
-  NOTREACHED();
-  return nullptr;
+  std::unique_ptr<InsecureFormControllerClient> client =
+      std::make_unique<InsecureFormControllerClient>(web_contents, request_url);
+  auto page =
+      std::make_unique<security_interstitials::InsecureFormBlockingPage>(
+          web_contents, request_url, std::move(client));
+  return page;
 }
 
 #if defined(OS_ANDROID)

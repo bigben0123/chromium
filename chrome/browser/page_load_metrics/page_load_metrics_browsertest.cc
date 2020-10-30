@@ -25,16 +25,12 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/page_load_metrics/observers/aborts_page_load_metrics_observer.h"
+#include "chrome/browser/page_load_metrics/observers/core/ukm_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/document_write_page_load_metrics_observer.h"
-#include "chrome/browser/page_load_metrics/observers/no_state_prefetch_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/service_worker_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/session_restore_page_load_metrics_observer.h"
-#include "chrome/browser/page_load_metrics/observers/ukm_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_initialize.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
-#include "chrome/browser/prerender/prerender_handle.h"
-#include "chrome/browser/prerender/prerender_histograms.h"
-#include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/prerender/prerender_test_utils.h"
 #include "chrome/browser/profiles/profile.h"
@@ -56,11 +52,14 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/keep_alive_registry/keep_alive_types.h"
 #include "components/keep_alive_registry/scoped_keep_alive.h"
-#include "components/page_load_metrics/browser/observers/core_page_load_metrics_observer.h"
+#include "components/page_load_metrics/browser/observers/core/uma_page_load_metrics_observer.h"
 #include "components/page_load_metrics/browser/observers/use_counter_page_load_metrics_observer.h"
 #include "components/page_load_metrics/browser/page_load_metrics_test_waiter.h"
 #include "components/page_load_metrics/browser/page_load_tracker.h"
 #include "components/prefs/pref_service.h"
+#include "components/prerender/browser/prerender_handle.h"
+#include "components/prerender/browser/prerender_histograms.h"
+#include "components/prerender/browser/prerender_manager.h"
 #include "components/prerender/common/prerender_origin.h"
 #include "components/sessions/content/content_test_helper.h"
 #include "components/sessions/core/serialized_navigation_entry.h"
@@ -78,14 +77,8 @@
 #include "content/public/test/test_navigation_observer.h"
 #include "net/base/net_errors.h"
 #include "net/dns/mock_host_resolver.h"
-#include "net/http/http_cache.h"
 #include "net/test/embedded_test_server/controllable_http_response.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
-#include "net/test/url_request/url_request_failed_job.h"
-#include "net/test/url_request/url_request_mock_http_job.h"
-#include "net/url_request/url_request_context.h"
-#include "net/url_request/url_request_context_getter.h"
-#include "net/url_request/url_request_filter.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/network/public/cpp/features.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -99,6 +92,7 @@
 using page_load_metrics::PageLoadMetricsTestWaiter;
 using TimingField = page_load_metrics::PageLoadMetricsTestWaiter::TimingField;
 using WebFeature = blink::mojom::WebFeature;
+using testing::SizeIs;
 using testing::UnorderedElementsAre;
 using NoStatePrefetch = ukm::builders::NoStatePrefetch;
 
@@ -732,7 +726,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, NoPaintForEmptyDocument) {
 }
 
 // TODO(crbug.com/986642): Flaky on Win and Linux.
-#if defined(OS_WIN) || defined(OS_LINUX)
+#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_CHROMEOS)
 #define MAYBE_NoPaintForEmptyDocumentInChildFrame \
   DISABLED_NoPaintForEmptyDocumentInChildFrame
 #else
@@ -1270,7 +1264,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
 }
 
 // TODO(crbug.com/1009885): Flaky on Linux MSan builds.
-#if defined(MEMORY_SANITIZER) && defined(OS_LINUX)
+#if defined(MEMORY_SANITIZER) && (defined(OS_LINUX) || defined(OS_CHROMEOS))
 #define MAYBE_FirstMeaningfulPaintRecorded DISABLED_FirstMeaningfulPaintRecorded
 #else
 #define MAYBE_FirstMeaningfulPaintRecorded FirstMeaningfulPaintRecorded
@@ -1318,44 +1312,6 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
                                       0);
   histogram_tester_->ExpectTotalCount(
       internal::kHistogramParseStartToFirstMeaningfulPaint, 0);
-}
-
-IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
-                       NoStatePrefetchObserverCacheable) {
-  ASSERT_TRUE(embedded_test_server()->Start());
-
-  auto waiter = CreatePageLoadMetricsTestWaiter();
-  waiter->AddPageExpectation(TimingField::kFirstContentfulPaint);
-
-  ui_test_utils::NavigateToURL(browser(),
-                               embedded_test_server()->GetURL("/title1.html"));
-
-  waiter->Wait();
-
-  histogram_tester_->ExpectTotalCount(
-      "Prerender.none_PrefetchTTFCP.Reference.NoStore.Visible", 0);
-  histogram_tester_->ExpectTotalCount(
-      "Prerender.none_PrefetchTTFCP.Reference.Cacheable.Visible", 1);
-  histogram_tester_->ExpectTotalCount(
-      "PageLoad.PaintTiming.ParseStartToFirstContentfulPaint", 1);
-}
-
-IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
-                       NoStatePrefetchObserverNoStore) {
-  ASSERT_TRUE(embedded_test_server()->Start());
-
-  auto waiter = CreatePageLoadMetricsTestWaiter();
-  waiter->AddPageExpectation(TimingField::kFirstContentfulPaint);
-
-  ui_test_utils::NavigateToURL(browser(),
-                               embedded_test_server()->GetURL("/nostore.html"));
-
-  waiter->Wait();
-
-  histogram_tester_->ExpectTotalCount(
-      "Prerender.none_PrefetchTTFCP.Reference.NoStore.Visible", 1);
-  histogram_tester_->ExpectTotalCount(
-      "Prerender.none_PrefetchTTFCP.Reference.Cacheable.Visible", 0);
 }
 
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, PayloadSize) {
@@ -1687,7 +1643,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
 
   const auto& entries = test_ukm_recorder_->GetEntriesByName(
       ukm::builders::Blink_UseCounter::kEntryName);
-  EXPECT_EQ(4u, entries.size());
+  EXPECT_THAT(entries, SizeIs(4));
   std::vector<int64_t> ukm_features;
   for (const auto* entry : entries) {
     test_ukm_recorder_->ExpectEntrySourceHasUrl(entry, url);
@@ -1728,7 +1684,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTestWithAutoupgradesDisabled,
 
   const auto& entries = test_ukm_recorder_->GetEntriesByName(
       ukm::builders::Blink_UseCounter::kEntryName);
-  EXPECT_EQ(7u, entries.size());
+  EXPECT_THAT(entries, SizeIs(7));
   std::vector<int64_t> ukm_features;
   for (const auto* entry : entries) {
     test_ukm_recorder_->ExpectEntrySourceHasUrl(entry, url);
@@ -2183,7 +2139,7 @@ IN_PROC_BROWSER_TEST_F(SessionRestorePageLoadMetricsBrowserTest,
   ExpectFirstPaintMetricsTotalCount(1);
 }
 
-#if defined(OS_WIN) || defined(OS_LINUX)
+#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_CHROMEOS)
 #define MAYBE_InitialForegroundTabChanged DISABLED_InitialForegroundTabChanged
 #else
 #define MAYBE_InitialForegroundTabChanged InitialForegroundTabChanged
@@ -2512,8 +2468,9 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
 
 // Verifies that css image resources shared across document do not cause a
 // crash, and are only counted once per context. https://crbug.com/979459.
+// TODO(crbug.com/1108534): Disabled due to flakiness.
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
-                       MemoryCacheResources_RecordedOncePerContext) {
+                       DISABLED_MemoryCacheResources_RecordedOncePerContext) {
   embedded_test_server()->ServeFilesFromSourceDirectory("chrome/test/data");
   content::SetupCrossSiteRedirector(embedded_test_server());
   ASSERT_TRUE(embedded_test_server()->Start());
@@ -2764,10 +2721,8 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, PreCommitWebFeature) {
       static_cast<int32_t>(WebFeature::kSecureContextCheckFailed), 0);
 }
 
-// TODO(https://crbug/1085175): Main frame document intersections need to be
-// transformed into the main frame documents coordinate system.
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
-                       DISABLED_MainFrameDocumentIntersectionsMainFrame) {
+                       MainFrameIntersectionsMainFrame) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   auto waiter = CreatePageLoadMetricsTestWaiter();
@@ -2783,7 +2738,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
 
   // Expectation is before NavigateToUrl for this test as the expectation can be
   // met after NavigateToUrl and before the Wait.
-  waiter->AddMainFrameDocumentIntersectionExpectation(
+  waiter->AddMainFrameIntersectionExpectation(
       gfx::Rect(0, 0, document_width,
                 document_height));  // Initial main frame rect.
 
@@ -2795,7 +2750,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
 
   // Create a |document_width|x|document_height| frame at 100,100, increasing
   // the page width and height by 100.
-  waiter->AddMainFrameDocumentIntersectionExpectation(
+  waiter->AddMainFrameIntersectionExpectation(
       gfx::Rect(0, 0, document_width + 100, document_height + 100));
   EXPECT_TRUE(ExecJs(
       web_contents,
@@ -2806,10 +2761,8 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
 
 // Creates a single frame within the main frame and verifies the intersection
 // with the main frame.
-// TODO(https://crbug/1085175): Main frame document intersections need to be
-// transformed into the main frame documents coordinate system.
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
-                       DISABLED_MainFrameDocumentIntersectionSingleFrame) {
+                       MainFrameIntersectionSingleFrame) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   auto waiter = CreatePageLoadMetricsTestWaiter();
@@ -2820,8 +2773,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
 
-  waiter->AddMainFrameDocumentIntersectionExpectation(
-      gfx::Rect(100, 100, 200, 200));
+  waiter->AddMainFrameIntersectionExpectation(gfx::Rect(100, 100, 200, 200));
 
   // Create a 200x200 iframe at 100,100.
   EXPECT_TRUE(ExecJs(web_contents,
@@ -2832,10 +2784,8 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
 
 // Creates a set of nested frames within the main frame and verifies
 // their intersections with the main frame.
-// TODO(https://crbug/1085175): Main frame document intersections need to be
-// transformed into the main frame documents coordinate system.
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
-                       DISABLED_MainFrameDocumentIntersectionSameOrigin) {
+                       MainFrameIntersectionSameOrigin) {
   EXPECT_TRUE(embedded_test_server()->Start());
 
   auto waiter = CreatePageLoadMetricsTestWaiter();
@@ -2846,8 +2796,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
 
-  waiter->AddMainFrameDocumentIntersectionExpectation(
-      gfx::Rect(100, 100, 200, 200));
+  waiter->AddMainFrameIntersectionExpectation(gfx::Rect(100, 100, 200, 200));
 
   // Create a 200x200 iframe at 100,100.
   EXPECT_TRUE(ExecJs(web_contents,
@@ -2863,8 +2812,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
   // dimensions 300x300. This frame is clipped by 110 pixels in the bottom and
   // right. This translates to an intersection of 110, 110, 190, 190 with the
   // main frame.
-  waiter->AddMainFrameDocumentIntersectionExpectation(
-      gfx::Rect(110, 110, 190, 190));
+  waiter->AddMainFrameIntersectionExpectation(gfx::Rect(110, 110, 190, 190));
   content::RenderFrameHost* child_frame =
       content::ChildFrameAt(web_contents->GetMainFrame(), 0);
   EXPECT_TRUE(
@@ -2875,10 +2823,8 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
 
 // Creates a set of nested frames, with a cross origin subframe, within the
 // main frame and verifies their intersections with the main frame.
-// TODO(https://crbug/1085175): Main frame document intersections need to be
-// transformed into the main frame documents coordinate system.
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
-                       DISABLED_MainFrameDocumentIntersectionCrossOrigin) {
+                       MainFrameIntersectionCrossOrigin) {
   EXPECT_TRUE(embedded_test_server()->Start());
   auto waiter = CreatePageLoadMetricsTestWaiter();
   ui_test_utils::NavigateToURL(
@@ -2888,8 +2834,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
 
-  waiter->AddMainFrameDocumentIntersectionExpectation(
-      gfx::Rect(100, 100, 200, 200));
+  waiter->AddMainFrameIntersectionExpectation(gfx::Rect(100, 100, 200, 200));
 
   // Create a 200x200 iframe at 100,100.
   EXPECT_TRUE(ExecJs(web_contents,
@@ -2909,8 +2854,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
   // code path as the previous wait can flakily pass due to receiving the
   // correct intersection before the frame transitions to cross-origin without
   // checking that the final computation is consistent.
-  waiter->AddMainFrameDocumentIntersectionExpectation(
-      gfx::Rect(100, 100, 150, 150));
+  waiter->AddMainFrameIntersectionExpectation(gfx::Rect(100, 100, 150, 150));
   EXPECT_TRUE(ExecJs(web_contents,
                      "let frame = document.getElementById('test'); "
                      "frame.width = 150; "
@@ -2921,8 +2865,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
   // dimensions 300x300. This frame is clipped by 110 pixels in the bottom and
   // right. This translates to an intersection of 110, 110, 190, 190 with the
   // main frame.
-  waiter->AddMainFrameDocumentIntersectionExpectation(
-      gfx::Rect(110, 110, 140, 140));
+  waiter->AddMainFrameIntersectionExpectation(gfx::Rect(110, 110, 140, 140));
   content::RenderFrameHost* child_frame =
       content::ChildFrameAt(web_contents->GetMainFrame(), 0);
   EXPECT_TRUE(
@@ -2934,11 +2877,8 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
 // Creates a set of nested frames, with a cross origin subframe that is out of
 // view within the main frame and verifies their intersections with the main
 // frame.
-// TODO(https://crbug/1085175): Main frame document intersections need to be
-// transformed into the main frame documents coordinate system.
-IN_PROC_BROWSER_TEST_F(
-    PageLoadMetricsBrowserTest,
-    DISABLED_MainFrameDocumentIntersectionCrossOriginOutOfView) {
+IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
+                       MainFrameIntersectionCrossOriginOutOfView) {
   EXPECT_TRUE(embedded_test_server()->Start());
   auto waiter = CreatePageLoadMetricsTestWaiter();
   ui_test_utils::NavigateToURL(
@@ -2948,8 +2888,7 @@ IN_PROC_BROWSER_TEST_F(
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
 
-  waiter->AddMainFrameDocumentIntersectionExpectation(
-      gfx::Rect(100, 100, 200, 200));
+  waiter->AddMainFrameIntersectionExpectation(gfx::Rect(100, 100, 200, 200));
 
   // Create a 200x200 iframe at 100,100.
   EXPECT_TRUE(ExecJs(web_contents,
@@ -2967,7 +2906,7 @@ IN_PROC_BROWSER_TEST_F(
 
   // Creates the grandchild iframe within the child frame outside the parent
   // frame's viewport.
-  waiter->AddMainFrameDocumentIntersectionExpectation(gfx::Rect(0, 0, 0, 0));
+  waiter->AddMainFrameIntersectionExpectation(gfx::Rect(0, 0, 0, 0));
   content::RenderFrameHost* child_frame =
       content::ChildFrameAt(web_contents->GetMainFrame(), 0);
   EXPECT_TRUE(ExecJs(child_frame,
@@ -2980,11 +2919,8 @@ IN_PROC_BROWSER_TEST_F(
 // view within the main frame and verifies their intersections with the main
 // frame. The out of view frame is then scrolled back into view and the
 // intersection is verified.
-// TODO(https://crbug/1085175): Main frame document intersections need to be
-// transformed into the main frame documents coordinate system.
-IN_PROC_BROWSER_TEST_F(
-    PageLoadMetricsBrowserTest,
-    DISABLED_MainFrameDocumentIntersectionCrossOriginScrolled) {
+IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest,
+                       MainFrameIntersectionCrossOriginScrolled) {
   EXPECT_TRUE(embedded_test_server()->Start());
   auto waiter = CreatePageLoadMetricsTestWaiter();
   ui_test_utils::NavigateToURL(
@@ -2994,8 +2930,7 @@ IN_PROC_BROWSER_TEST_F(
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
 
-  waiter->AddMainFrameDocumentIntersectionExpectation(
-      gfx::Rect(100, 100, 200, 200));
+  waiter->AddMainFrameIntersectionExpectation(gfx::Rect(100, 100, 200, 200));
 
   // Create a 200x200 iframe at 100,100.
   EXPECT_TRUE(ExecJs(web_contents,
@@ -3013,7 +2948,7 @@ IN_PROC_BROWSER_TEST_F(
 
   // Creates the grandchild iframe within the child frame outside the parent
   // frame's viewport.
-  waiter->AddMainFrameDocumentIntersectionExpectation(gfx::Rect(0, 0, 0, 0));
+  waiter->AddMainFrameIntersectionExpectation(gfx::Rect(0, 0, 0, 0));
   content::RenderFrameHost* child_frame =
       content::ChildFrameAt(web_contents->GetMainFrame(), 0);
   EXPECT_TRUE(ExecJs(child_frame,
@@ -3025,8 +2960,7 @@ IN_PROC_BROWSER_TEST_F(
   // child frame after scrolling is positioned at 100,100 within the parent
   // frame and is clipped to 100x100. The grand child's main frame document
   // position is then 200,200 after the child frame is scrolled.
-  waiter->AddMainFrameDocumentIntersectionExpectation(
-      gfx::Rect(200, 200, 100, 100));
+  waiter->AddMainFrameIntersectionExpectation(gfx::Rect(200, 200, 100, 100));
 
   EXPECT_TRUE(ExecJs(child_frame, "window.scroll(4900, 4900); "));
 
@@ -3261,10 +3195,10 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTestWithBackForwardCache,
       internal::kHistogramBackForwardCacheEvent,
       internal::PageLoadBackForwardCacheEvent::kEnterBackForwardCache, 2);
 
-  // For now CorePageLoadMetricsObserver::OnEnterBackForwardCache returns
+  // For now UmaPageLoadMetricsObserver::OnEnterBackForwardCache returns
   // STOP_OBSERVING, OnRestoreFromBackForward is never reached.
   //
-  // TODO(hajimehoshi): Update this when the CorePageLoadMetricsObserver
+  // TODO(hajimehoshi): Update this when the UmaPageLoadMetricsObserver
   // continues to observe after entering to back-forward cache.
   histogram_tester_->ExpectBucketCount(
       internal::kHistogramBackForwardCacheEvent,

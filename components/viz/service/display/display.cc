@@ -26,6 +26,7 @@
 #include "components/viz/common/quads/draw_quad.h"
 #include "components/viz/common/quads/shared_quad_state.h"
 #include "components/viz/common/viz_utils.h"
+#include "components/viz/service/display/aggregated_frame.h"
 #include "components/viz/service/display/damage_frame_annotator.h"
 #include "components/viz/service/display/direct_renderer.h"
 #include "components/viz/service/display/display_client.h"
@@ -51,7 +52,7 @@
 #include "ui/gfx/swap_result.h"
 
 #if defined(OS_ANDROID)
-#include "ui/gl/android/android_surface_control_compat.h"
+#include "ui/gfx/android/android_surface_control_compat.h"
 #endif
 namespace viz {
 
@@ -244,7 +245,10 @@ bool ReduceComplexity(const cc::Region& region,
 bool SupportsSetFrameRate(const OutputSurface* output_surface) {
 #if defined(OS_ANDROID)
   return output_surface->capabilities().supports_surfaceless &&
-         gl::SurfaceControl::SupportsSetFrameRate();
+         gfx::SurfaceControl::SupportsSetFrameRate();
+#elif defined(OS_WIN)
+  return output_surface->capabilities().supports_dc_layers &&
+         features::ShouldUseSetPresentDuration();
 #endif
   return false;
 }
@@ -286,14 +290,18 @@ void Display::PresentationGroupTiming::OnPresent(
 Display::Display(
     SharedBitmapManager* bitmap_manager,
     const RendererSettings& settings,
+    const DebugRendererSettings* debug_settings,
     const FrameSinkId& frame_sink_id,
+    std::unique_ptr<DisplayCompositorMemoryAndTaskController> gpu_dependency,
     std::unique_ptr<OutputSurface> output_surface,
     std::unique_ptr<OverlayProcessorInterface> overlay_processor,
     std::unique_ptr<DisplaySchedulerBase> scheduler,
     scoped_refptr<base::SingleThreadTaskRunner> current_task_runner)
     : bitmap_manager_(bitmap_manager),
       settings_(settings),
+      debug_settings_(debug_settings),
       frame_sink_id_(frame_sink_id),
+      gpu_dependency_(std::move(gpu_dependency)),
       output_surface_(std::move(output_surface)),
       skia_output_surface_(output_surface_->AsSkiaOutputSurface()),
       scheduler_(std::move(scheduler)),
@@ -306,8 +314,6 @@ Display::Display(
   DCHECK(frame_sink_id_.is_valid());
   if (scheduler_)
     scheduler_->SetClient(this);
-  enable_quad_splitting_ = features::ShouldSplitPartiallyOccludedQuads() &&
-                           !overlay_processor_->DisableSplittingQuads();
 }
 
 Display::~Display() {
@@ -515,32 +521,20 @@ void Display::InitializeRenderer(bool enable_shared_images) {
       mode, output_surface_->context_provider(), bitmap_manager_,
       enable_shared_images);
   if (settings_.use_skia_renderer && mode == DisplayResourceProvider::kGpu) {
-    // Default to use DDL if skia_output_surface is not null.
-    if (skia_output_surface_) {
-      renderer_ = std::make_unique<SkiaRenderer>(
-          &settings_, output_surface_.get(), resource_provider_.get(),
-          overlay_processor_.get(), skia_output_surface_,
-          SkiaRenderer::DrawMode::DDL);
-    } else {
-      // GPU compositing with GL to an SKP.
-      DCHECK(output_surface_);
-      DCHECK(output_surface_->context_provider());
-      DCHECK(settings_.record_sk_picture);
-      DCHECK(!overlay_processor_->IsOverlaySupported());
-      renderer_ = std::make_unique<SkiaRenderer>(
-          &settings_, output_surface_.get(), resource_provider_.get(),
-          overlay_processor_.get(), nullptr /* skia_output_surface */,
-          SkiaRenderer::DrawMode::SKPRECORD);
-    }
+    renderer_ = std::make_unique<SkiaRenderer>(
+        &settings_, debug_settings_, output_surface_.get(),
+        resource_provider_.get(), overlay_processor_.get(),
+        skia_output_surface_);
   } else if (output_surface_->context_provider()) {
     renderer_ = std::make_unique<GLRenderer>(
-        &settings_, output_surface_.get(), resource_provider_.get(),
-        overlay_processor_.get(), current_task_runner_);
+        &settings_, debug_settings_, output_surface_.get(),
+        resource_provider_.get(), overlay_processor_.get(),
+        current_task_runner_);
   } else {
     DCHECK(!overlay_processor_->IsOverlaySupported());
     auto renderer = std::make_unique<SoftwareRenderer>(
-        &settings_, output_surface_.get(), resource_provider_.get(),
-        overlay_processor_.get());
+        &settings_, debug_settings_, output_surface_.get(),
+        resource_provider_.get(), overlay_processor_.get());
     software_renderer_ = renderer.get();
     renderer_ = std::move(renderer);
   }
@@ -560,19 +554,12 @@ void Display::InitializeRenderer(bool enable_shared_images) {
 
   aggregator_ = std::make_unique<SurfaceAggregator>(
       surface_manager_, resource_provider_.get(), output_partial_list,
-      overlay_processor_->NeedsSurfaceOccludingDamageRect());
-  if (settings_.show_aggregated_damage)
-    aggregator_->SetFrameAnnotator(std::make_unique<DamageFrameAnnotator>());
+      overlay_processor_->NeedsSurfaceDamageRectList());
 
   aggregator_->set_output_is_secure(output_is_secure_);
   aggregator_->SetDisplayColorSpaces(display_color_spaces_);
-  // Consider adding a softare limit as well.
-  aggregator_->SetMaximumTextureSize(
-      (output_surface_ && output_surface_->context_provider())
-          ? output_surface_->context_provider()
-                ->ContextCapabilities()
-                .max_texture_size
-          : 0);
+  aggregator_->SetMaxRenderTargetSize(
+      output_surface_->capabilities().max_render_target_size);
 }
 
 bool Display::IsRootFrameMissing() const {
@@ -593,6 +580,14 @@ void Display::OnContextLost() {
 
 bool Display::DrawAndSwap(base::TimeTicks expected_display_time) {
   TRACE_EVENT0("viz", "Display::DrawAndSwap");
+  if (debug_settings_->show_aggregated_damage !=
+      aggregator_->HasFrameAnnotator()) {
+    if (debug_settings_->show_aggregated_damage) {
+      aggregator_->SetFrameAnnotator(std::make_unique<DamageFrameAnnotator>());
+    } else {
+      aggregator_->DestroyFrameAnnotator();
+    }
+  }
   gpu::ScopedAllowScheduleGpuTask allow_schedule_gpu_task;
 
   if (!current_surface_id_.is_valid()) {
@@ -639,13 +634,18 @@ bool Display::DrawAndSwap(base::TimeTicks expected_display_time) {
 
   base::ElapsedTimer aggregate_timer;
   aggregate_timer.Begin();
-  CompositorFrame frame;
+  AggregatedFrame frame;
   {
     FrameRateDecider::ScopedAggregate scoped_aggregate(
         frame_rate_decider_.get());
     gfx::Rect target_damage_bounding_rect;
     if (output_surface_->capabilities().supports_target_damage)
       target_damage_bounding_rect = renderer_->GetTargetDamageBoundingRect();
+
+    // Ensure that the surfaces that were damaged by any delegated ink trail are
+    // aggregated again so that the trail exists for a single frame.
+    target_damage_bounding_rect.Union(
+        renderer_->GetDelegatedInkTrailDamageRect());
 
     frame = aggregator_->Aggregate(
         current_surface_id_, expected_display_time, current_display_transform,
@@ -656,25 +656,25 @@ bool Display::DrawAndSwap(base::TimeTicks expected_display_time) {
   // TODO(vikassoni) : Extend this capability to record whether a video frame is
   // inline or fullscreen.
   UMA_HISTOGRAM_ENUMERATION("Compositing.SurfaceAggregator.FrameContainsVideo",
-                            frame.metadata.may_contain_video
+                            frame.may_contain_video
                                 ? TypeOfVideoInFrame::kVideo
                                 : TypeOfVideoInFrame::kNoVideo);
 
-  if (frame.metadata.delegated_ink_metadata) {
-    TRACE_EVENT_INSTANT2(
+  if (frame.delegated_ink_metadata) {
+    TRACE_EVENT_INSTANT1(
         "viz", "Delegated Ink Metadata was aggregated for DrawAndSwap.",
-        TRACE_EVENT_SCOPE_THREAD, "point",
-        frame.metadata.delegated_ink_metadata->point().ToString(), "area",
-        frame.metadata.delegated_ink_metadata->presentation_area().ToString());
-    // TODO(1052145): This metadata will be stored here and used to determine
-    // which points should be drawn onto the back buffer (via Skia or OS APIs)
-    // before being swapped onto the screen.
+        TRACE_EVENT_SCOPE_THREAD, "ink metadata",
+        frame.delegated_ink_metadata->ToString());
+    renderer_->SetDelegatedInkMetadata(std::move(frame.delegated_ink_metadata));
   }
 
+  UMA_HISTOGRAM_ENUMERATION("Compositing.ColorGamut",
+                            frame.content_color_usage);
+
 #if defined(OS_ANDROID)
-  bool wide_color_enabled = display_color_spaces_.GetOutputColorSpace(
-                                frame.metadata.content_color_usage, true) !=
-                            gfx::ColorSpace::CreateSRGB();
+  bool wide_color_enabled =
+      display_color_spaces_.GetOutputColorSpace(
+          frame.content_color_usage, true) != gfx::ColorSpace::CreateSRGB();
   if (wide_color_enabled != last_wide_color_enabled_) {
     client_->SetWideColorEnabled(wide_color_enabled);
     last_wide_color_enabled_ = wide_color_enabled;
@@ -696,13 +696,11 @@ bool Display::DrawAndSwap(base::TimeTicks expected_display_time) {
   // Run callbacks early to allow pipelining and collect presented callbacks.
   damage_tracker_->RunDrawCallbacks();
 
-  frame.metadata.latency_info.insert(frame.metadata.latency_info.end(),
-                                     stored_latency_info_.begin(),
-                                     stored_latency_info_.end());
+  frame.latency_info.insert(frame.latency_info.end(),
+                            stored_latency_info_.begin(),
+                            stored_latency_info_.end());
   stored_latency_info_.clear();
-  bool have_copy_requests = false;
-  for (const auto& pass : frame.render_pass_list)
-    have_copy_requests |= !pass->copy_requests.empty();
+  bool have_copy_requests = frame.has_copy_requests;
 
   gfx::Size surface_size;
   bool have_damage = false;
@@ -725,6 +723,7 @@ bool Display::DrawAndSwap(base::TimeTicks expected_display_time) {
     // skip the draw and so that the GL swap won't stretch the output.
     last_render_pass.output_rect.set_size(current_surface_size);
     last_render_pass.damage_rect = last_render_pass.output_rect;
+    frame.surface_damage_rect_list_.push_back(last_render_pass.damage_rect);
   }
   surface_size = last_render_pass.output_rect.size();
   have_damage = !last_render_pass.damage_rect.size().IsEmpty();
@@ -747,8 +746,14 @@ bool Display::DrawAndSwap(base::TimeTicks expected_display_time) {
         "Compositing.Display.Draw.Occlusion.Calculation.Time",
         draw_occlusion_timer.Elapsed().InMicroseconds());
 
-    bool disable_image_filtering =
-        frame.metadata.is_resourceless_software_draw_with_scroll_or_animation;
+    // TODO(vmpstr): This used to set to
+    // frame.metadata.is_resourceless_software_draw_with_scroll_or_animation
+    // from CompositedFrame. However, after changing this to AggregatedFrame, it
+    // seems that the value is never changed from the default false (i.e.
+    // SurfaceAggregator has no reference to
+    // is_resourceless_software_draw_with_scroll_or_animation). The TODO here is
+    // to clean up the code below or to figure out if this value is important.
+    bool disable_image_filtering = false;
     if (software_renderer_) {
       software_renderer_->SetDisablePictureQuadImageFiltering(
           disable_image_filtering);
@@ -760,7 +765,8 @@ bool Display::DrawAndSwap(base::TimeTicks expected_display_time) {
     draw_timer.emplace();
     renderer_->DecideRenderPassAllocationsForFrame(frame.render_pass_list);
     renderer_->DrawFrame(&frame.render_pass_list, device_scale_factor_,
-                         current_surface_size, display_color_spaces_);
+                         current_surface_size, display_color_spaces_,
+                         &frame.surface_damage_rect_list_);
     switch (output_surface_->type()) {
       case OutputSurface::Type::kSoftware:
         UMA_HISTOGRAM_COUNTS_1M(
@@ -804,18 +810,17 @@ bool Display::DrawAndSwap(base::TimeTicks expected_display_time) {
     swapped_since_resize_ = true;
 
     ui::LatencyInfo::TraceIntermediateFlowEvents(
-        frame.metadata.latency_info,
+        frame.latency_info,
         perfetto::protos::pbzero::ChromeLatencyInfo::STEP_DRAW_AND_SWAP);
 
     cc::benchmark_instrumentation::IssueDisplayRenderingStatsEvent();
     DirectRenderer::SwapFrameData swap_frame_data;
-    swap_frame_data.latency_info = std::move(frame.metadata.latency_info);
-    if (frame.metadata.top_controls_visible_height.has_value()) {
+    swap_frame_data.latency_info = std::move(frame.latency_info);
+    if (frame.top_controls_visible_height.has_value()) {
       swap_frame_data.top_controls_visible_height_changed =
           last_top_controls_visible_height_ !=
-          *frame.metadata.top_controls_visible_height;
-      last_top_controls_visible_height_ =
-          *frame.metadata.top_controls_visible_height;
+          *frame.top_controls_visible_height;
+      last_top_controls_visible_height_ = *frame.top_controls_visible_height;
     }
 
     // We must notify scheduler and increase |pending_swaps_| before calling
@@ -833,16 +838,15 @@ bool Display::DrawAndSwap(base::TimeTicks expected_display_time) {
 
     if (have_damage) {
       // Do not store more than the allowed size.
-      if (ui::LatencyInfo::Verify(frame.metadata.latency_info,
-                                  "Display::DrawAndSwap")) {
-        stored_latency_info_.swap(frame.metadata.latency_info);
+      if (ui::LatencyInfo::Verify(frame.latency_info, "Display::DrawAndSwap")) {
+        stored_latency_info_.swap(frame.latency_info);
       }
     } else {
       // There was no damage. Terminate the latency info objects.
-      while (!frame.metadata.latency_info.empty()) {
-        auto& latency = frame.metadata.latency_info.back();
+      while (!frame.latency_info.empty()) {
+        auto& latency = frame.latency_info.back();
         latency.Terminate();
-        frame.metadata.latency_info.pop_back();
+        frame.latency_info.pop_back();
       }
     }
 
@@ -920,6 +924,16 @@ void Display::DidReceiveSwapBuffersAck(const gfx::SwapTimings& timings) {
         "Compositing.Display.DrawToSwapUs", delta, kDrawToSwapMin,
         kDrawToSwapMax, kDrawToSwapUsBuckets);
   }
+
+  if (!timings.viz_scheduled_draw.is_null()) {
+    DCHECK(!timings.gpu_started_draw.is_null());
+    DCHECK_LE(timings.viz_scheduled_draw, timings.gpu_started_draw);
+    base::TimeDelta delta =
+        timings.gpu_started_draw - timings.viz_scheduled_draw;
+    UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
+        "Compositing.Display.VizScheduledDrawToGpuStartedDrawUs", delta,
+        kDrawToSwapMin, kDrawToSwapMax, kDrawToSwapUsBuckets);
+  }
 }
 
 void Display::DidReceiveTextureInUseResponses(
@@ -955,8 +969,23 @@ void Display::DidReceivePresentationFeedback(
   TRACE_EVENT_INSTANT_WITH_TIMESTAMP0(
       "benchmark,viz", "Display::FrameDisplayed", TRACE_EVENT_SCOPE_THREAD,
       copy_feedback.timestamp);
+
+  if (renderer_->CompositeTimeTracingEnabled()) {
+    if (copy_feedback.ready_timestamp.is_null()) {
+      LOG(WARNING) << "Ready Timestamp unavailable";
+    } else {
+      renderer_->AddCompositeTimeTraces(copy_feedback.ready_timestamp);
+    }
+  }
+
   presentation_group_timing.OnPresent(copy_feedback);
   pending_presentation_group_timings_.pop_front();
+}
+
+void Display::DidReceiveReleasedOverlays(
+    const std::vector<gpu::Mailbox>& released_overlays) {
+  if (renderer_)
+    renderer_->DidReceiveReleasedOverlays(released_overlays);
 }
 
 void Display::SetNeedsRedrawRect(const gfx::Rect& damage_rect) {
@@ -968,10 +997,10 @@ void Display::DidFinishFrame(const BeginFrameAck& ack) {
   for (auto& observer : observers_)
     observer.OnDisplayDidFinishFrame(ack);
 
-  // Only used with experimental de-jelly effect. Forces us to produce a new
-  // un-skewed frame if the last one had a de-jelly skew applied. This prevents
-  // de-jelly skew from staying on screen for more than one frame.
-  if (aggregator_->last_frame_had_jelly()) {
+  // Prevent de-jelly skew or a delegated ink trail from staying on the screen
+  // for more than one frame by forcing a new frame to be produced.
+  if (aggregator_->last_frame_had_jelly() ||
+      !renderer_->GetDelegatedInkTrailDamageRect().IsEmpty()) {
     scheduler_->SetNeedsOneBeginFrame(true);
   }
 }
@@ -1006,11 +1035,11 @@ void Display::SetNeedsOneBeginFrame() {
     scheduler_->SetNeedsOneBeginFrame(false);
 }
 
-void Display::RemoveOverdrawQuads(CompositorFrame* frame) {
+void Display::RemoveOverdrawQuads(AggregatedFrame* frame) {
   if (frame->render_pass_list.empty())
     return;
 
-  base::flat_map<RenderPassId, gfx::Rect> backdrop_filter_rects;
+  base::flat_map<AggregatedRenderPassId, gfx::Rect> backdrop_filter_rects;
   for (const auto& pass : frame->render_pass_list) {
     if (!pass->backdrop_filters.IsEmpty() &&
         pass->backdrop_filters.HasFilterThatMovesPixels()) {
@@ -1038,15 +1067,18 @@ void Display::RemoveOverdrawQuads(CompositorFrame* frame) {
     cc::Region occlusion_in_quad_content_space;
     gfx::Rect render_pass_quads_in_content_space;
     for (auto quad = pass->quad_list.begin(); quad != quad_list_end;) {
-      // Skip quad if it is a RenderPassDrawQuad because RenderPassDrawQuad is a
+      // Sanity check: we should not have a Compositor
+      // CompositorRenderPassDrawQuad here.
+      DCHECK_NE(quad->material, DrawQuad::Material::kCompositorRenderPass);
+      // Skip quad if it is a AggregatedRenderPassDrawQuad because it is a
       // special type of DrawQuad where the visible_rect of shared quad state is
       // not entirely covered by draw quads in it.
-      if (quad->material == ContentDrawQuadBase::Material::kRenderPass) {
+      if (quad->material == DrawQuad::Material::kAggregatedRenderPass) {
         // A RenderPass with backdrop filters may apply to a quad underlying
         // RenderPassQuad. These regions should be tracked so that correctly
         // handle splitting and occlusion of the underlying quad.
-        auto it = backdrop_filter_rects.find(
-            RenderPassDrawQuad::MaterialCast(*quad)->render_pass_id);
+        auto* rpdq = AggregatedRenderPassDrawQuad::MaterialCast(*quad);
+        auto it = backdrop_filter_rects.find(rpdq->render_pass_id);
         if (it != backdrop_filter_rects.end()) {
           backdrop_filters_in_target_space.Union(it->second);
         }
@@ -1079,9 +1111,10 @@ void Display::RemoveOverdrawQuads(CompositorFrame* frame) {
           // If a rounded corner is being applied then the visible rect for the
           // sqs is actually even smaller. Reduce the rect size to get a
           // rounded corner adjusted occluding region.
-          if (!last_sqs->rounded_corner_bounds.IsEmpty()) {
-            sqs_rect_in_target.Intersect(gfx::ToEnclosedRect(
-                GetOccludingRectForRRectF(last_sqs->rounded_corner_bounds)));
+          if (last_sqs->mask_filter_info.HasRoundedCorners()) {
+            sqs_rect_in_target.Intersect(
+                gfx::ToEnclosedRect(GetOccludingRectForRRectF(
+                    last_sqs->mask_filter_info.rounded_corner_bounds())));
           }
 
           if (last_sqs->is_clipped)
@@ -1184,7 +1217,7 @@ void Display::RemoveOverdrawQuads(CompositorFrame* frame) {
         // Split quad into multiple draw quads when area can be reduce by
         // more than X fragments.
         const bool should_split_quads =
-            enable_quad_splitting_ &&
+            !overlay_processor_->DisableSplittingQuads() &&
             !visible_region.Intersects(render_pass_quads_in_content_space) &&
             ReduceComplexity(visible_region, settings_.quad_split_limit,
                              &cached_visible_region_) &&
@@ -1218,10 +1251,14 @@ void Display::RemoveOverdrawQuads(CompositorFrame* frame) {
 
 void Display::SetPreferredFrameInterval(base::TimeDelta interval) {
   if (frame_rate_decider_->supports_set_frame_rate()) {
-    float frame_rate =
-        interval.InSecondsF() == 0 ? 0 : (1 / interval.InSecondsF());
+    float interval_s = interval.InSecondsF();
+    float frame_rate = interval_s == 0 ? 0 : (1 / interval_s);
     output_surface_->SetFrameRate(frame_rate);
+#if defined(OS_ANDROID)
+    // On Android we want to return early because the |client_| callback hits
+    // a platform API in the browser process.
     return;
+#endif  // OS_ANDROID
   }
 
   client_->SetPreferredFrameInterval(interval);
@@ -1245,6 +1282,10 @@ base::ScopedClosureRunner Display::GetCacheBackBufferCb() {
 void Display::DisableGPUAccessByDefault() {
   DCHECK(resource_provider_);
   resource_provider_->SetAllowAccessToGPUThread(false);
+}
+
+DelegatedInkPointRendererBase* Display::GetDelegatedInkPointRenderer() {
+  return renderer_->GetDelegatedInkPointRenderer();
 }
 
 }  // namespace viz

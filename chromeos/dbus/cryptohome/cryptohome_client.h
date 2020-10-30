@@ -25,6 +25,7 @@ class AuthorizationRequest;
 class BaseReply;
 class CheckHealthRequest;
 class CheckKeyRequest;
+class EndFingerprintAuthSessionRequest;
 class FlushAndSignBootAttributesRequest;
 class GetBootAttributeRequest;
 class GetKeyDataRequest;
@@ -40,6 +41,7 @@ class RemoveFirmwareManagementParametersRequest;
 class RemoveKeyRequest;
 class SetBootAttributeRequest;
 class SetFirmwareManagementParametersRequest;
+class StartFingerprintAuthSessionRequest;
 class UnmountRequest;
 class UpdateKeyRequest;
 
@@ -314,21 +316,6 @@ class COMPONENT_EXPORT(CRYPTOHOME_CLIENT) CryptohomeClient {
   // succeeds. This method blocks until the call returns.
   virtual bool InstallAttributesIsFirstInstall(bool* is_first_install) = 0;
 
-  // Calls the TpmAttestationIsPrepared dbus method.  The callback is called
-  // when the operation completes.
-  virtual void TpmAttestationIsPrepared(DBusMethodCallback<bool> callback) = 0;
-
-  // Requests the device's enrollment identifier (EID). The |callback| will be
-  // called with the EID. If |ignore_cache| is true, the EID is calculated
-  // even if the attestation database already contains a cached version.
-  virtual void TpmAttestationGetEnrollmentId(
-      bool ignore_cache,
-      DBusMethodCallback<TpmAttestationDataResult> callback) = 0;
-
-  // Calls the TpmAttestationIsEnrolled dbus method.  The callback is called
-  // when the operation completes.
-  virtual void TpmAttestationIsEnrolled(DBusMethodCallback<bool> callback) = 0;
-
   // Asynchronously creates an attestation enrollment request.  The callback
   // will be called when the dbus call completes.  When the operation completes,
   // the AsyncCallStatusWithDataHandler signal handler is called.  The data that
@@ -459,53 +446,6 @@ class COMPONENT_EXPORT(CRYPTOHOME_CLIENT) CryptohomeClient {
       const std::string& challenge,
       AsyncMethodCallback callback) = 0;
 
-  // Gets the payload associated with the key specified by |key_type| and
-  // |key_name|.  The |callback| will be called when the operation completes.
-  // If the key does not exist the callback |result| parameter will be false.
-  // If no payload has been set for the key the callback |result| parameter will
-  // be true and the |data| parameter will be empty.  If |key_type| is
-  // KEY_USER, a |id| must be provided.  Otherwise |id| is ignored.
-  virtual void TpmAttestationGetKeyPayload(
-      attestation::AttestationKeyType key_type,
-      const cryptohome::AccountIdentifier& id,
-      const std::string& key_name,
-      DBusMethodCallback<TpmAttestationDataResult> callback) = 0;
-
-  // Sets the |payload| associated with the key specified by |key_type| and
-  // |key_name|.  The |callback| will be called when the operation completes.
-  // If the operation succeeds, the callback |result| parameter will be true.
-  // If |key_type| is KEY_USER, a |id| must be provided.  Otherwise |id| is
-  // ignored.
-  virtual void TpmAttestationSetKeyPayload(
-      attestation::AttestationKeyType key_type,
-      const cryptohome::AccountIdentifier& id,
-      const std::string& key_name,
-      const std::string& payload,
-      DBusMethodCallback<bool> callback) = 0;
-
-  // Deletes certified keys as specified by |key_type| and |key_prefix|.  The
-  // |callback| will be called when the operation completes.  If the operation
-  // succeeds, the callback |result| parameter will be true.  If |key_type| is
-  // KEY_USER, a |id| must be provided.  Otherwise |id| is ignored.
-  // All keys where the key name has a prefix matching |key_prefix| will be
-  // deleted.  All meta-data associated with the key, including certificates,
-  // will also be deleted.
-  virtual void TpmAttestationDeleteKeysByPrefix(
-      attestation::AttestationKeyType key_type,
-      const cryptohome::AccountIdentifier& id,
-      const std::string& key_prefix,
-      DBusMethodCallback<bool> callback) = 0;
-
-  // Deletes certified keys as specified by |key_type| and |key_name|.  The
-  // |callback| will be called when the operation completes.  If the operation
-  // succeeds, the callback |result| parameter will be true.  If |key_type| is
-  // KEY_USER, a |id| must be provided.  Otherwise |id| is ignored.
-  // Note that if the key does not exist, the operation will still succeed.
-  virtual void TpmAttestationDeleteKey(attestation::AttestationKeyType key_type,
-                                       const cryptohome::AccountIdentifier& id,
-                                       const std::string& key_name,
-                                       DBusMethodCallback<bool> callback) = 0;
-
   // Asynchronously gets the underlying TPM version information and passes it to
   // the given callback.
   virtual void TpmGetVersion(DBusMethodCallback<TpmVersionInfo> callback) = 0;
@@ -593,6 +533,23 @@ class COMPONENT_EXPORT(CRYPTOHOME_CLIENT) CryptohomeClient {
       const cryptohome::AccountIdentifier& id,
       const cryptohome::AuthorizationRequest& auth,
       const cryptohome::MassRemoveKeysRequest& request,
+      DBusMethodCallback<cryptohome::BaseReply> callback) = 0;
+
+  // Asynchronously calls StartFingerprintAuthSession method. |callback| is
+  // called after method call, and with reply protobuf.
+  // StartFingerprintAuthSession prepares biometrics daemon for upcoming
+  // fingerprint authentication.
+  virtual void StartFingerprintAuthSession(
+      const cryptohome::AccountIdentifier& id,
+      const cryptohome::StartFingerprintAuthSessionRequest& request,
+      DBusMethodCallback<cryptohome::BaseReply> callback) = 0;
+
+  // Asynchronously calls EndFingerprintAuthSession method. |callback| is
+  // called after method call, and with reply protobuf.
+  // EndFingerprintAuthSession sets biometrics daemon back to normal mode.
+  // If there is a reply, it is always an empty reply with no errors.
+  virtual void EndFingerprintAuthSession(
+      const cryptohome::EndFingerprintAuthSessionRequest& request,
       DBusMethodCallback<cryptohome::BaseReply> callback) = 0;
 
   // Asynchronously calls GetBootAttribute method. |callback| is called after

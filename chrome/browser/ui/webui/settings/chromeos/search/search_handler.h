@@ -9,20 +9,21 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/optional.h"
-#include "chrome/browser/chromeos/local_search_service/index.h"
 #include "chrome/browser/ui/webui/settings/chromeos/search/search.mojom.h"
 #include "chrome/browser/ui/webui/settings/chromeos/search/search_tag_registry.h"
+#include "chromeos/components/local_search_service/index_sync.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/remote_set.h"
 
+namespace chromeos {
+
 namespace local_search_service {
-class LocalSearchService;
+class LocalSearchServiceSync;
 }  // namespace local_search_service
 
-namespace chromeos {
 namespace settings {
 
 class Hierarchy;
@@ -32,17 +33,18 @@ struct SearchConcept;
 // Handles search queries for Chrome OS settings. Search() is expected to be
 // invoked by the settings UI as well as the the Launcher search UI. Search
 // results are obtained by matching the provided query against search tags
-// indexed in the LocalSearchService and cross-referencing results with
+// indexed in the LocalSearchServiceSync and cross-referencing results with
 // SearchTagRegistry.
 //
 // Searches which do not provide any matches result in an empty results array.
 class SearchHandler : public mojom::SearchHandler,
                       public SearchTagRegistry::Observer {
  public:
-  SearchHandler(SearchTagRegistry* search_tag_registry,
-                OsSettingsSections* sections,
-                Hierarchy* hierarchy,
-                local_search_service::LocalSearchService* local_search_service);
+  SearchHandler(
+      SearchTagRegistry* search_tag_registry,
+      OsSettingsSections* sections,
+      Hierarchy* hierarchy,
+      local_search_service::LocalSearchServiceSync* local_search_service);
   ~SearchHandler() override;
 
   SearchHandler(const SearchHandler& other) = delete;
@@ -89,6 +91,7 @@ class SearchHandler : public mojom::SearchHandler,
 
   std::vector<mojom::SearchResultPtr>::iterator AddSubpageResultIfPossible(
       const std::vector<mojom::SearchResultPtr>::iterator& position,
+      const mojom::SearchResultPtr& child_result,
       mojom::Subpage subpage,
       double relevance_score,
       std::vector<mojom::SearchResultPtr>* results) const;
@@ -105,7 +108,7 @@ class SearchHandler : public mojom::SearchHandler,
   SearchTagRegistry* search_tag_registry_;
   OsSettingsSections* sections_;
   Hierarchy* hierarchy_;
-  local_search_service::Index* index_;
+  local_search_service::IndexSync* index_;
 
   // Note: Expected to have multiple clients, so ReceiverSet/RemoteSet are used.
   mojo::ReceiverSet<mojom::SearchHandler> receivers_;

@@ -14,7 +14,7 @@
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/heap/trace_traits.h"
+#include "third_party/blink/renderer/platform/heap/impl/trace_traits.h"
 #include "third_party/blink/renderer/platform/heap/visitor.h"
 
 namespace blink {
@@ -110,8 +110,6 @@ class ObjectWithMixinWithCallbackBeforeInitializer
     : public GarbageCollected<ObjectWithMixinWithCallbackBeforeInitializer<T>>,
       public BoolMixin,
       public MixinWithCallbackBeforeInitializer<T> {
-  USING_GARBAGE_COLLECTED_MIXIN(ObjectWithMixinWithCallbackBeforeInitializer);
-
  public:
   using Mixin = MixinWithCallbackBeforeInitializer<T>;
 

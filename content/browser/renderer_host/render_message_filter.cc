@@ -37,7 +37,6 @@
 #include "content/browser/resource_context_impl.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/render_message_filter.mojom.h"
-#include "content/common/view_messages.h"
 #include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -67,10 +66,10 @@
 #include "base/file_descriptor_posix.h"
 #endif
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #include "ui/accelerated_widget_mac/window_resize_helper_mac.h"
 #endif
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 #include "base/linux_util.h"
 #include "base/threading/platform_thread.h"
 #endif
@@ -78,7 +77,7 @@
 namespace content {
 namespace {
 
-const uint32_t kRenderFilteredMessageClasses[] = {ViewMsgStart};
+const uint32_t kRenderFilteredMessageClasses[] = {FrameMsgStart};
 
 }  // namespace
 
@@ -117,7 +116,7 @@ void RenderMessageFilter::GenerateRoutingID(
   std::move(callback).Run(render_widget_helper_->GetNextRoutingID());
 }
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 void RenderMessageFilter::SetThreadPriorityOnFileThread(
     base::PlatformThreadId ns_tid,
     base::ThreadPriority priority) {
@@ -134,11 +133,11 @@ void RenderMessageFilter::SetThreadPriorityOnFileThread(
     return;
   }
 
-  base::PlatformThread::SetThreadPriority(peer_tid, priority);
+  base::PlatformThread::SetThreadPriority(peer_pid(), peer_tid, priority);
 }
 #endif
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 void RenderMessageFilter::SetThreadPriority(int32_t ns_tid,
                                             base::ThreadPriority priority) {
   constexpr base::TaskTraits kTraits = {

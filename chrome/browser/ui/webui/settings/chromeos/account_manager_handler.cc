@@ -55,7 +55,7 @@ std::string GetEnterpriseDomainFromUsername(const std::string& username) {
   return gaia::ExtractDomainName(username);
 }
 
-AccountManager::AccountKey GetAccountKeyFromJsCallback(
+::account_manager::AccountKey GetAccountKeyFromJsCallback(
     const base::DictionaryValue* const dictionary) {
   const base::Value* id_value = dictionary->FindKey("id");
   DCHECK(id_value);
@@ -72,10 +72,10 @@ AccountManager::AccountKey GetAccountKeyFromJsCallback(
   const account_manager::AccountType account_type =
       static_cast<account_manager::AccountType>(account_type_int);
 
-  return AccountManager::AccountKey{id, account_type};
+  return ::account_manager::AccountKey{id, account_type};
 }
 
-bool IsSameAccount(const AccountManager::AccountKey& account_key,
+bool IsSameAccount(const ::account_manager::AccountKey& account_key,
                    const AccountId& account_id) {
   switch (account_key.account_type) {
     case chromeos::account_manager::AccountType::ACCOUNT_TYPE_GAIA:
@@ -230,20 +230,21 @@ void AccountManagerUIHandler::HandleGetAccounts(const base::ListValue* args) {
 
   base::Value callback_id = args_list[0].Clone();
 
-  account_manager_->GetAccounts(
-      base::BindOnce(&AccountManagerUIHandler::OnGetAccounts,
-                     weak_factory_.GetWeakPtr(), std::move(callback_id)));
+  account_manager_->CheckDummyGaiaTokenForAllAccounts(base::BindOnce(
+      &AccountManagerUIHandler::OnCheckDummyGaiaTokenForAllAccounts,
+      weak_factory_.GetWeakPtr(), std::move(callback_id)));
 }
 
-void AccountManagerUIHandler::OnGetAccounts(
+void AccountManagerUIHandler::OnCheckDummyGaiaTokenForAllAccounts(
     base::Value callback_id,
-    const std::vector<AccountManager::Account>& stored_accounts) {
+    const std::vector<std::pair<::account_manager::Account, bool>>&
+        account_dummy_token_list) {
   user_manager::User* user = ProfileHelper::Get()->GetUserByProfile(profile_);
   DCHECK(user);
 
   base::DictionaryValue gaia_device_account;
   base::ListValue accounts =
-      GetSecondaryGaiaAccounts(stored_accounts, user->GetAccountId(),
+      GetSecondaryGaiaAccounts(account_dummy_token_list, user->GetAccountId(),
                                profile_->IsChild(), &gaia_device_account);
 
   AccountBuilder device_account;
@@ -269,7 +270,10 @@ void AccountManagerUIHandler::OnGetAccounts(
 
     // Check if user is managed.
     if (profile_->IsChild()) {
-      device_account.SetOrganization(kFamilyLink);
+      std::string organization = kFamilyLink;
+      // Replace space with the non-breaking space.
+      base::ReplaceSubstringsAfterOffset(&organization, 0, " ", "&nbsp;");
+      device_account.SetOrganization(organization);
     } else if (user->IsActiveDirectoryUser()) {
       device_account.SetOrganization(
           GetEnterpriseDomainFromUsername(user->GetDisplayEmail()));
@@ -288,19 +292,20 @@ void AccountManagerUIHandler::OnGetAccounts(
 }
 
 base::ListValue AccountManagerUIHandler::GetSecondaryGaiaAccounts(
-    const std::vector<AccountManager::Account>& stored_accounts,
+    const std::vector<std::pair<::account_manager::Account, bool>>&
+        account_dummy_token_list,
     const AccountId device_account_id,
     const bool is_child_user,
     base::DictionaryValue* device_account) {
   base::ListValue accounts;
-  for (const auto& stored_account : stored_accounts) {
-    const AccountManager::AccountKey& account_key = stored_account.key;
+  for (const auto& account_token_pair : account_dummy_token_list) {
+    const ::account_manager::Account& stored_account = account_token_pair.first;
+    const ::account_manager::AccountKey& account_key = stored_account.key;
     // We are only interested in listing GAIA accounts.
     if (account_key.account_type !=
         account_manager::AccountType::ACCOUNT_TYPE_GAIA) {
       continue;
     }
-
 
     base::Optional<AccountInfo> maybe_account_info =
         identity_manager_
@@ -314,13 +319,11 @@ base::ListValue AccountManagerUIHandler::GetSecondaryGaiaAccounts(
         .SetIsDeviceAccount(false)
         .SetFullName(maybe_account_info->full_name)
         .SetEmail(stored_account.raw_email)
-        // Secondary accounts in child user session cannot be unmigrated. If
-        // such account has dummy gaia token, it was invalidated.
-        .SetUnmigrated(!is_child_user &&
-                       account_manager_->HasDummyGaiaToken(account_key))
+        .SetUnmigrated(!is_child_user && account_token_pair.second)
         .SetIsSignedIn(!identity_manager_
                             ->HasAccountWithRefreshTokenInPersistentErrorState(
                                 maybe_account_info->account_id));
+
     if (!maybe_account_info->account_image.IsEmpty()) {
       account.SetPic(webui::GetBitmapDataUrl(
           maybe_account_info->account_image.AsBitmap()));
@@ -379,7 +382,7 @@ void AccountManagerUIHandler::HandleRemoveAccount(const base::ListValue* args) {
 
   const AccountId device_account_id =
       ProfileHelper::Get()->GetUserByProfile(profile_)->GetAccountId();
-  const AccountManager::AccountKey account_key =
+  const ::account_manager::AccountKey account_key =
       GetAccountKeyFromJsCallback(dictionary);
   if (IsSameAccount(account_key, device_account_id)) {
     // It should not be possible to remove a device account.
@@ -419,12 +422,12 @@ void AccountManagerUIHandler::OnJavascriptDisallowed() {
 // guarantee that |AccountManager| (our source of truth) will have a newly added
 // account by the time |IdentityManager| has it.
 void AccountManagerUIHandler::OnTokenUpserted(
-    const AccountManager::Account& account) {
+    const ::account_manager::Account& account) {
   RefreshUI();
 }
 
 void AccountManagerUIHandler::OnAccountRemoved(
-    const AccountManager::Account& account) {
+    const ::account_manager::Account& account) {
   RefreshUI();
 }
 

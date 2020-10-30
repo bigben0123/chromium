@@ -10,11 +10,11 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/optional.h"
+#include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/optimization_guide/optimization_guide_hints_manager.h"
 #include "chrome/browser/optimization_guide/optimization_guide_navigation_data.h"
 #include "chrome/browser/optimization_guide/optimization_guide_session_statistic.h"
 #include "chrome/browser/optimization_guide/optimization_guide_top_host_provider.h"
-#include "chrome/browser/optimization_guide/optimization_guide_util.h"
 #include "chrome/browser/optimization_guide/prediction/prediction_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/leveldb_proto/public/proto_database_provider.h"
@@ -23,6 +23,8 @@
 #include "components/optimization_guide/optimization_guide_decider.h"
 #include "components/optimization_guide/optimization_guide_features.h"
 #include "components/optimization_guide/optimization_guide_service.h"
+#include "components/optimization_guide/optimization_guide_util.h"
+#include "components/optimization_guide/proto/models.pb.h"
 #include "components/optimization_guide/top_host_provider.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -68,6 +70,26 @@ GetOptimizationGuideDecisionFromOptimizationTargetDecision(
   }
 }
 
+// Logs |optimization_target_decision| for |optimization_target| in a histogram
+// and passes the corresponding OptimizationGuideDecision to |callback|.
+void LogOptimizationTargetDecisionAndPassOptimizationGuideDecision(
+    optimization_guide::proto::OptimizationTarget optimization_target,
+    optimization_guide::OptimizationGuideTargetDecisionCallback callback,
+    optimization_guide::OptimizationTargetDecision
+        optimization_target_decision) {
+  base::UmaHistogramExactLinear(
+      "OptimizationGuide.TargetDecision." +
+          optimization_guide::GetStringNameForOptimizationTarget(
+              optimization_target),
+      static_cast<int>(optimization_target_decision),
+      static_cast<int>(
+          optimization_guide::OptimizationTargetDecision::kMaxValue));
+
+  std::move(callback).Run(
+      GetOptimizationGuideDecisionFromOptimizationTargetDecision(
+          optimization_target_decision));
+}
+
 }  // namespace
 
 OptimizationGuideKeyedService::OptimizationGuideKeyedService(
@@ -90,8 +112,12 @@ void OptimizationGuideKeyedService::Initialize(
 
   Profile* profile = Profile::FromBrowserContext(browser_context_);
   top_host_provider_ = GetTopHostProviderIfUserPermitted(browser_context_);
+  bool optimization_guide_fetching_enabled = top_host_provider_ != nullptr;
   UMA_HISTOGRAM_BOOLEAN("OptimizationGuide.RemoteFetchingEnabled",
-                        top_host_provider_ != nullptr);
+                        optimization_guide_fetching_enabled);
+  ChromeMetricsServiceAccessor::RegisterSyntheticFieldTrial(
+      "SyntheticOptimizationGuideRemoteFetching",
+      optimization_guide_fetching_enabled ? "Enabled" : "Disabled");
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory =
       content::BrowserContext::GetDefaultStoragePartition(profile)
           ->GetURLLoaderFactoryForBrowserProcess();
@@ -99,14 +125,10 @@ void OptimizationGuideKeyedService::Initialize(
       pre_initialized_optimization_types_, optimization_guide_service, profile,
       profile_path, profile->GetPrefs(), database_provider,
       top_host_provider_.get(), url_loader_factory);
-  if (optimization_guide::features::IsOptimizationTargetPredictionEnabled() &&
-      optimization_guide::features::IsRemoteFetchingEnabled()) {
-    prediction_manager_ =
-        std::make_unique<optimization_guide::PredictionManager>(
-            pre_initialized_optimization_targets_, profile_path,
-            database_provider, top_host_provider_.get(), url_loader_factory,
-            profile->GetPrefs(), profile);
-  }
+  prediction_manager_ = std::make_unique<optimization_guide::PredictionManager>(
+      pre_initialized_optimization_targets_, profile_path, database_provider,
+      top_host_provider_.get(), url_loader_factory, profile->GetPrefs(),
+      profile);
 }
 
 OptimizationGuideHintsManager*
@@ -165,36 +187,27 @@ void OptimizationGuideKeyedService::RegisterOptimizationTargets(
   }
 }
 
-optimization_guide::OptimizationGuideDecision
-OptimizationGuideKeyedService::ShouldTargetNavigation(
+void OptimizationGuideKeyedService::ShouldTargetNavigationAsync(
     content::NavigationHandle* navigation_handle,
-    optimization_guide::proto::OptimizationTarget optimization_target) {
+    optimization_guide::proto::OptimizationTarget optimization_target,
+    const base::flat_map<optimization_guide::proto::ClientModelFeature, float>&
+        client_model_feature_values,
+    optimization_guide::OptimizationGuideTargetDecisionCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(navigation_handle->IsInMainFrame());
 
-  if (!hints_manager_) {
-    // We are not initialized yet, just return unknown.
-    return optimization_guide::OptimizationGuideDecision::kUnknown;
+  if (!prediction_manager_) {
+    // We are not initialized yet, so just return unknown.
+    std::move(callback).Run(
+        optimization_guide::OptimizationGuideDecision::kUnknown);
+    return;
   }
 
-  optimization_guide::OptimizationTargetDecision optimization_target_decision;
-  if (prediction_manager_) {
-    optimization_target_decision = prediction_manager_->ShouldTargetNavigation(
-        navigation_handle, optimization_target);
-  } else {
-    DCHECK(hints_manager_);
-    optimization_target_decision = hints_manager_->ShouldTargetNavigation(
-        navigation_handle, optimization_target);
-  }
-
-  base::UmaHistogramExactLinear(
-      "OptimizationGuide.TargetDecision." +
-          GetStringNameForOptimizationTarget(optimization_target),
-      static_cast<int>(optimization_target_decision),
-      static_cast<int>(
-          optimization_guide::OptimizationTargetDecision::kMaxValue));
-  return GetOptimizationGuideDecisionFromOptimizationTargetDecision(
-      optimization_target_decision);
+  prediction_manager_->ShouldTargetNavigationAsync(
+      navigation_handle, optimization_target, client_model_feature_values,
+      base::BindOnce(
+          &LogOptimizationTargetDecisionAndPassOptimizationGuideDecision,
+          optimization_target, std::move(callback)));
 }
 
 void OptimizationGuideKeyedService::RegisterOptimizationTypes(
@@ -225,7 +238,8 @@ OptimizationGuideKeyedService::CanApplyOptimization(
   }
 
   optimization_guide::OptimizationTypeDecision optimization_type_decision =
-      hints_manager_->CanApplyOptimization(url, optimization_type,
+      hints_manager_->CanApplyOptimization(url, /*navigation_id=*/base::nullopt,
+                                           optimization_type,
                                            optimization_metadata);
   base::UmaHistogramEnumeration(
       "OptimizationGuide.ApplyDecision." +
@@ -251,7 +265,8 @@ void OptimizationGuideKeyedService::CanApplyOptimizationAsync(
   }
 
   hints_manager_->CanApplyOptimizationAsync(
-      navigation_handle->GetURL(), optimization_type, std::move(callback));
+      navigation_handle->GetURL(), navigation_handle->GetNavigationId(),
+      optimization_type, std::move(callback));
 }
 
 void OptimizationGuideKeyedService::AddHintForTesting(
@@ -288,10 +303,6 @@ void OptimizationGuideKeyedService::OverrideTargetDecisionForTesting(
     optimization_guide::OptimizationGuideDecision optimization_guide_decision) {
   if (prediction_manager_) {
     prediction_manager_->OverrideTargetDecisionForTesting(
-        optimization_target, optimization_guide_decision);
-  } else {
-    DCHECK(hints_manager_);
-    hints_manager_->OverrideTargetDecisionForTesting(
         optimization_target, optimization_guide_decision);
   }
 }

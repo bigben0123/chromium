@@ -30,12 +30,11 @@ suite('CategoryDefaultSetting', function() {
     PolymerTest.clearBody();
     testElement = document.createElement('category-default-setting');
     testElement.subOptionLabel = 'test label';
-    testElement.subOptionMode = 'cookies-session-only';
     document.body.appendChild(testElement);
   });
 
   test('browserProxy APIs used on startup', function() {
-    const category = ContentSettingsTypes.COOKIES;
+    const category = ContentSettingsTypes.JAVASCRIPT;
     testElement.category = category;
     return Promise
         .all([
@@ -124,44 +123,6 @@ suite('CategoryDefaultSetting', function() {
         false, ContentSetting.ASK);
   });
 
-  test('test Flash content setting in DETECT/ASK setting', function() {
-    const prefsFlash = createSiteSettingsPrefs(
-        [createContentSettingTypeToValuePair(
-            ContentSettingsTypes.PLUGINS, createDefaultContentSetting({
-              setting: ContentSetting.IMPORTANT_CONTENT,
-            }))],
-        []);
-
-    return testCategoryEnabled(
-        testElement, ContentSettingsTypes.PLUGINS, prefsFlash, true,
-        ContentSetting.IMPORTANT_CONTENT);
-  });
-
-  test('test Flash content setting in legacy ALLOW setting', function() {
-    const prefsFlash = createSiteSettingsPrefs(
-        [createContentSettingTypeToValuePair(
-            ContentSettingsTypes.PLUGINS, createDefaultContentSetting({
-              setting: ContentSetting.ALLOW,
-            }))],
-        []);
-
-    return testCategoryEnabled(
-        testElement, ContentSettingsTypes.PLUGINS, prefsFlash, true,
-        ContentSetting.IMPORTANT_CONTENT);
-  });
-
-  test('test Flash content setting in BLOCK setting', function() {
-    const prefsFlash = createSiteSettingsPrefs(
-        [createContentSettingTypeToValuePair(
-            ContentSettingsTypes.PLUGINS, createDefaultContentSetting({
-              setting: ContentSetting.BLOCK,
-            }))],
-        []);
-
-    return testCategoryEnabled(
-        testElement, ContentSettingsTypes.PLUGINS, prefsFlash, false,
-        ContentSetting.IMPORTANT_CONTENT);
-  });
 
   test('test content setting from extension', function() {
     testElement.category = ContentSettingsTypes.MIC;
@@ -297,23 +258,6 @@ suite('CategoryDefaultSetting', function() {
           assertTrue(secondaryToggle.checked);
         });
   }
-
-  test('test special tri-state Cookies category', function() {
-    /**
-     * An example pref where the Cookies category is set to delete when
-     * session ends.
-     */
-    const prefsCookiesSessionOnly = createSiteSettingsPrefs(
-        [createContentSettingTypeToValuePair(
-            ContentSettingsTypes.COOKIES, createDefaultContentSetting({
-              setting: ContentSetting.SESSION_ONLY,
-            }))],
-        []);
-
-    return testTristateCategory(
-        prefsCookiesSessionOnly, ContentSettingsTypes.COOKIES,
-        ContentSetting.SESSION_ONLY, '#subOptionCookiesToggle');
-  });
 
   test('test popups content setting default value', function() {
     testElement.category = ContentSettingsTypes.POPUPS;

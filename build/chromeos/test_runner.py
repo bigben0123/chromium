@@ -30,6 +30,7 @@ CHROMIUM_SRC_PATH = os.path.abspath(
 # output json ourselves.
 sys.path.insert(0, os.path.join(CHROMIUM_SRC_PATH, 'build', 'android'))
 from pylib.base import base_test_result  # pylint: disable=import-error
+from pylib.base import result_sink  # pylint: disable=import-error
 from pylib.results import json_results  # pylint: disable=import-error
 
 import subprocess32 as subprocess  # pylint: disable=import-error
@@ -87,6 +88,7 @@ class RemoteTest(object):
     self._test_launcher_summary_output = args.test_launcher_summary_output
     self._logs_dir = args.logs_dir
     self._use_vm = args.use_vm
+    self._rdb_client = result_sink.TryInitClient()
 
     self._retries = 0
     self._timeout = None
@@ -122,6 +124,8 @@ class RemoteTest(object):
       ]
     if args.flash:
       self._test_cmd += ['--flash']
+      if args.public_image:
+        self._test_cmd += ['--public-image']
 
     # This environment variable is set for tests that have been instrumented
     # for code coverage. Its incoming value is expected to be a location
@@ -268,17 +272,12 @@ class TastTest(RemoteTest):
           if not arg.startswith('--gtest_repeat')
       ]
 
-    if self._additional_args:
-      logging.error(
-          'Tast tests should not have additional args. These will be '
-          'ignored: %s', self._additional_args)
-
     self._test_cmd += [
         '--deploy',
         '--mount',
         '--build-dir',
         os.path.relpath(self._path_to_outdir, CHROMIUM_SRC_PATH),
-    ]
+    ] + self._additional_args
 
     # Coverage tests require some special pre-test setup, so use an
     # on_device_script in that case. For all other tests, use cros_run_test's
@@ -377,6 +376,21 @@ class TastTest(RemoteTest):
           test['name'], result, duration=duration_ms, log=error_log)
       suite_results.AddResult(base_result)
       self._maybe_handle_perf_results(test['name'])
+
+      if self._rdb_client:
+        # Walk the contents of the test's "outDir" and atttach any file found
+        # inside as an RDB 'artifact'. (This could include system logs, screen
+        # shots, etc.)
+        artifacts = {}
+        artifacts_dir = test['outDir']
+        for dirpath, _, filenames in os.walk(artifacts_dir):
+          for f in filenames:
+            artifact_path = os.path.join(dirpath, f)
+            artifacts[os.path.relpath(artifact_path, artifacts_dir)] = {
+                'filePath': artifact_path,
+            }
+
+        self._rdb_client.Post(test['name'], result, error_log, artifacts)
 
     if self._test_launcher_summary_output:
       with open(self._test_launcher_summary_output, 'w') as f:
@@ -692,13 +706,9 @@ def device_test(args, unknown_args):
   return test.run_test()
 
 
-def host_cmd(args, unknown_args):
-  if not args.cmd:
+def host_cmd(args, cmd_args):
+  if not cmd_args:
     raise TestFormatError('Must specify command to run on the host.')
-  elif unknown_args:
-    raise TestFormatError(
-        'Args "%s" unsupported. Is your host command correctly formatted?' %
-        (' '.join(unknown_args)))
   elif args.deploy_chrome and not args.path_to_outdir:
     raise TestFormatError(
         '--path-to-outdir must be specified if --deploy-chrome is passed.')
@@ -722,6 +732,10 @@ def host_cmd(args, unknown_args):
     ]
   if args.verbose:
     cros_run_test_cmd.append('--debug')
+  if args.flash:
+    cros_run_test_cmd.append('--flash')
+    if args.public_image:
+      cros_run_test_cmd += ['--public-image']
 
   if args.logs_dir:
     for log in SYSTEM_LOG_LOCATIONS:
@@ -745,7 +759,7 @@ def host_cmd(args, unknown_args):
   cros_run_test_cmd += [
       '--host-cmd',
       '--',
-  ] + args.cmd
+  ] + cmd_args
 
   logging.info('Running the following command:')
   logging.info(' '.join(cros_run_test_cmd))
@@ -800,9 +814,7 @@ def add_common_args(*parsers):
         'this dir will be added onto PATH in the device. WARNING: The '
         'arch of the device might not match the arch of the host, so '
         'avoid using "${platform}" when downloading vpython via CIPD.')
-    # TODO(bpastene): Switch all uses of "--vm-logs-dir" to "--logs-dir".
     parser.add_argument(
-        '--vm-logs-dir',
         '--logs-dir',
         type=str,
         dest='logs_dir',
@@ -813,6 +825,10 @@ def add_common_args(*parsers):
         action='store_true',
         help='Will flash the device to the current SDK version before running '
         'the test.')
+    parser.add_argument(
+        '--public-image',
+        action='store_true',
+        help='Will flash a public "full" image to the device.')
 
     vm_or_device_group = parser.add_mutually_exclusive_group()
     vm_or_device_group.add_argument(
@@ -841,7 +857,6 @@ def main():
       action='store_true',
       help='Will deploy a locally built Chrome binary to the device before '
       'running the host-cmd.')
-  host_cmd_parser.add_argument('cmd', nargs=argparse.REMAINDER)
   # GTest args.
   # TODO(bpastene): Rename 'vm-test' arg to 'gtest'.
   gtest_parser = subparsers.add_parser(
@@ -933,7 +948,20 @@ def main():
       help='A Tast test to run in the device (eg: "ui.ChromeLogin").')
 
   add_common_args(gtest_parser, tast_test_parser, host_cmd_parser)
-  args, unknown_args = parser.parse_known_args()
+
+  args = sys.argv[1:]
+  unknown_args = []
+  # If a '--' is present in the args, treat everything to the right of it as
+  # args to the test and everything to the left as args to this test runner.
+  # Otherwise treat all known args as args to this test runner and all unknown
+  # args as test args.
+  if '--' in args:
+    unknown_args = args[args.index('--') + 1:]
+    args = args[0:args.index('--')]
+  if unknown_args:
+    args = parser.parse_args(args=args)
+  else:
+    args, unknown_args = parser.parse_known_args()
 
   logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARN)
 
@@ -947,15 +975,6 @@ def main():
     except socket.gaierror:
       logging.error('The default DUT hostname of %s is unreachable.',
                     LAB_DUT_HOSTNAME)
-      return 1
-  if args.use_vm:
-    if not os.path.exists('/dev/kvm'):
-      logging.error('/dev/kvm is missing. Is KVM installed on this machine?')
-      return 1
-    elif not os.access('/dev/kvm', os.W_OK):
-      logging.error(
-          '/dev/kvm is not writable as current user. Perhaps you should be '
-          'root?')
       return 1
 
   args.cros_cache = os.path.abspath(args.cros_cache)

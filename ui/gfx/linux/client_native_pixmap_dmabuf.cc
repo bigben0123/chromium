@@ -104,7 +104,7 @@ bool ClientNativePixmapDmaBuf::IsConfigurationSupported(
 #endif
 
   bool disable_yuv_biplanar = true;
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || BUILDFLAG(IS_CHROMECAST)
   // IsConfigurationSupported(SCANOUT_CPU_READ_WRITE) is used by the renderer
   // to tell whether the platform supports sampling a given format. Zero-copy
   // video capture and encoding requires gfx::BufferFormat::YUV_420_BIPLANAR to
@@ -191,6 +191,7 @@ bool ClientNativePixmapDmaBuf::IsConfigurationSupported(
     case gfx::BufferUsage::CAMERA_AND_CPU_READ_WRITE:
       // R_8 is used as the underlying pixel format for BLOB buffers.
       return format == gfx::BufferFormat::R_8;
+    case gfx::BufferUsage::SCANOUT_VEA_CPU_READ:
     case gfx::BufferUsage::SCANOUT_VEA_READ_CAMERA_AND_CPU_READ_WRITE:
       return format == gfx::BufferFormat::YVU_420 ||
              format == gfx::BufferFormat::YUV_420_BIPLANAR;

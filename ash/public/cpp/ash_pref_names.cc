@@ -104,21 +104,12 @@ const char kAccessibilitySwitchAccessEnabled[] =
 // A pref that stores the key code for the "select" action.
 const char kAccessibilitySwitchAccessSelectKeyCodes[] =
     "settings.a11y.switch_access.select.key_codes";
-// A pref that stores the setting value for the "select" action.
-const char kAccessibilitySwitchAccessSelectSetting[] =
-    "settings.a11y.switch_access.select.setting";
 // A pref that stores the key code for the "next" action.
 const char kAccessibilitySwitchAccessNextKeyCodes[] =
     "settings.a11y.switch_access.next.key_codes";
-// A pref that stores the setting value for the "next" action.
-const char kAccessibilitySwitchAccessNextSetting[] =
-    "settings.a11y.switch_access.next.setting";
 // A pref that stores the key code for the "previous" action.
 const char kAccessibilitySwitchAccessPreviousKeyCodes[] =
     "settings.a11y.switch_access.previous.key_codes";
-// A pref that stores the setting value for the "previous" action.
-const char kAccessibilitySwitchAccessPreviousSetting[] =
-    "settings.a11y.switch_access.previous.setting";
 // A boolean pref which determines whether auto-scanning is enabled within
 // Switch Access.
 const char kAccessibilitySwitchAccessAutoScanEnabled[] =
@@ -448,9 +439,13 @@ const char kQuickUnlockPinSalt[] = "quick_unlock.pin.salt";
 // bases - for exmaple the last used base per user.
 const char kDetachableBaseDevices[] = "ash.detachable_base.devices";
 
-// Integer pref storing the number of Assistant warmer welcome triggered times.
-const char kAssistantNumWarmerWelcomeTriggered[] =
-    "ash.assistant.num_warmer_welcome_triggered";
+// Pref storing the number of sessions in which Assistant onboarding was shown.
+const char kAssistantNumSessionsWhereOnboardingShown[] =
+    "ash.assistant.num_sessions_where_onboarding_shown";
+
+// Pref storing the time of the last Assistant interaction.
+const char kAssistantTimeOfLastInteraction[] =
+    "ash.assistant.time_of_last_interaction";
 
 // Whether the user is allowed to disconnect and configure VPN connections.
 const char kVpnConfigAllowed[] = "vpn_config_allowed";
@@ -568,6 +563,31 @@ const char kXkbAutoRepeatInterval[] =
 const char kNaturalScroll[] = "settings.touchpad.natural_scroll";
 // A boolean pref which is true if mouse reverse scroll is enabled.
 const char kMouseReverseScroll[] = "settings.mouse.reverse_scroll";
+
+// A dictionary storing the number of times and most recent time the multipaste
+// contextual nudge was shown.
+const char kMultipasteNudges[] = "ash.clipboard.multipaste_nudges";
+
+// A boolean pref that indicates whether dark mode is enabled.
+const char kDarkModeEnabled[] = "cros.system.dark_mode_enabled";
+// A boolean pref that indicates whether the color mode is themed. If true, the
+// background color will be calculated based on extracted wallpaper color.
+const char kColorModeThemed[] = "cros.system.color_mode_themed";
+
+// A boolean pref that indicates whether app badging is shown in launcher and
+// shelf.
+const char kAppNotificationBadgingEnabled[] =
+    "ash.app_notification_badging_enabled";
+
+// An integer pref that counts how many times the reverse gesture notification
+// shows.
+const char kReverseGestureNotificationCount[] =
+    "ash.wm.reverse_gesture_notification_count";
+
+// An integer pref that indicates whether global media controls is pinned to
+// shelf or it's unset and need to be determined by screen size during runtime.
+const char kGlobalMediaControlsPinned[] =
+    "ash.system.global_media_controls_pinned";
 
 // NOTE: New prefs should start with the "ash." prefix. Existing prefs moved
 // into this file should not be renamed, since they may be synced.

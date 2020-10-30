@@ -25,6 +25,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "content/public/browser/browser_thread.h"
+#include "third_party/blink/public/mojom/manifest/manifest.mojom.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "url/gurl.h"
@@ -92,7 +93,7 @@ static void JNI_WebApkUpdateManager_StoreWebApkUpdateRequestToFile(
   info.user_title = info.short_name;
   info.display = static_cast<blink::mojom::DisplayMode>(java_display_mode);
   info.orientation =
-      static_cast<blink::WebScreenOrientationLockType>(java_orientation);
+      static_cast<device::mojom::ScreenOrientationLockType>(java_orientation);
   info.theme_color = JavaColorToOptionalSkColor(java_theme_color);
   info.background_color = JavaColorToOptionalSkColor(java_background_color);
   info.best_primary_icon_url =
@@ -175,13 +176,13 @@ static void JNI_WebApkUpdateManager_StoreWebApkUpdateRequestToFile(
     DCHECK_EQ(shortcut_data.size(), 6u);
     blink::Manifest::ShortcutItem shortcut_item;
     shortcut_item.name = shortcut_data[0];
-    shortcut_item.short_name = base::NullableString16(shortcut_data[1]);
+    shortcut_item.short_name = shortcut_data[1];
     shortcut_item.url = GURL(base::UTF16ToUTF8(shortcut_data[2]));
 
     blink::Manifest::ImageResource icon;
     GURL icon_src(base::UTF16ToUTF8(shortcut_data[3]));
     icon.src = icon_src;
-    icon.purpose.push_back(blink::Manifest::ImageResource::Purpose::ANY);
+    icon.purpose.push_back(blink::mojom::ManifestImageResource_Purpose::ANY);
     shortcut_item.icons.push_back(std::move(icon));
 
     if (icon_src.is_valid()) {

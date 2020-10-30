@@ -28,7 +28,7 @@ class TabModelJniBridge : public TabModel {
  public:
   TabModelJniBridge(JNIEnv* env,
                     jobject obj,
-                    bool is_incognito,
+                    Profile* profile,
                     bool is_tabbed_activity);
   void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
   ~TabModelJniBridge() override;
@@ -62,7 +62,7 @@ class TabModelJniBridge : public TabModel {
 
   // Return true if this class is the currently selected in the correspond
   // tab model selector.
-  bool IsCurrentModel() const override;
+  bool IsActiveModel() const override;
 
   void AddObserver(TabModelObserver* observer) override;
   void RemoveObserver(TabModelObserver* observer) override;

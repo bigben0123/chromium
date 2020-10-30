@@ -12,9 +12,9 @@
 #include "ui/base/x/x11_util.h"
 #include "ui/events/platform/x11/x11_event_source.h"
 #include "ui/events/x/x11_window_event_manager.h"
-#include "ui/gfx/x/x11.h"
 #include "ui/gfx/x/x11_atom_cache.h"
 #include "ui/gfx/x/xproto.h"
+#include "ui/gfx/x/xproto_util.h"
 
 namespace ui {
 
@@ -104,8 +104,7 @@ void SelectionOwner::RetrieveTargets(std::vector<x11::Atom>* targets) {
 
 void SelectionOwner::TakeOwnershipOfSelection(const SelectionFormatMap& data) {
   acquired_selection_timestamp_ = X11EventSource::GetInstance()->GetTimestamp();
-  SetSelectionOwner(x_window_, selection_name_,
-                    static_cast<x11::Time>(acquired_selection_timestamp_));
+  SetSelectionOwner(x_window_, selection_name_, acquired_selection_timestamp_);
 
   if (GetSelectionOwner(selection_name_) == x_window_) {
     // The X server agrees that we are the selection owner. Commit our data.
@@ -161,7 +160,7 @@ void SelectionOwner::OnSelectionRequest(const x11::Event& x11_event) {
   }
 
   // Send off the reply.
-  ui::SendEvent(reply, requestor, x11::EventMask::NoEvent);
+  x11::SendEvent(reply, requestor, x11::EventMask::NoEvent);
 }
 
 void SelectionOwner::OnSelectionClear(const x11::Event& event) {
@@ -232,7 +231,8 @@ bool SelectionOwner::ProcessTarget(x11::Atom target,
           base::TimeDelta::FromMilliseconds(kIncrementalTransferTimeoutMs);
       incremental_transfers_.emplace_back(
           requestor, target, property,
-          std::make_unique<XScopedEventSelector>(requestor, PropertyChangeMask),
+          std::make_unique<XScopedEventSelector>(
+              requestor, x11::EventMask::PropertyChange),
           it->second, 0, timeout);
 
       // Start a timer to abort the data transfer in case that the selection

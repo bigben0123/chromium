@@ -32,6 +32,8 @@
 #include "services/network/public/mojom/content_security_policy.mojom-blink.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom-blink.h"
+#include "third_party/blink/public/mojom/devtools/inspector_issue.mojom-blink.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/web_content_security_policy_struct.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
@@ -63,7 +65,6 @@ class ContentSecurityPolicyResponseHeaders;
 class ConsoleMessage;
 class CSPDirectiveList;
 class CSPSource;
-class Document;
 class DOMWrapperWorld;
 class Element;
 class ExecutionContext;
@@ -124,6 +125,7 @@ class CORE_EXPORT ContentSecurityPolicyDelegate : public GarbageCollectedMixin {
   virtual void Count(WebFeature) = 0;
 
   virtual void AddConsoleMessage(ConsoleMessage*) = 0;
+  virtual void AddInspectorIssue(mojom::blink::InspectorIssueInfoPtr) = 0;
   virtual void DisableEval(const String& error_message) = 0;
   virtual void ReportBlockedScriptExecutionToInspector(
       const String& directive_text) = 0;
@@ -143,7 +145,7 @@ class CORE_EXPORT ContentSecurityPolicy final
   //
   // Trusted Types violation's 'resource' values are defined in
   // https://wicg.github.io/trusted-types/dist/spec/#csp-violation-object-hdr.
-  enum ViolationType {
+  enum ContentSecurityPolicyViolationType {
     kInlineViolation,
     kEvalViolation,
     kURLViolation,
@@ -182,7 +184,7 @@ class CORE_EXPORT ContentSecurityPolicy final
     kPrefetchSrc,
     kReportTo,
     kReportURI,
-    kTrustedTypes,
+    kRequireTrustedTypesFor,
     kSandbox,
     kScriptSrc,
     kScriptSrcAttr,
@@ -190,10 +192,11 @@ class CORE_EXPORT ContentSecurityPolicy final
     kStyleSrc,
     kStyleSrcAttr,
     kStyleSrcElem,
+    kTreatAsPublicAddress,
+    kTrustedTypes,
     kUndefined,
     kUpgradeInsecureRequests,
     kWorkerSrc,
-    kRequireTrustedTypesFor,
   };
 
   // CheckHeaderType can be passed to Allow*FromSource methods to control which
@@ -230,7 +233,7 @@ class CORE_EXPORT ContentSecurityPolicy final
   void AddPolicyFromHeaderValue(const String&,
                                 network::mojom::ContentSecurityPolicyType,
                                 network::mojom::ContentSecurityPolicySource);
-  void ReportAccumulatedHeaders(LocalFrame*) const;
+  void ReportAccumulatedHeaders() const;
 
   Vector<CSPHeaderAndType> Headers() const;
 
@@ -253,15 +256,6 @@ class CORE_EXPORT ContentSecurityPolicy final
                      ExceptionStatus,
                      const String& script_content) const;
   bool AllowPluginType(
-      const String& type,
-      const String& type_attribute,
-      const KURL&,
-      ReportingDisposition = ReportingDisposition::kReport) const;
-  // Checks whether the plugin type should be allowed in the given
-  // document; enforces the CSP rule that PluginDocuments inherit
-  // plugin-types directives from the parent document.
-  bool AllowPluginTypeForDocument(
-      const Document&,
       const String& type,
       const String& type_attribute,
       const KURL&,
@@ -319,22 +313,10 @@ class CORE_EXPORT ContentSecurityPolicy final
 
   static bool IsScriptInlineType(InlineType);
 
-  // |allowAncestors| does not need to know whether the resource was a
-  // result of a redirect. After a redirect, source paths are usually
-  // ignored to stop a page from learning the path to which the
-  // request was redirected, but this is not a concern for ancestors,
-  // because a child frame can't manipulate the URL of a cross-origin
-  // parent.
-  bool AllowAncestors(
-      LocalFrame*,
-      const KURL&,
-      ReportingDisposition = ReportingDisposition::kReport) const;
-  bool IsFrameAncestorsEnforced() const;
-
-  // TODO(crbug.com/889751): Remove "mojom::RequestContextType" once
+  // TODO(crbug.com/889751): Remove "mojom::blink::RequestContextType" once
   // all the code migrates.
   bool AllowRequestWithoutIntegrity(
-      mojom::RequestContextType,
+      mojom::blink::RequestContextType,
       network::mojom::RequestDestination,
       const KURL&,
       const KURL& url_before_redirects,
@@ -342,9 +324,9 @@ class CORE_EXPORT ContentSecurityPolicy final
       ReportingDisposition = ReportingDisposition::kReport,
       CheckHeaderType = CheckHeaderType::kCheckAll) const;
 
-  // TODO(crbug.com/889751): Remove "mojom::RequestContextType" once
+  // TODO(crbug.com/889751): Remove "mojom::blink::RequestContextType" once
   // all the code migrates.
-  bool AllowRequest(mojom::RequestContextType,
+  bool AllowRequest(mojom::blink::RequestContextType,
                     network::mojom::RequestDestination,
                     const KURL&,
                     const String& nonce,
@@ -412,7 +394,7 @@ class CORE_EXPORT ContentSecurityPolicy final
                        bool use_reporting_api,
                        const String& header,
                        network::mojom::ContentSecurityPolicyType,
-                       ViolationType,
+                       ContentSecurityPolicyViolationType,
                        std::unique_ptr<SourceLocation>,
                        LocalFrame* = nullptr,
                        RedirectStatus = RedirectStatus::kFollowedRedirect,
@@ -456,11 +438,20 @@ class CORE_EXPORT ContentSecurityPolicy final
 
   // Whether the main world's CSP should be bypassed based on the current
   // javascript world we are in.
+  // Note: This is deprecated. New usages should not be added. Operations in an
+  // isolated world should use the isolated world CSP instead of bypassing the
+  // main world CSP. See
+  // ExecutionContext::GetContentSecurityPolicyForCurrentWorld.
+  // TODO(karandeepb): Rename to ShouldBypassMainWorldDeprecated.
   static bool ShouldBypassMainWorld(const ExecutionContext*);
 
   // Whether the main world's CSP should be bypassed for operations in the given
   // |world|.
-  static bool ShouldBypassMainWorld(const DOMWrapperWorld& world);
+  // Note: This is deprecated. New usages should not be added. Operations in an
+  // isolated world should use the isolated world CSP instead of bypassing the
+  // main world CSP. See ExecutionContext::GetContentSecurityPolicyForWorld.
+  // TODO(karandeepb): Rename to ShouldBypassMainWorldDeprecated.
+  static bool ShouldBypassMainWorld(const DOMWrapperWorld* world);
 
   static bool IsNonceableElement(const Element*);
 
@@ -577,6 +568,18 @@ class CORE_EXPORT ContentSecurityPolicy final
   bool ShouldBypassContentSecurityPolicy(
       const KURL&,
       SchemeRegistry::PolicyAreas = SchemeRegistry::kPolicyAreaAll) const;
+
+  // TODO: Consider replacing 'ContentSecurityPolicy::ViolationType' with the
+  // mojo enum.
+  mojom::blink::ContentSecurityPolicyViolationType BuildCSPViolationType(
+      ContentSecurityPolicy::ContentSecurityPolicyViolationType violation_type);
+
+  void ReportContentSecurityPolicyIssue(
+      const blink::SecurityPolicyViolationEventInit& violation_data,
+      network::mojom::ContentSecurityPolicyType header_type,
+      ContentSecurityPolicyViolationType violation_type,
+      LocalFrame* = nullptr,
+      Element* = nullptr);
 
   Member<ContentSecurityPolicyDelegate> delegate_;
   bool override_inline_style_allowed_;

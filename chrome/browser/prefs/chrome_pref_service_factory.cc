@@ -77,7 +77,7 @@
 #if defined(OS_WIN)
 #include "base/enterprise_util.h"
 #if BUILDFLAG(ENABLE_RLZ)
-#include "rlz/lib/machine_id.h"
+#include "rlz/lib/machine_id.h"  // nogncheck crbug.com/1125897
 #endif  // BUILDFLAG(ENABLE_RLZ)
 #endif  // defined(OS_WIN)
 
@@ -225,7 +225,7 @@ SettingsEnforcementGroup GetSettingsEnforcementGroup() {
   // Use the strongest enforcement setting on Windows and MacOS. Remember to
   // update the OFFICIAL_BUILD section of extension_startup_browsertest.cc and
   // pref_hash_browsertest.cc when updating the default value below.
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_WIN) || defined(OS_MAC)
   return GROUP_ENFORCE_DEFAULT;
 #else
   return GROUP_NO_ENFORCEMENT;

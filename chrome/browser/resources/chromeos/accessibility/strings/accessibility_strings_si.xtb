@@ -6,6 +6,7 @@
 <translation id="1012173283529841972">අයිතමය ලැයිස්තු කරන්න</translation>
 <translation id="1013742170491673792">srched</translation>
 <translation id="1014370462248694370">ඇඟිලි දෙකක් දකුණට ස්වයිප් කරන්න</translation>
+<translation id="1016393160682012902">qwerty යතුරක් හෝ නැවුම් කළ හැකි බ්‍රේල් යතුරක් ඔබන්න, නැති නම් එහි කාර්ය දැන ගැනීමට ඉංගිතය ස්පර්ශ කරන්න. w සමඟ control, හෝ පිට වීමට escape ඔබන්න.</translation>
 <translation id="1022586497894531524">ඔබ පළමු වරට ChromeVox කථන ප්‍රතිපෝෂණය භාවිත කරන්නේ ද? මෙම කඩිනම් නිබන්ධනය ChromeVox ආරම්භ කිරීමේ අත්‍යවශ්‍ය දේවල් පැහැදිලි කරයි.</translation>
 <translation id="1025074108959230262">ඇලවුම් ප්‍රකාරය අක්‍රීයයි</translation>
 <translation id="1031961866430398710">ඉන්පසු</translation>
@@ -51,6 +52,7 @@ Chrome බ්‍රවුසර මෙනුව විවෘත කිරීම�
 <translation id="1291286136605998134">මාරු බොත්තම</translation>
 <translation id="1299774449519412690">ළා අහස් නිල්</translation>
 <translation id="1303806948938513162">ChromeVox මෙනුවලට ඇතුළු වීමට ඇඟිලි 4ක් සමඟ තට්ටු කරන්න</translation>
+<translation id="1313373992684326101">පෙර කොටස වෙත යන්න. උදාහරණවලට තත්ත්ව තැටි සහ දියත් කිරීම ඇතුළත් වේ.</translation>
 <translation id="1325363694295259631"><ph name="NAME" />, මෙනු අයිතම රේඩියෝ බොත්තම නොතේරිණි</translation>
 <translation id="1325946044405407859">පදම් කළ සම</translation>
 <translation id="1331702245475014624"><ph name="TOTAL" /> හි <ph name="INDEX" /></translation>
@@ -66,6 +68,7 @@ Chrome බ්‍රවුසර මෙනුව විවෘත කිරීම�
 <translation id="1383876407941801731">සොයන්න</translation>
 <translation id="1396114365388024581">tablst</translation>
 <translation id="1405567553485452995">ලා කොළ</translation>
+<translation id="141454040365657399">පිටු ශීර්ෂකය</translation>
 <translation id="1417889266572670458">නාවික</translation>
 <translation id="1431911867058218151">ප්ලම්</translation>
 <translation id="1439316808600711881">rgn</translation>
@@ -78,6 +81,7 @@ Chrome බ්‍රවුසර මෙනුව විවෘත කිරීම�
 <translation id="1506187449813838456">අන්තරාලය වැඩි කරන්න</translation>
 <translation id="151784044608172266">ඊළඟ වාක්‍යය</translation>
 <translation id="1524531499102321782">බ්‍රේල් ඊළඟ පේළිය</translation>
+<translation id="1542513807034338907">පෙර පිටුවට අනුචලනය කරන්න</translation>
 <translation id="1546370775711804143">ස්ක්‍රෝල් බාර්</translation>
 <translation id="1555130319947370107">නිල්</translation>
 <translation id="1559739829547075274">පසුපසට ගවේශනය</translation>
@@ -279,6 +283,7 @@ Chrome බ්‍රවුසර මෙනුව විවෘත කිරීම�
 <translation id="3103579948980282461">මධ්‍යම ජම්බූල රතු</translation>
 <translation id="3104705064753753826">alrt dlg</translation>
 <translation id="3109724472072898302">හැකිළූ</translation>
+<translation id="311015743332597320">ඇඟිලි හතරක් දකුණට ස්වයිප් කරන්න</translation>
 <translation id="3112457281078985179">ChromeVox ක්‍රියාත්මක හෝ ක්‍රියාවිරහිත කිරීමට, Control+Alt+Z භාවිත කරන්න.</translation>
 <translation id="3131002934070407451">අංක මෙලෙස කියවන්න:</translation>
 <translation id="3134461040845705080">කියවීම සඳහා පමණි</translation>
@@ -344,6 +349,8 @@ Chrome බ්‍රවුසර මෙනුව විවෘත කිරීම�
 <translation id="3549141990712742152">කපන්න <ph name="TEXT" />.</translation>
 <translation id="3549680091535286226">තාවකාලිකව කථනය නැවැත්වීමට ඇඟිලි 2ක් සමඟ තට්ටු කරන්න</translation>
 <translation id="3564729643041517261">වත්මන් සංදර්ශක විලාසය පැත්තෙන් පැත්තටය</translation>
+<translation id="3573145950452451508">පිටු පාදකය</translation>
+<translation id="3587482841069643663">සියළු</translation>
 <translation id="3589661172894441357">ශබ්ද මාලාව</translation>
 <translation id="3591784666823501596">රාජකීය නිල්</translation>
 <translation id="3594207934078151302">මධ්‍යම මුහුදු කොළ</translation>
@@ -435,6 +442,7 @@ Chrome බ්‍රවුසර මෙනුව විවෘත කිරීම�
 <translation id="4278486392851938658">පෙර නැරඹූ සබැඳිය</translation>
 <translation id="4281245629646759298">ළා කහ</translation>
 <translation id="4289540628985791613">දළ විශ්ලේෂණය</translation>
+<translation id="4294967782363273192">වැඩිවන අනුපිළිවෙළට සැකසීම</translation>
 <translation id="4300318234632215983">සබැඳිය පසුපස ලිපිනය නිවේදනය</translation>
 <translation id="4322625298640984693">රක්ත දුඹුරු</translation>
 <translation id="4342180618051828363">{COUNT,plural, =1{තිත}=3{ලෝපය}one{# තිත්}other{# තිත්}}</translation>
@@ -446,7 +454,9 @@ Chrome බ්‍රවුසර මෙනුව විවෘත කිරීම�
 <translation id="4384583879834880242">ප්‍රශ්න සහ පිළිතුරු</translation>
 <translation id="4391478986194775161">cntntinfo</translation>
 <translation id="4402014469255336455">ගැඹුරු අහස් නිල්</translation>
+<translation id="4406249099130339147">විරාම ලකුණු දෝංකාරය:</translation>
 <translation id="4432457053224379116">ඉන්දියානු රතු</translation>
+<translation id="4432896207833262240">ලකුණු කළ අන්තර්ගතය</translation>
 <translation id="4437615272777527928">මෙනුවල සෙවීමට ටයිප් කරන්න. ප්‍රතිඵල අතරින් එහා මෙහා වීමට ඉහළ සහ පහළ ඊතල භාවිත කරන්න. පාඨ කැරට් ගැළපීමට සහ මෙනු අතර එහා මෙහා යාමට වම් සහ දකුණු ඊතල භාවිත කරන්න.</translation>
 <translation id="4457472090507035117">වත්මන් හඬ තෝරන්න:</translation>
 <translation id="4476183483923481720">නව පේළිය</translation>
@@ -480,6 +490,7 @@ Chrome බ්‍රවුසර මෙනුව විවෘත කිරීම�
 <translation id="4763480195061959176">වීඩියෝ</translation>
 <translation id="4764692524839457597">පෙරනිමි</translation>
 <translation id="4772771694153161212">යටින් ඉරි ඇඳ නොවේ</translation>
+<translation id="4780458943471935919">ඊළඟ පිටුවට අනුචලනය කරන්න</translation>
 <translation id="4784215347943747396">1 ස්විචයක් හෝ ස්විච 2 ක් සමඟ උපාංගය පාලන කරන්න</translation>
 <translation id="4786285211967466855">පෙර 1 වෙනි මට්ටමේ ශීර්ෂ නැත</translation>
 <translation id="4787577491510559358">වත්මන් අයිතමය සඳහා ආකෘති කිරීම නිවේදන කරන්න</translation>
@@ -504,7 +515,6 @@ Chrome බ්‍රවුසර මෙනුව විවෘත කිරීම�
 <translation id="489907760999452556">අභ්‍යන්තර සබැඳිය</translation>
 <translation id="4909019435900810068">එක වචනයක් පසුපසට යන්න</translation>
 <translation id="4911349081560453449">පෙර පිරික්සුම් කොටු නැත</translation>
-<translation id="4915087353619183190">ඉගෙනීම් ප්‍රකාරය පටන් ගැනීම. Qwerty යතුරක් හෝ නැවුම් කළ හැකි බ්‍රේල් යතුරක් ඔබන්න, නැති නම් එහි කාර්ය දැන ගැනීමට අභිනය ස්පර්ශ කරන්න. W සමඟ Control, හෝ පිටත් වීමට Escape ඔබන්න.</translation>
 <translation id="492295894462528572">පෙරවදන</translation>
 <translation id="495046168593986294">ඉහළට අනුචලනය කරන්න</translation>
 <translation id="495170559598752135">ක්‍රියාමාර්ග</translation>
@@ -644,9 +654,11 @@ Chrome බ්‍රවුසර මෙනුව විවෘත කිරීම�
 <translation id="5999630716831179808">හඬ</translation>
 <translation id="6006050241733874051">වෙතින්</translation>
 <translation id="6006064078185310784">{COUNT,plural, =1{පසු ඇළඉර}one{# පසු ඇළඉරි}other{# පසු ඇළඉරි}}</translation>
+<translation id="6010616110396250088">අඩුවන අනුපිළිවෙළට සැකසීම</translation>
 <translation id="6017514345406065928">කොළ</translation>
 <translation id="602001110135236999">වමට අනුචලන කරන්න</translation>
 <translation id="6034000775414344507">ලා අළු</translation>
+<translation id="6036135911048686884">ස්පර්ශ ගවේෂණය</translation>
 <translation id="6037602951055904232">ඉදිරියට අදින්න</translation>
 <translation id="6044160928851315051">අඳුරු කළ තිරය</translation>
 <translation id="6082768461603900813">මූලික සංචාලනය</translation>
@@ -814,6 +826,7 @@ Chrome බ්‍රවුසර මෙනුව විවෘත කිරීම�
 <translation id="744163271241493234">pwded</translation>
 <translation id="7484805699335881122">මූලාංග වර්ග කථා කරන විට සහ උද්ධෘතව, මකා, තදකුරින්, වරහන් තුළ, හෝ කැපිටල් පාඨය වී ඇති විට ස්වරමානය වෙනස් කරන්න.</translation>
 <translation id="7491962110804786152">ටැබය</translation>
+<translation id="7492497529767769458">ඊළඟ කොටස වෙත යන්න. උදාහරණවලට තත්ත්ව තැටි සහ දියත් කිරීම ඇතුළත් වේ.</translation>
 <translation id="7505149250476994901">අකුරට පෙර "මහකුරු" කථා කරන්න</translation>
 <translation id="7518543783849163354">ChromeVox කථා කිරීම තාවකාලිකව නැවැත්වීමට, Control යතුර ඔබන්න.</translation>
 <translation id="7533226154149229506">ළා රන් දණ්ඩ කහ</translation>
@@ -821,6 +834,7 @@ Chrome බ්‍රවුසර මෙනුව විවෘත කිරීම�
 <translation id="7552432549459840808">ප්‍රයෝජනවත් Chrome කෙටි මං</translation>
 <translation id="7569983096843329377">කළු</translation>
 <translation id="7579911500627256166">තිත් <ph name="DOT" /></translation>
+<translation id="7592060599656252486">සමහර</translation>
 <translation id="7595446402663080101">පෙර වගුවක් නැත</translation>
 <translation id="7596131838331109045">ළා සැමන්</translation>
 <translation id="7604026522577407655">වත්මන් තීරුවේ ඇරඹුම වෙත යන්න</translation>
@@ -840,6 +854,7 @@ Chrome බ්‍රවුසර මෙනුව විවෘත කිරීම�
 <translation id="7684431668231950609">වදන් වෙනස් කරන්න, URL ඇතුළු කිරීම</translation>
 <translation id="7685589220304187312">tlbar</translation>
 <translation id="7693840228159394336">පෙර රේඩියෝ බොත්තම</translation>
+<translation id="7701040980221191251">නොමැත</translation>
 <translation id="7701196182766842984">autolst</translation>
 <translation id="7714340021005120797">මීළඟ සංයුක්ත කොටුවක් නැත</translation>
 <translation id="772146615414628379">සුබ පැතුම්! ඔබ ChromeVox භාවිත කිරීමට අත්‍යවශ්‍ය දේ සාර්ථකව ඉගෙන ගෙන ඇත. ඔබට ඕනෑම වේලාවක සෙවීම+තිත ඔබා ChromeVox විධානය විවෘත කළ හැකි බව මතක තබා ගන්න. ChromeVox සහ Chrome OS ගැන තවත් දැන ගැනීමට, පහත ලිපි වෙත පැමිණෙන්න.
@@ -898,7 +913,9 @@ Chrome බ්‍රවුසර මෙනුව විවෘත කිරීම�
 <translation id="812886159861361726"><ph name="FILE_NAME" /> බාගැනීම නැවැත්විය</translation>
 <translation id="8129445297241948503">ඉහළ කොටු නැත</translation>
 <translation id="8138880386467279117">ස්පර්ශය</translation>
+<translation id="8173092779156526980">ඇඟිලි හතරක් වමට ස්වයිප් කරන්න</translation>
 <translation id="817440585505441544">{COUNT,plural, =1{යටි ඉර}one{# යටි ඉරි}other{# යටි ඉරි}}</translation>
+<translation id="8179976553408161302">ඇතුළු කරන්න</translation>
 <translation id="8184828902145951186">පේළි</translation>
 <translation id="8186185314313222077">පූර්ණ තිරය ටොගල කිරීම</translation>
 <translation id="8199231515320852133">වත්මන් කොටුවේ ශීර්ෂයන් නිවේදනය කරන්න</translation>
@@ -923,6 +940,7 @@ Chrome බ්‍රවුසර මෙනුව විවෘත කිරීම�
 <translation id="8345569862449483843">{COUNT,plural, =1{පවුම}one{පවුම් සංකේත # ක්}other{පවුම් සංකේත # ක්}}</translation>
 <translation id="8378855320830505539">කලාපය</translation>
 <translation id="8382679411218029383">ස්වයංසම්පූර්ණ මැදිසන සහ ලැයිස්තුව</translation>
+<translation id="8394908167088220973">මාධ්‍ය වාදනය/අත්හිටීම</translation>
 <translation id="8428213095426709021">සැකසුම්</translation>
 <translation id="8428603554127842284">මට්ටම් <ph name="DEPTH" /></translation>
 <translation id="8430049249787218991">mnubr</translation>
@@ -967,6 +985,7 @@ Chrome බ්‍රවුසර මෙනුව විවෘත කිරීම�
 <translation id="8770473310765924354">වගු වැනි විය්‍යුහීය අන්තර්ගතයන් ගෙන් පිටවන්න</translation>
 <translation id="8779057862865475116">පෙර සබැඳියක් නැත</translation>
 <translation id="8796411681063377102">ඊලඟ මට්ටම් 3 ශීර්ෂය</translation>
+<translation id="8823311177246872527"><ph name="TOTALPAGES" /> න් <ph name="CURRENTPAGE" /> පිටුව</translation>
 <translation id="8825828890761629845">බැනරය</translation>
 <translation id="8851136666856101339">ප්‍රධාන</translation>
 <translation id="8882002077197914455">සංස්කරණය නොකළ ශීර්ෂය</translation>
@@ -982,6 +1001,7 @@ Chrome බ්‍රවුසර මෙනුව විවෘත කිරීම�
 <translation id="8946628535652548639">පේ<ph name="TABLECELLROWINDEX" />තී<ph name="TABLECELLCOLUMNINDEX" /></translation>
 <translation id="8952400011684167587">පෙර රේඩියෝ බොත්තම් නැත</translation>
 <translation id="8970172509886453271">පෙර කොටස් නැත</translation>
+<translation id="89720367119469899">Escape</translation>
 <translation id="8978496506222343566">tltip</translation>
 <translation id="8986362086234534611">අමතක</translation>
 <translation id="9040132695316389094">ශීර්ෂකය1</translation>

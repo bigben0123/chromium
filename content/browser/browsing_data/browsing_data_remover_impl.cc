@@ -22,7 +22,7 @@
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/browsing_data/browsing_data_filter_builder_impl.h"
-#include "content/browser/frame_host/render_frame_host_impl.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -129,13 +129,14 @@ BrowsingDataRemoverImpl::~BrowsingDataRemoverImpl() {
                              task_queue_.size(), 10);
 
   // If we are still removing data, notify observers that their task has been
-  // (albeit unsucessfuly) processed, so they can unregister themselves.
-  // TODO(bauerb): If it becomes a problem that browsing data might not actually
-  // be fully cleared when an observer is notified, add a success flag.
+  // (albeit unsuccessfully) processed, so they can unregister themselves.
   while (!task_queue_.empty()) {
-    for (Observer* observer : task_queue_.front().observers) {
-      if (observer_list_.HasObserver(observer))
-        observer->OnBrowsingDataRemoverDone();
+    const RemovalTask& task = task_queue_.front();
+    for (Observer* observer : task.observers) {
+      if (observer_list_.HasObserver(observer)) {
+        observer->OnBrowsingDataRemoverDone(
+            /*failed_data_types=*/task.remove_mask);
+      }
     }
     task_queue_.pop_front();
   }
@@ -285,6 +286,7 @@ void BrowsingDataRemoverImpl::RemoveImpl(
   delete_end_ = delete_end;
   remove_mask_ = remove_mask;
   origin_type_mask_ = origin_type_mask;
+  failed_data_types_ = 0;
 
   // Record the combined deletion of cookies and cache.
   CookieOrCacheDeletionChoice choice = NEITHER_COOKIES_NOR_CACHE;
@@ -486,8 +488,8 @@ void BrowsingDataRemoverImpl::RemoveImpl(
         BrowsingDataFilterBuilder::Mode::kPreserve) {
       // When clearing cache, wipe accumulated network related data
       // (TransportSecurityState and HttpServerPropertiesManager data).
-      network_context->ClearNetworkingHistorySince(
-          delete_begin,
+      network_context->ClearNetworkingHistoryBetween(
+          delete_begin, delete_end,
           CreateTaskCompletionClosureForMojo(TracingDataType::kNetworkHistory));
     }
 
@@ -535,8 +537,10 @@ void BrowsingDataRemoverImpl::RemoveImpl(
       !(remove_mask & DATA_TYPE_AVOID_CLOSING_CONNECTIONS)) {
     BrowserContext::GetDefaultStoragePartition(browser_context_)
         ->GetNetworkContext()
-        ->ClearHttpAuthCache(delete_begin, CreateTaskCompletionClosureForMojo(
-                                               TracingDataType::kAuthCache));
+        ->ClearHttpAuthCache(
+            delete_begin_.is_null() ? base::Time::Min() : delete_begin_,
+            delete_end_.is_null() ? base::Time::Max() : delete_end_,
+            CreateTaskCompletionClosureForMojo(TracingDataType::kAuthCache));
   }
 
   //////////////////////////////////////////////////////////////////////////////
@@ -545,7 +549,9 @@ void BrowsingDataRemoverImpl::RemoveImpl(
     embedder_delegate_->RemoveEmbedderData(
         delete_begin_, delete_end_, remove_mask, filter_builder,
         origin_type_mask,
-        CreateTaskCompletionClosure(TracingDataType::kEmbedderData));
+        base::BindOnce(
+            &BrowsingDataRemoverImpl::OnDelegateDone, GetWeakPtr(),
+            CreateTaskCompletionClosure(TracingDataType::kEmbedderData)));
   }
 }
 
@@ -615,6 +621,13 @@ StoragePartition* BrowsingDataRemoverImpl::GetStoragePartition() {
              : BrowserContext::GetDefaultStoragePartition(browser_context_);
 }
 
+void BrowsingDataRemoverImpl::OnDelegateDone(
+    base::OnceClosure completion_closure,
+    uint64_t failed_data_types) {
+  failed_data_types_ |= failed_data_types;
+  std::move(completion_closure).Run();
+}
+
 void BrowsingDataRemoverImpl::Notify() {
   // Some tests call |RemoveImpl| directly, without using the task scheduler.
   // TODO(msramek): Improve those tests so we don't have to do this. Tests
@@ -633,7 +646,7 @@ void BrowsingDataRemoverImpl::Notify() {
   const RemovalTask& task = task_queue_.front();
   for (Observer* observer : task.observers) {
     if (observer_list_.HasObserver(observer)) {
-      observer->OnBrowsingDataRemoverDone();
+      observer->OnBrowsingDataRemoverDone(failed_data_types_);
     }
   }
 

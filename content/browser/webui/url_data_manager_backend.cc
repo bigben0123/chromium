@@ -38,11 +38,6 @@
 #include "net/filter/source_stream.h"
 #include "net/http/http_status_code.h"
 #include "net/log/net_log_util.h"
-#include "net/url_request/url_request.h"
-#include "net/url_request/url_request_context.h"
-#include "net/url_request/url_request_error_job.h"
-#include "net/url_request/url_request_job.h"
-#include "net/url_request/url_request_job_factory.h"
 #include "services/network/public/mojom/content_security_policy.mojom.h"
 #include "ui/base/template_expressions.h"
 #include "ui/base/webui/i18n_source_stream.h"
@@ -168,14 +163,17 @@ scoped_refptr<net::HttpResponseHeaders> URLDataManagerBackend::GetHeaders(
 
     const network::mojom::CSPDirectiveName kAllDirectives[] = {
         network::mojom::CSPDirectiveName::ChildSrc,
+        network::mojom::CSPDirectiveName::ConnectSrc,
         network::mojom::CSPDirectiveName::DefaultSrc,
+        network::mojom::CSPDirectiveName::FrameSrc,
         network::mojom::CSPDirectiveName::ImgSrc,
         network::mojom::CSPDirectiveName::MediaSrc,
         network::mojom::CSPDirectiveName::ObjectSrc,
+        network::mojom::CSPDirectiveName::RequireTrustedTypesFor,
         network::mojom::CSPDirectiveName::ScriptSrc,
         network::mojom::CSPDirectiveName::StyleSrc,
-        network::mojom::CSPDirectiveName::WorkerSrc,
-        network::mojom::CSPDirectiveName::ConnectSrc};
+        network::mojom::CSPDirectiveName::TrustedTypes,
+        network::mojom::CSPDirectiveName::WorkerSrc};
 
     for (auto& directive : kAllDirectives) {
       csp_header.append(source->GetContentSecurityPolicy(directive));
@@ -198,9 +196,10 @@ scoped_refptr<net::HttpResponseHeaders> URLDataManagerBackend::GetHeaders(
                        kChromeURLXFrameOptionsHeaderValue);
   }
 
-  if (base::FeatureList::IsEnabled(features::kWebUIReportOnlyTrustedTypes))
+  if (base::FeatureList::IsEnabled(features::kWebUIReportOnlyTrustedTypes)) {
     headers->SetHeader(kChromeURLContentSecurityPolicyReportOnlyHeaderName,
                        kChromeURLContentSecurityPolicyReportOnlyHeaderValue);
+  }
 
   if (!source->AllowCaching())
     headers->SetHeader("Cache-Control", "no-cache");

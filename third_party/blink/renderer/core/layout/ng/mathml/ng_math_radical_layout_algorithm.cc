@@ -17,8 +17,8 @@ namespace blink {
 namespace {
 
 bool HasBaseGlyphForRadical(const ComputedStyle& style) {
-  return style.GetFont().PrimaryFont() &&
-         style.GetFont().PrimaryFont()->GlyphForCharacter(kSquareRootCharacter);
+  const SimpleFontData* font_data = style.GetFont().PrimaryFont();
+  return font_data && font_data->GlyphForCharacter(kSquareRootCharacter);
 }
 
 }  // namespace
@@ -27,9 +27,6 @@ NGMathRadicalLayoutAlgorithm::NGMathRadicalLayoutAlgorithm(
     const NGLayoutAlgorithmParams& params)
     : NGLayoutAlgorithm(params) {
   DCHECK(params.space.IsNewFormattingContext());
-  container_builder_.SetIsNewFormattingContext(
-      params.space.IsNewFormattingContext());
-  container_builder_.SetInitialFragmentGeometry(params.fragment_geometry);
 }
 
 void NGMathRadicalLayoutAlgorithm::GatherChildren(
@@ -89,10 +86,9 @@ scoped_refptr<const NGLayoutResult> NGMathRadicalLayoutAlgorithm::Layout() {
         &To<NGPhysicalBoxFragment>(base_layout_result->PhysicalFragment());
     base_margins =
         ComputeMarginsFor(constraint_space, base.Style(), ConstraintSpace());
-    NGBoxFragment fragment(ConstraintSpace().GetWritingMode(),
-                           ConstraintSpace().Direction(), *base_fragment);
-    base_ascent = base_margins.block_start +
-                  fragment.Baseline().value_or(fragment.BlockSize());
+    NGBoxFragment fragment(ConstraintSpace().GetWritingDirection(),
+                           *base_fragment);
+    base_ascent = base_margins.block_start + fragment.BaselineOrSynthesize();
     base_descent = fragment.BlockSize() + base_margins.BlockSum() - base_ascent;
   }
   if (index) {
@@ -106,11 +102,10 @@ scoped_refptr<const NGLayoutResult> NGMathRadicalLayoutAlgorithm::Layout() {
         &To<NGPhysicalBoxFragment>(index_layout_result->PhysicalFragment());
     index_margins =
         ComputeMarginsFor(constraint_space, index.Style(), ConstraintSpace());
-    NGBoxFragment fragment(ConstraintSpace().GetWritingMode(),
-                           ConstraintSpace().Direction(), *index_fragment);
+    NGBoxFragment fragment(ConstraintSpace().GetWritingDirection(),
+                           *index_fragment);
     index_inline_size = fragment.InlineSize() + index_margins.InlineSum();
-    index_ascent = index_margins.block_start +
-                   fragment.Baseline().value_or(fragment.BlockSize());
+    index_ascent = index_margins.block_start + fragment.BaselineOrSynthesize();
     index_descent =
         fragment.BlockSize() + index_margins.BlockSum() - index_ascent;
     horizontal = GetRadicalHorizontalParameters(Style());
@@ -135,10 +130,9 @@ scoped_refptr<const NGLayoutResult> NGMathRadicalLayoutAlgorithm::Layout() {
                                         horizontal.kern_before_degree +
                                         horizontal.kern_after_degree;
     container_builder_.SetMathMLPaintInfo(
-        kSquareRootCharacter, std::move(shape_result_view),
-        LayoutUnit(surd_metrics.advance), LayoutUnit(surd_metrics.ascent),
-        LayoutUnit(surd_metrics.descent), &operator_inline_offset,
-        &base_margins);
+        std::move(shape_result_view), LayoutUnit(surd_metrics.advance),
+        LayoutUnit(surd_metrics.ascent), LayoutUnit(surd_metrics.descent),
+        operator_inline_offset, base_margins);
   }
 
   // Determine the metrics of the radical operator + the base.
@@ -194,11 +188,7 @@ scoped_refptr<const NGLayoutResult> NGMathRadicalLayoutAlgorithm::Layout() {
   container_builder_.SetIntrinsicBlockSize(total_block_size);
   container_builder_.SetFragmentsTotalBlockSize(block_size);
 
-  NGOutOfFlowLayoutPart(
-      Node(), ConstraintSpace(),
-      container_builder_.Borders() + container_builder_.Scrollbar(),
-      &container_builder_)
-      .Run();
+  NGOutOfFlowLayoutPart(Node(), ConstraintSpace(), &container_builder_).Run();
 
   return container_builder_.ToBoxFragment();
 }

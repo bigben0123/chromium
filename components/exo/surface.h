@@ -66,6 +66,7 @@ extern const ui::ClassProperty<int32_t>* const kClientSurfaceIdKey;
 class Surface final : public ui::PropertyHandler {
  public:
   using PropertyDeallocator = void (*)(int64_t value);
+  using LeaveEnterCallback = base::RepeatingCallback<void(int64_t, int64_t)>;
 
   Surface();
   ~Surface() override;
@@ -74,6 +75,16 @@ class Surface final : public ui::PropertyHandler {
   static Surface* AsSurface(const aura::Window* window);
 
   aura::Window* window() { return window_.get(); }
+
+  void set_leave_enter_callback(LeaveEnterCallback callback) {
+    leave_enter_callback_ = callback;
+  }
+
+  // Called when the display the surface is on has changed.
+  void UpdateDisplay(int64_t old_id, int64_t new_id);
+
+  // Called when the output is added for new display.
+  void OnNewOutputAdded();
 
   // Set a buffer as the content of this surface. A buffer can only be attached
   // to one surface at a time.
@@ -164,6 +175,11 @@ class Surface final : public ui::PropertyHandler {
 
   // Request that surface should have a specific application ID string.
   void SetApplicationId(const char* application_id);
+
+  // Whether to hide the shelf when fullscreen. If true, shelf is inaccessible
+  // (plain fullscreen). If false, shelf auto-hides and can be shown with a
+  // mouse gesture (immersive fullscreen).
+  void SetUseImmersiveForFullscreen(bool value);
 
   // This sets the color space for the buffer for this surface.
   void SetColorSpace(gfx::ColorSpace color_space);
@@ -271,7 +287,7 @@ class Surface final : public ui::PropertyHandler {
   bool FillsBoundsOpaquely() const;
 
   bool HasPendingDamageForTesting(const gfx::Rect& damage) const {
-    return pending_damage_.Contains(damage);
+    return pending_state_.damage.Contains(damage);
   }
 
   // Set occlusion tracking region for surface.
@@ -330,6 +346,26 @@ class Surface final : public ui::PropertyHandler {
     DISALLOW_COPY_AND_ASSIGN(BufferAttachment);
   };
 
+  struct ExtendedState {
+    ExtendedState();
+    ~ExtendedState();
+
+    State basic_state;
+
+    // The buffer that will become the content of surface.
+    BufferAttachment buffer;
+    // The damage region to schedule paint for.
+    cc::Region damage;
+    // These lists contain the callbacks to notify the client when it is a good
+    // time to start producing a new frame.
+    std::list<FrameCallback> frame_callbacks;
+    // These lists contain the callbacks to notify the client when surface
+    // contents have been presented.
+    std::list<PresentationCallback> presentation_callbacks;
+    // The acquire gpu fence to associate with the surface buffer.
+    std::unique_ptr<gfx::GpuFence> acquire_fence;
+  };
+
   friend class subtle::PropertyHelper;
 
   // Updates current_resource_ with a new resource id corresponding to the
@@ -351,7 +387,7 @@ class Surface final : public ui::PropertyHandler {
   void UpdateContentSize();
 
   // This returns true when the surface has some contents assigned to it.
-  bool has_contents() const { return !current_buffer_.size().IsEmpty(); }
+  bool has_contents() const { return !state_.buffer.size().IsEmpty(); }
 
   // This window has the layer which contains the Surface contents.
   std::unique_ptr<aura::Window> window_;
@@ -365,43 +401,19 @@ class Surface final : public ui::PropertyHandler {
   // This is the bounds of the last committed surface hierarchy contents.
   gfx::Rect surface_hierarchy_content_bounds_;
 
-  // This is true when Attach() has been called and new contents should take
-  // effect next time Commit() is called.
+  // This is true when Attach() has been called and new contents should be
+  // cached next time Commit() is called.
   bool has_pending_contents_ = false;
+  // This is true when new contents are cached and should take effect next time
+  // synchronized CommitSurfaceHierarchy() is called.
+  bool has_cached_contents_ = false;
 
-  // The buffer that will become the content of surface when Commit() is called.
-  BufferAttachment pending_buffer_;
-
-  // The damage region to schedule paint for when Commit() is called.
-  cc::Region pending_damage_;
-
-  // The damage region which will be used by
-  // AppendSurfaceHierarchyContentsToFrame() to generate frame.
-  cc::Region damage_;
-
-  // These lists contains the callbacks to notify the client when it is a good
-  // time to start producing a new frame. These callbacks move to
-  // |frame_callbacks_| when Commit() is called. Later they are moved to
-  // |active_frame_callbacks_| when the effect of the Commit() is scheduled to
-  // be drawn. They fire at the first begin frame notification after this.
-  std::list<FrameCallback> pending_frame_callbacks_;
-  std::list<FrameCallback> frame_callbacks_;
-
-  // These lists contains the callbacks to notify the client when surface
-  // contents have been presented. These callbacks move to
-  // |presentation_callbacks_| when Commit() is called. Later they are moved to
-  // |swapping_presentation_callbacks_| when the effect of the Commit() is
-  // scheduled to be drawn and then moved to |swapped_presentation_callbacks_|
-  // after receiving VSync parameters update for the previous frame. They fire
-  // at the next VSync parameters update after that.
-  std::list<PresentationCallback> pending_presentation_callbacks_;
-  std::list<PresentationCallback> presentation_callbacks_;
-
+  // This is the state that has yet to be cached.
+  ExtendedState pending_state_;
   // This is the state that has yet to be committed.
-  State pending_state_;
-
+  ExtendedState cached_state_;
   // This is the state that has been committed.
-  State state_;
+  ExtendedState state_;
 
   // Cumulative input region of surface and its sub-surfaces.
   cc::Region hit_test_region_;
@@ -414,20 +426,11 @@ class Surface final : public ui::PropertyHandler {
   SubSurfaceEntryList pending_sub_surfaces_;
   SubSurfaceEntryList sub_surfaces_;
 
-  // The buffer that is currently set as content of surface.
-  BufferAttachment current_buffer_;
-
   // The last resource that was sent to a surface.
   viz::TransferableResource current_resource_;
 
   // Whether the last resource that was sent to a surface has an alpha channel.
   bool current_resource_has_alpha_ = false;
-
-  // The acquire gpu fence to associate with the surface buffer when Commit()
-  // is called.
-  std::unique_ptr<gfx::GpuFence> pending_acquire_fence_;
-  // The acquire gpu fence that is currently associated with the surface buffer.
-  std::unique_ptr<gfx::GpuFence> acquire_fence_;
 
   // This is true if a call to Commit() as been made but
   // CommitSurfaceHierarchy() has not yet been called.
@@ -463,6 +466,8 @@ class Surface final : public ui::PropertyHandler {
   // The embedded surface is actually |embedded_surface_size_|. This is used
   // for calculating clipping and scaling.
   gfx::Size embedded_surface_size_;
+
+  LeaveEnterCallback leave_enter_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(Surface);
 };

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/no_destructor.h"
 #include "base/optional.h"
 #include "base/test/task_environment.h"
 #include "chrome/browser/nearby_sharing/client/nearby_share_api_call_flow_impl.h"
@@ -81,12 +82,12 @@ class NearbyShareApiCallFlowImplTest : public testing::Test {
 
   void StartPostRequestApiCallFlowWithSerializedRequest(
       const std::string& serialized_request) {
-    flow_.StartPostRequest(GURL(kRequestUrl), serialized_request,
-                           shared_factory_, kAccessToken,
-                           base::Bind(&NearbyShareApiCallFlowImplTest::OnResult,
-                                      base::Unretained(this)),
-                           base::Bind(&NearbyShareApiCallFlowImplTest::OnError,
-                                      base::Unretained(this)));
+    flow_.StartPostRequest(
+        GURL(kRequestUrl), serialized_request, shared_factory_, kAccessToken,
+        base::BindOnce(&NearbyShareApiCallFlowImplTest::OnResult,
+                       base::Unretained(this)),
+        base::BindOnce(&NearbyShareApiCallFlowImplTest::OnError,
+                       base::Unretained(this)));
     // A pending fetch for the API request should be created.
     CheckNearbySharingClientHttpPostRequest(serialized_request);
   }
@@ -99,10 +100,10 @@ class NearbyShareApiCallFlowImplTest : public testing::Test {
       const std::string& serialized_request) {
     flow_.StartPatchRequest(
         GURL(kRequestUrl), serialized_request, shared_factory_, kAccessToken,
-        base::Bind(&NearbyShareApiCallFlowImplTest::OnResult,
-                   base::Unretained(this)),
-        base::Bind(&NearbyShareApiCallFlowImplTest::OnError,
-                   base::Unretained(this)));
+        base::BindOnce(&NearbyShareApiCallFlowImplTest::OnResult,
+                       base::Unretained(this)),
+        base::BindOnce(&NearbyShareApiCallFlowImplTest::OnError,
+                       base::Unretained(this)));
     // A pending fetch for the API request should be created.
     CheckNearbySharingClientHttpPatchRequest(serialized_request);
   }
@@ -115,12 +116,13 @@ class NearbyShareApiCallFlowImplTest : public testing::Test {
   void StartGetRequestApiCallFlowWithRequestAsQueryParameters(
       const NearbyShareApiCallFlow::QueryParameters&
           request_as_query_parameters) {
-    flow_.StartGetRequest(GURL(kRequestUrl), request_as_query_parameters,
-                          shared_factory_, kAccessToken,
-                          base::Bind(&NearbyShareApiCallFlowImplTest::OnResult,
-                                     base::Unretained(this)),
-                          base::Bind(&NearbyShareApiCallFlowImplTest::OnError,
-                                     base::Unretained(this)));
+    flow_.StartGetRequest(
+        GURL(kRequestUrl), request_as_query_parameters, shared_factory_,
+        kAccessToken,
+        base::BindOnce(&NearbyShareApiCallFlowImplTest::OnResult,
+                       base::Unretained(this)),
+        base::BindOnce(&NearbyShareApiCallFlowImplTest::OnError,
+                       base::Unretained(this)));
     // A pending fetch for the API request should be created.
     CheckNearbySharingClientHttpGetRequest(request_as_query_parameters);
   }
@@ -130,9 +132,9 @@ class NearbyShareApiCallFlowImplTest : public testing::Test {
     result_ = std::make_unique<std::string>(result);
   }
 
-  void OnError(NearbyShareRequestError network_error) {
+  void OnError(NearbyShareHttpError network_error) {
     EXPECT_FALSE(result_ || network_error_);
-    network_error_ = std::make_unique<NearbyShareRequestError>(network_error);
+    network_error_ = std::make_unique<NearbyShareHttpError>(network_error);
   }
 
   void CheckNearbySharingClientHttpPostRequest(
@@ -269,7 +271,7 @@ class NearbyShareApiCallFlowImplTest : public testing::Test {
   }
 
   std::unique_ptr<std::string> result_;
-  std::unique_ptr<NearbyShareRequestError> network_error_;
+  std::unique_ptr<NearbyShareHttpError> network_error_;
 
  private:
   base::test::TaskEnvironment task_environment_;
@@ -304,21 +306,21 @@ TEST_F(NearbyShareApiCallFlowImplTest, PostRequestFailure) {
   StartPostRequestApiCallFlow();
   CompleteCurrentPostRequest(net::ERR_FAILED);
   EXPECT_FALSE(result_);
-  EXPECT_EQ(NearbyShareRequestError::kOffline, *network_error_);
+  EXPECT_EQ(NearbyShareHttpError::kOffline, *network_error_);
 }
 
 TEST_F(NearbyShareApiCallFlowImplTest, PatchRequestFailure) {
   StartPatchRequestApiCallFlow();
   CompleteCurrentPatchRequest(net::ERR_FAILED);
   EXPECT_FALSE(result_);
-  EXPECT_EQ(NearbyShareRequestError::kOffline, *network_error_);
+  EXPECT_EQ(NearbyShareHttpError::kOffline, *network_error_);
 }
 
 TEST_F(NearbyShareApiCallFlowImplTest, GetRequestFailure) {
   StartGetRequestApiCallFlow();
   CompleteCurrentPostRequest(net::ERR_FAILED);
   EXPECT_FALSE(result_);
-  EXPECT_EQ(NearbyShareRequestError::kOffline, *network_error_);
+  EXPECT_EQ(NearbyShareHttpError::kOffline, *network_error_);
 }
 
 TEST_F(NearbyShareApiCallFlowImplTest, RequestStatus500) {
@@ -326,7 +328,7 @@ TEST_F(NearbyShareApiCallFlowImplTest, RequestStatus500) {
   CompleteCurrentPostRequest(net::OK, net::HTTP_INTERNAL_SERVER_ERROR,
                              "Nearby Sharing Meltdown.");
   EXPECT_FALSE(result_);
-  EXPECT_EQ(NearbyShareRequestError::kInternalServerError, *network_error_);
+  EXPECT_EQ(NearbyShareHttpError::kInternalServerError, *network_error_);
 }
 
 TEST_F(NearbyShareApiCallFlowImplTest, PatchRequestStatus500) {
@@ -334,7 +336,7 @@ TEST_F(NearbyShareApiCallFlowImplTest, PatchRequestStatus500) {
   CompleteCurrentPatchRequest(net::OK, net::HTTP_INTERNAL_SERVER_ERROR,
                               "Nearby Sharing Meltdown.");
   EXPECT_FALSE(result_);
-  EXPECT_EQ(NearbyShareRequestError::kInternalServerError, *network_error_);
+  EXPECT_EQ(NearbyShareHttpError::kInternalServerError, *network_error_);
 }
 
 TEST_F(NearbyShareApiCallFlowImplTest, GetRequestStatus500) {
@@ -342,7 +344,7 @@ TEST_F(NearbyShareApiCallFlowImplTest, GetRequestStatus500) {
   CompleteCurrentPostRequest(net::OK, net::HTTP_INTERNAL_SERVER_ERROR,
                              "Nearby Sharing Meltdown.");
   EXPECT_FALSE(result_);
-  EXPECT_EQ(NearbyShareRequestError::kInternalServerError, *network_error_);
+  EXPECT_EQ(NearbyShareHttpError::kInternalServerError, *network_error_);
 }
 
 // The empty string is a valid protocol buffer message serialization.

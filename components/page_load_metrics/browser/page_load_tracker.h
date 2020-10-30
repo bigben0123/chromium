@@ -11,7 +11,7 @@
 #include "base/macros.h"
 #include "base/optional.h"
 #include "base/time/time.h"
-#include "components/page_load_metrics/browser/observers/largest_contentful_paint_handler.h"
+#include "components/page_load_metrics/browser/observers/core/largest_contentful_paint_handler.h"
 #include "components/page_load_metrics/browser/page_load_metrics_observer.h"
 #include "components/page_load_metrics/browser/page_load_metrics_observer_delegate.h"
 #include "components/page_load_metrics/browser/page_load_metrics_update_dispatcher.h"
@@ -204,7 +204,8 @@ class PageLoadTracker : public PageLoadMetricsUpdateDispatcher::Client,
   void OnFrameIntersectionUpdate(
       content::RenderFrameHost* rfh,
       const mojom::FrameIntersectionUpdate& frame_intersection_update) override;
-  void UpdateThroughput(mojom::ThroughputUkmDataPtr throughput_data) override;
+  void SetUpSharedMemoryForSmoothness(
+      base::ReadOnlySharedMemoryRegion shared_memory) override;
 
   // PageLoadMetricsObserverDelegate implementation:
   content::WebContents* GetWebContents() const override;
@@ -227,6 +228,7 @@ class PageLoadTracker : public PageLoadMetricsUpdateDispatcher::Client,
   const mojom::FrameMetadata& GetSubframeMetadata() const override;
   const PageRenderData& GetPageRenderData() const override;
   const mojom::InputTiming& GetPageInputTiming() const override;
+  const blink::MobileFriendliness& GetMobileFriendliness() const override;
   const PageRenderData& GetMainFrameRenderData() const override;
   const ui::ScopedVisibilityTracker& GetVisibilityTracker() const override;
   const ResourceTracker& GetResourceTracker() const override;
@@ -234,7 +236,7 @@ class PageLoadTracker : public PageLoadMetricsUpdateDispatcher::Client,
       const override;
   const LargestContentfulPaintHandler&
   GetExperimentalLargestContentfulPaintHandler() const override;
-  ukm::SourceId GetSourceId() const override;
+  ukm::SourceId GetPageUkmSourceId() const override;
   bool IsFirstNavigationInWebContents() const override;
 
   void Redirect(content::NavigationHandle* navigation_handle);
@@ -445,6 +447,7 @@ class PageLoadTracker : public PageLoadMetricsUpdateDispatcher::Client,
   const bool started_in_foreground_;
 
   mojom::PageLoadTimingPtr last_dispatched_merged_page_timing_;
+  blink::MobileFriendliness latest_mobile_friendliness_;
 
   ui::PageTransition page_transition_;
 

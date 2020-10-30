@@ -8,7 +8,6 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_source.h"
-#include "third_party/blink/public/web/modules/mediastream/media_stream_video_track.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/dom/events/native_event_listener.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -23,9 +22,11 @@
 #include "third_party/blink/renderer/modules/mediastream/media_stream_constraints_util.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_utils.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_video_capturer_source.h"
+#include "third_party/blink/renderer/modules/mediastream/media_stream_video_track.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_descriptor.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
 #include "third_party/blink/renderer/platform/wtf/uuid.h"
 
 namespace blink {
@@ -60,8 +61,6 @@ bool AddVideoTrackToMediaStream(
   const String track_id(WTF::CreateCanonicalUUIDString());
   auto* media_stream_source = MakeGarbageCollected<MediaStreamSource>(
       track_id, MediaStreamSource::kTypeVideo, track_id, is_remote);
-  // Takes ownership of |media_stream_video_source|.
-  media_stream_video_source->SetOwner(media_stream_source);
   media_stream_source->SetPlatformSource(std::move(media_stream_video_source));
   media_stream_source->SetCapabilities(ComputeCapabilitiesForVideoSource(
       track_id, preferred_formats,
@@ -114,11 +113,10 @@ void CreateHTMLAudioElementCapturer(
           web_media_player, std::move(task_runner));
 
   // |media_stream_source| takes ownership of |media_stream_audio_source|.
-  media_stream_audio_source->SetOwner(media_stream_source);
   media_stream_source->SetPlatformSource(
       base::WrapUnique(media_stream_audio_source));
 
-  WebMediaStreamSource::Capabilities capabilities;
+  MediaStreamSource::Capabilities capabilities;
   capabilities.device_id = track_id;
   capabilities.echo_cancellation.emplace_back(false);
   capabilities.auto_gain_control.emplace_back(false);
@@ -166,7 +164,9 @@ void MediaElementEventListener::Invoke(ExecutionContext* context,
     const MediaStreamTrackVector tracks = media_stream_->getTracks();
     for (const auto& track : tracks) {
       track->stopTrack(context);
-      media_stream_->RemoveTrackByComponentAndFireEvents(track->Component());
+      media_stream_->RemoveTrackByComponentAndFireEvents(
+          track->Component(),
+          MediaStreamDescriptorClient::DispatchEventTiming::kScheduled);
     }
 
     media_stream_->StreamEnded();
@@ -180,17 +180,21 @@ void MediaElementEventListener::Invoke(ExecutionContext* context,
     const MediaStreamTrackVector tracks = media_stream_->getTracks();
     for (const auto& track : tracks) {
       track->stopTrack(context);
-      media_stream_->RemoveTrackByComponentAndFireEvents(track->Component());
+      media_stream_->RemoveTrackByComponentAndFireEvents(
+          track->Component(),
+          MediaStreamDescriptorClient::DispatchEventTiming::kScheduled);
     }
     MediaStreamDescriptor* const descriptor = media_element_->GetSrcObject();
     DCHECK(descriptor);
     for (unsigned i = 0; i < descriptor->NumberOfAudioComponents(); i++) {
       media_stream_->AddTrackByComponentAndFireEvents(
-          descriptor->AudioComponent(i));
+          descriptor->AudioComponent(i),
+          MediaStreamDescriptorClient::DispatchEventTiming::kScheduled);
     }
     for (unsigned i = 0; i < descriptor->NumberOfVideoComponents(); i++) {
       media_stream_->AddTrackByComponentAndFireEvents(
-          descriptor->VideoComponent(i));
+          descriptor->VideoComponent(i),
+          MediaStreamDescriptorClient::DispatchEventTiming::kScheduled);
     }
     UpdateSources(context);
     return;
@@ -216,12 +220,18 @@ void MediaElementEventListener::Invoke(ExecutionContext* context,
   }
 
   MediaStreamComponentVector video_components = descriptor->VideoComponents();
-  for (auto component : video_components)
-    media_stream_->AddTrackByComponentAndFireEvents(component);
+  for (auto component : video_components) {
+    media_stream_->AddTrackByComponentAndFireEvents(
+        component,
+        MediaStreamDescriptorClient::DispatchEventTiming::kScheduled);
+  }
 
   MediaStreamComponentVector audio_components = descriptor->AudioComponents();
-  for (auto component : audio_components)
-    media_stream_->AddTrackByComponentAndFireEvents(component);
+  for (auto component : audio_components) {
+    media_stream_->AddTrackByComponentAndFireEvents(
+        component,
+        MediaStreamDescriptorClient::DispatchEventTiming::kScheduled);
+  }
 
   DVLOG(2) << "#videotracks: " << video_components.size()
            << " #audiotracks: " << audio_components.size();
@@ -229,11 +239,11 @@ void MediaElementEventListener::Invoke(ExecutionContext* context,
   UpdateSources(context);
 }
 
-void DidStopMediaStreamSource(const WebMediaStreamSource& source) {
-  if (source.IsNull())
+void DidStopMediaStreamSource(MediaStreamSource* source) {
+  if (!source)
     return;
-  blink::WebPlatformMediaStreamSource* const platform_source =
-      source.GetPlatformSource();
+  WebPlatformMediaStreamSource* const platform_source =
+      source->GetPlatformSource();
   DCHECK(platform_source);
   platform_source->StopSource();
 }
@@ -242,9 +252,14 @@ void MediaElementEventListener::UpdateSources(ExecutionContext* context) {
   for (auto track : media_stream_->getTracks())
     sources_.insert(track->Component()->Source());
 
+  // Handling of the ended event in JS triggered by DidStopMediaStreamSource()
+  // may cause a reentrant call to this function, which can modify |sources_|.
+  // Iterate over a copy of |sources_| to avoid invalidation of the iterator
+  // when a reentrant call occurs.
+  auto sources_copy = sources_;
   if (!media_element_->currentSrc().IsEmpty() &&
       !media_element_->IsMediaDataCorsSameOrigin()) {
-    for (auto source : sources_)
+    for (auto source : sources_copy)
       DidStopMediaStreamSource(source.Get());
   }
 }

@@ -18,15 +18,17 @@
 #include "base/debug/alias.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop_current.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/single_thread_task_runner.h"
+#include "base/task/current_thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "base/win/scoped_gdi_object.h"
 #include "base/win/win_util.h"
 #include "base/win/windows_version.h"
+#include "services/tracing/public/cpp/perfetto/macros.h"
+#include "third_party/perfetto/protos/perfetto/trace/track_event/chrome_window_handle_event_info.pbzero.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "ui/accessibility/accessibility_switches.h"
 #include "ui/accessibility/platform/ax_fragment_root_win.h"
@@ -791,7 +793,7 @@ bool HWNDMessageHandler::RunMoveLoop(const gfx::Vector2d& drag_offset,
   MoveLoopMouseWatcher watcher(this, hide_on_escape);
   // In Aura, we handle touch events asynchronously. So we need to allow nested
   // tasks while in windows move loop.
-  base::MessageLoopCurrent::ScopedNestableTaskAllower allow_nested;
+  base::CurrentThread::ScopedNestableTaskAllower allow_nested;
 
   SendMessage(hwnd(), WM_SYSCOMMAND, SC_MOVE | 0x0002, GetMessagePos());
   // Windows doesn't appear to offer a way to determine whether the user
@@ -988,7 +990,12 @@ HICON HWNDMessageHandler::GetSmallWindowIcon() const {
 LRESULT HWNDMessageHandler::OnWndProc(UINT message,
                                       WPARAM w_param,
                                       LPARAM l_param) {
-  TRACE_EVENT1("ui", "HWNDMessageHandler::OnWndProc", "message_id", message);
+  TRACE_EVENT("ui", "HWNDMessageHandler::OnWndProc",
+              [&](perfetto::EventContext ctx) {
+                perfetto::protos::pbzero::ChromeWindowHandleEventInfo* args =
+                    ctx.event()->set_chrome_window_handle_event_info();
+                args->set_message_id(message);
+              });
 
   HWND window = hwnd();
   LRESULT result = 0;
@@ -1696,8 +1703,12 @@ LRESULT HWNDMessageHandler::OnDpiChanged(UINT msg,
   if (LOWORD(w_param) != HIWORD(w_param))
     NOTIMPLEMENTED() << "Received non-square scaling factors";
 
-  TRACE_EVENT1("ui", "HWNDMessageHandler::OnDwmCompositionChanged", "dpi",
-               LOWORD(w_param));
+  TRACE_EVENT("ui", "HWNDMessageHandler::OnDpiChanged",
+              [&](perfetto::EventContext ctx) {
+                perfetto::protos::pbzero::ChromeWindowHandleEventInfo* args =
+                    ctx.event()->set_chrome_window_handle_event_info();
+                args->set_dpi(LOWORD(w_param));
+              });
 
   int dpi;
   float scaling_factor;
@@ -2532,8 +2543,7 @@ LRESULT HWNDMessageHandler::OnSetText(const wchar_t* text) {
 }
 
 void HWNDMessageHandler::OnSettingChange(UINT flags, const wchar_t* section) {
-  if (!GetParent(hwnd()) && (flags == SPI_SETWORKAREA) &&
-      !delegate_->WillProcessWorkAreaChange()) {
+  if (!GetParent(hwnd()) && (flags == SPI_SETWORKAREA)) {
     // Fire a dummy SetWindowPos() call, so we'll trip the code in
     // OnWindowPosChanging() below that notices work area changes.
     ::SetWindowPos(hwnd(), nullptr, 0, 0, 0, 0,
@@ -2797,7 +2807,10 @@ void HWNDMessageHandler::OnWindowPosChanging(WINDOWPOS* window_pos) {
         // window is maximized. We should take this into account.
         gfx::Insets client_area_insets;
         if (GetClientAreaInsets(&client_area_insets, monitor))
-          expected_maximized_bounds.Inset(client_area_insets.Scale(-1));
+          // Ceil the insets after scaling to make them exclude fractional parts
+          // after scaling, since the result is negative.
+          expected_maximized_bounds.Inset(
+              gfx::ScaleToCeiledInsets(client_area_insets, -1));
       }
       // Sometimes Windows incorrectly changes bounds of maximized windows after
       // attaching or detaching additional displays. In this case user can see
@@ -3025,7 +3038,7 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
         // we need to tell the RootView to send the mouse pressed event (which
         // sets capture, allowing subsequent WM_LBUTTONUP (note, _not_
         // WM_NCLBUTTONUP) to fire so that the appropriate WM_SYSCOMMAND can be
-        // sent by the applicable button's ButtonListener. We _have_ to do this
+        // sent by the applicable button's callback. We _have_ to do this this
         // way rather than letting Windows just send the syscommand itself (as
         // would happen if we never did this dance) because for some insane
         // reason DefWindowProc for WM_NCLBUTTONDOWN also renders the pressed
@@ -3290,9 +3303,7 @@ bool HWNDMessageHandler::IsSynthesizedMouseMessage(unsigned int message,
     ::ClientToScreen(hwnd(), &mouse_location);
     POINT cursor_pos = {0};
     ::GetCursorPos(&cursor_pos);
-    if (memcmp(&cursor_pos, &mouse_location, sizeof(POINT)))
-      return false;
-    return true;
+    return memcmp(&cursor_pos, &mouse_location, sizeof(POINT)) == 0;
   }
   return false;
 }

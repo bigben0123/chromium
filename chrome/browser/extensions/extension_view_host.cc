@@ -90,8 +90,12 @@ ExtensionViewHost::ExtensionViewHost(const Extension* extension,
     content::HostZoomMap* zoom_map =
         content::HostZoomMap::GetForWebContents(host_contents());
     zoom_map->SetTemporaryZoomLevel(
-        host_contents()->GetRenderViewHost()->GetProcess()->GetID(),
-        host_contents()->GetRenderViewHost()->GetRoutingID(),
+        host_contents()
+            ->GetMainFrame()
+            ->GetRenderViewHost()
+            ->GetProcess()
+            ->GetID(),
+        host_contents()->GetMainFrame()->GetRenderViewHost()->GetRoutingID(),
         zoom_map->GetDefaultZoomLevel());
   }
 }
@@ -157,7 +161,7 @@ bool ExtensionViewHost::IsBackgroundPage() const {
 content::WebContents* ExtensionViewHost::OpenURLFromTab(
     content::WebContents* source,
     const content::OpenURLParams& params) {
-  // Whitelist the dispositions we will allow to be opened.
+  // Allowlist the dispositions we will allow to be opened.
   switch (params.disposition) {
     case WindowOpenDisposition::SINGLETON_TAB:
     case WindowOpenDisposition::NEW_FOREGROUND_TAB:
@@ -224,7 +228,7 @@ content::ColorChooser* ExtensionViewHost::OpenColorChooser(
 
 void ExtensionViewHost::RunFileChooser(
     content::RenderFrameHost* render_frame_host,
-    std::unique_ptr<content::FileSelectListener> listener,
+    scoped_refptr<content::FileSelectListener> listener,
     const blink::mojom::FileChooserParams& params) {
   // For security reasons opening a file picker requires a visible <input>
   // element to click on, so this code only exists for extensions with a view.

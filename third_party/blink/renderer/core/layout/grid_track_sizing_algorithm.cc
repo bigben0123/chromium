@@ -694,15 +694,15 @@ double IndefiniteSizeStrategy::FindUsedFlexFraction(
   if (!grid.HasGridItems())
     return flex_fraction;
 
-  for (size_t i = 0; i < flexible_sized_tracks_index.size(); ++i) {
-    auto iterator =
-        grid.CreateIterator(direction, flexible_sized_tracks_index[i]);
+  HashSet<LayoutBox*> items_set;
+  for (const auto& track_index : flexible_sized_tracks_index) {
+    auto iterator = grid.CreateIterator(direction, track_index);
     while (LayoutBox* grid_item = iterator->NextGridItem()) {
-      const GridSpan& span = grid.GridItemSpan(*grid_item, direction);
-
       // Do not include already processed items.
-      if (i > 0 && span.StartLine() <= flexible_sized_tracks_index[i - 1])
+      if (!items_set.insert(grid_item).is_new_entry)
         continue;
+
+      const GridSpan& span = grid.GridItemSpan(*grid_item, direction);
 
       // Removing gutters from the max-content contribution of the item,
       // so they are not taken into account in FindFrUnitSize().
@@ -856,14 +856,15 @@ const GridTrackSize& GridTrackSizingAlgorithm::RawGridTrackSize(
     size_t translated_index) const {
   bool is_row_axis = direction == kForColumns;
   const Vector<GridTrackSize>& track_styles =
-      is_row_axis ? layout_grid_->StyleRef().GridTemplateColumns()
-                  : layout_grid_->StyleRef().GridTemplateRows();
+      is_row_axis
+          ? layout_grid_->StyleRef().GridTemplateColumns().LegacyTrackList()
+          : layout_grid_->StyleRef().GridTemplateRows().LegacyTrackList();
   const Vector<GridTrackSize>& auto_repeat_track_styles =
       is_row_axis ? layout_grid_->StyleRef().GridAutoRepeatColumns()
                   : layout_grid_->StyleRef().GridAutoRepeatRows();
   const Vector<GridTrackSize>& auto_track_styles =
-      is_row_axis ? layout_grid_->StyleRef().GridAutoColumns()
-                  : layout_grid_->StyleRef().GridAutoRows();
+      is_row_axis ? layout_grid_->StyleRef().GridAutoColumns().LegacyTrackList()
+                  : layout_grid_->StyleRef().GridAutoRows().LegacyTrackList();
   size_t insertion_point =
       is_row_axis
           ? layout_grid_->StyleRef().GridAutoRepeatColumnsInsertionPoint()
@@ -1258,9 +1259,9 @@ LayoutUnit GridTrackSizingAlgorithm::ItemSizeForTrackSizeComputationPhase(
     LayoutBox& grid_item) const {
   switch (phase) {
     case kResolveIntrinsicMinimums:
-    case kResolveIntrinsicMaximums:
       return strategy_->MinSizeForChild(grid_item);
     case kResolveContentBasedMinimums:
+    case kResolveIntrinsicMaximums:
       return strategy_->MinContentForChild(grid_item);
     case kResolveMaxContentMinimums:
     case kResolveMaxContentMaximums:

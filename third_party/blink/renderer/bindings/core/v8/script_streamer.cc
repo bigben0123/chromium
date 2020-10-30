@@ -16,7 +16,6 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
-#include "third_party/blink/renderer/core/html/parser/text_resource_decoder.h"
 #include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
 #include "third_party/blink/renderer/core/loader/resource/script_resource.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
@@ -233,6 +232,11 @@ class SourceStream : public v8::ScriptCompiler::ExternalSourceStream {
       ResponseBodyLoaderClient* response_body_loader_client,
       std::unique_ptr<char[]> data,
       uint32_t data_size) {
+    // The response_body_loader_client is held weakly, so it may be dead by the
+    // time this callback is called. If so, we can simply drop this chunk.
+    if (!response_body_loader_client)
+      return;
+
     response_body_loader_client->DidReceiveData(
         base::make_span(data.get(), data_size));
   }

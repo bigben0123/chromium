@@ -67,7 +67,7 @@ bool EditContext::HasPendingActivity() const {
 }
 
 InputMethodController& EditContext::GetInputMethodController() const {
-  return ExecutionContextClient::GetFrame()->GetInputMethodController();
+  return DomWindow()->GetFrame()->GetInputMethodController();
 }
 
 bool EditContext::IsEditContextActive() const {
@@ -93,19 +93,15 @@ bool EditContext::IsVirtualKeyboardPolicyManual() const {
 
 void EditContext::DispatchCompositionEndEvent(const String& text) {
   auto* event = MakeGarbageCollected<CompositionEvent>(
-      event_type_names::kCompositionend,
-      ExecutionContextClient::GetFrame()->DomWindow(), text);
+      event_type_names::kCompositionend, DomWindow(), text);
   DispatchEvent(*event);
 }
 
 bool EditContext::DispatchCompositionStartEvent(const String& text) {
   auto* event = MakeGarbageCollected<CompositionEvent>(
-      event_type_names::kCompositionstart,
-      ExecutionContextClient::GetFrame()->DomWindow(), text);
+      event_type_names::kCompositionstart, DomWindow(), text);
   DispatchEvent(*event);
-  if (!ExecutionContextClient::GetFrame())
-    return false;
-  return true;
+  return DomWindow();
 }
 
 void EditContext::DispatchTextUpdateEvent(const String& text,
@@ -126,6 +122,7 @@ void EditContext::DispatchTextFormatEvent(
   // TODO(snianu): Try to accumulate the ranges with similar formats and fire
   // one event.
   DCHECK(has_composition_);
+  String underline_thickness;
   String underline_style;
   for (const auto& ime_text_span : ime_text_spans) {
     const int format_range_start =
@@ -135,16 +132,30 @@ void EditContext::DispatchTextFormatEvent(
 
     switch (ime_text_span.thickness) {
       case ui::ImeTextSpan::Thickness::kNone:
-        underline_style = "None";
+        underline_thickness = "None";
         break;
       case ui::ImeTextSpan::Thickness::kThin:
-        underline_style = "Thin";
+        underline_thickness = "Thin";
         break;
       case ui::ImeTextSpan::Thickness::kThick:
-        underline_style = "Thick";
+        underline_thickness = "Thick";
         break;
-      default:
+    }
+    switch (ime_text_span.underline_style) {
+      case ui::ImeTextSpan::UnderlineStyle::kNone:
         underline_style = "None";
+        break;
+      case ui::ImeTextSpan::UnderlineStyle::kSolid:
+        underline_style = "Solid";
+        break;
+      case ui::ImeTextSpan::UnderlineStyle::kDot:
+        underline_style = "Dotted";
+        break;
+      case ui::ImeTextSpan::UnderlineStyle::kDash:
+        underline_style = "Dashed";
+        break;
+      case ui::ImeTextSpan::UnderlineStyle::kSquiggle:
+        underline_style = "Squiggle";
         break;
     }
     TextFormatUpdateEvent* event = MakeGarbageCollected<TextFormatUpdateEvent>(
@@ -155,7 +166,9 @@ void EditContext::DispatchTextFormatEvent(
             ime_text_span.background_color),
         cssvalue::CSSColorValue::SerializeAsCSSComponentValue(
             ime_text_span.suggestion_highlight_color),
-        underline_style);
+        cssvalue::CSSColorValue::SerializeAsCSSComponentValue(
+            ime_text_span.text_color),
+        underline_thickness, underline_style);
     DispatchEvent(*event);
   }
 }

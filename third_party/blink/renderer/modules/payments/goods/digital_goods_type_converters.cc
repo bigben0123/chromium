@@ -9,48 +9,54 @@
 
 namespace mojo {
 
-blink::ItemDetails*
-TypeConverter<blink::ItemDetails*, payments::mojom::blink::ItemDetailsPtr>::
-    Convert(const payments::mojom::blink::ItemDetailsPtr& input) {
+using payments::mojom::blink::BillingResponseCode;
+using payments::mojom::blink::ItemDetailsPtr;
+
+blink::ItemDetails* TypeConverter<blink::ItemDetails*, ItemDetailsPtr>::Convert(
+    const ItemDetailsPtr& input) {
   if (!input)
     return nullptr;
   blink::ItemDetails* output = blink::ItemDetails::Create();
   output->setItemId(input->item_id);
   output->setTitle(input->title);
-  output->setDescription(input->description);
+  if (!input->description.IsEmpty())
+    output->setDescription(input->description);
   output->setPrice(
       blink::PaymentEventDataConversion::ToPaymentCurrencyAmount(input->price));
+  if (input->subscription_period && !input->subscription_period.IsEmpty())
+    output->setSubscriptionPeriod(input->subscription_period);
+  if (input->free_trial_period && !input->free_trial_period.IsEmpty())
+    output->setFreeTrialPeriod(input->free_trial_period);
+  if (input->introductory_price) {
+    output->setIntroductoryPrice(
+        blink::PaymentEventDataConversion::ToPaymentCurrencyAmount(
+            input->introductory_price));
+  }
+  if (input->introductory_price_period &&
+      !input->introductory_price_period.IsEmpty()) {
+    output->setIntroductoryPricePeriod(input->introductory_price_period);
+  }
   return output;
 }
 
-WTF::String
-TypeConverter<WTF::String, payments::mojom::blink::BillingResponseCode>::
-    Convert(const payments::mojom::blink::BillingResponseCode& input) {
+WTF::String TypeConverter<WTF::String, BillingResponseCode>::Convert(
+    const BillingResponseCode& input) {
   switch (input) {
-    case payments::mojom::blink::BillingResponseCode::kOk:
+    case BillingResponseCode::kOk:
       return "ok";
-    case payments::mojom::blink::BillingResponseCode::kError:
+    case BillingResponseCode::kError:
       return "error";
-    case payments::mojom::blink::BillingResponseCode::kBillingUnavailable:
-      return "billingUnavailable";
-    case payments::mojom::blink::BillingResponseCode::kDeveloperError:
-      return "developerError";
-    case payments::mojom::blink::BillingResponseCode::kFeatureNotSupported:
-      return "featureNotSupported";
-    case payments::mojom::blink::BillingResponseCode::kItemAlreadyOwned:
+    case BillingResponseCode::kItemAlreadyOwned:
       return "itemAlreadyOwned";
-    case payments::mojom::blink::BillingResponseCode::kItemNotOwned:
+    case BillingResponseCode::kItemNotOwned:
       return "itemNotOwned";
-    case payments::mojom::blink::BillingResponseCode::kItemUnavailable:
+    case BillingResponseCode::kItemUnavailable:
       return "itemUnavailable";
-    case payments::mojom::blink::BillingResponseCode::kServiceDisconnected:
-      return "serviceDisconnected";
-    case payments::mojom::blink::BillingResponseCode::kServiceUnavailable:
-      return "serviceUnavailable";
-    case payments::mojom::blink::BillingResponseCode::kUserCancelled:
-      return "userCancelled";
+    case BillingResponseCode::kClientAppUnavailable:
+      return "clientAppUnavailable";
+    case BillingResponseCode::kClientAppError:
+      return "clientAppError";
   }
-
   NOTREACHED();
 }
 

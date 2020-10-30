@@ -128,7 +128,8 @@
             pathAndBase.startsWith('/css/cssom-view/') ||
             pathAndBase.startsWith('/css/css-scroll-snap/') ||
             pathAndBase.startsWith('/dom/events/') ||
-            pathAndBase.startsWith('/feature-policy/experimental-features/')) {
+            pathAndBase.startsWith('/feature-policy/experimental-features/') ||
+            pathAndBase.startsWith('/permissions-policy/experimental-features/')) {
             // Per-test automation scripts.
             src = automationPath + pathAndBase + '-automation.js';
         } else {
@@ -174,7 +175,7 @@
         }
 
         // Output failure metrics if there are many.
-        resultCounts = countResultTypes(tests);
+        const resultCounts = countResultTypes(tests);
         if (outputDocument.URL.indexOf('://web-platform.test') >= 0 &&
             tests.length >= 50 &&
             (resultCounts[1] || resultCounts[2] || resultCounts[3])) {

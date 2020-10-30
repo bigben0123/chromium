@@ -88,6 +88,7 @@ class PinRequestViewTest : public LoginTestBase,
   void StartView(base::Optional<int> pin_length = 6) {
     PinRequest request;
     request.help_button_enabled = true;
+    request.obscure_pin = false;
     request.pin_length = pin_length;
     request.on_pin_request_done = base::DoNothing::Once<bool>();
     view_ = new PinRequestView(std::move(request), this);
@@ -220,7 +221,7 @@ TEST_F(PinRequestViewTest, SubmitButton) {
 
   // The submit button on the PIN keyboard shouldn't be shown.
   LoginPinView::TestApi test_pin_keyboard(test_api.pin_keyboard_view());
-  EXPECT_FALSE(test_pin_keyboard.GetSubmitButton()->parent());
+  EXPECT_FALSE(test_pin_keyboard.GetSubmitButton());
 
   auto* generator = GetEventGenerator();
   // Updating input code (here last digit) should clear error state.
@@ -652,14 +653,14 @@ TEST_F(PinRequestWidgetTest, SpokenFeedbackKeyCombo) {
 
   AccessibilityControllerImpl* controller =
       Shell::Get()->accessibility_controller();
-  EXPECT_FALSE(controller->spoken_feedback_enabled());
+  EXPECT_FALSE(controller->spoken_feedback().enabled());
 
   ui::test::EventGenerator* generator = GetEventGenerator();
   generator->PressKey(ui::KeyboardCode(ui::KeyboardCode::VKEY_Z),
                       ui::EF_ALT_DOWN | ui::EF_CONTROL_DOWN);
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_TRUE(controller->spoken_feedback_enabled());
+  EXPECT_TRUE(controller->spoken_feedback().enabled());
 }
 
 }  // namespace ash

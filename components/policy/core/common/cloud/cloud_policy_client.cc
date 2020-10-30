@@ -62,7 +62,7 @@ DeviceMode TranslateProtobufDeviceMode(
 bool IsChromePolicy(const std::string& type) {
   return type == dm_protocol::kChromeDevicePolicyType ||
          type == dm_protocol::kChromeUserPolicyType ||
-         type == dm_protocol::kChromeMachineLevelUserCloudPolicyType;
+         IsMachineLevelUserCloudPolicyType(type);
 }
 
 em::PolicyValidationReportRequest::ValidationResultType
@@ -460,7 +460,7 @@ void CloudPolicyClient::FetchRobotAuthCodes(
 
   request->set_device_type(device_type);
 
-  policy_fetch_request_job_ = service_->CreateJob(std::move(config));
+  request_jobs_.push_back(service_->CreateJob(std::move(config)));
 }
 
 void CloudPolicyClient::Unregister() {
@@ -607,7 +607,8 @@ void CloudPolicyClient::UploadAppInstallReport(base::Value report,
   CHECK(is_registered());
   CancelAppInstallReportUpload();
   app_install_report_request_job_ = CreateNewRealtimeReportingJob(
-      std::move(report), service()->configuration()->GetReportingServerUrl(),
+      std::move(report),
+      service()->configuration()->GetRealtimeReportingServerUrl(),
       /* add_connector_url_params=*/false, std::move(callback));
   DCHECK(app_install_report_request_job_);
 }
@@ -627,7 +628,8 @@ void CloudPolicyClient::UploadExtensionInstallReport(base::Value report,
   CHECK(is_registered());
   CancelExtensionInstallReportUpload();
   extension_install_report_request_job_ = CreateNewRealtimeReportingJob(
-      std::move(report), service()->configuration()->GetReportingServerUrl(),
+      std::move(report),
+      service()->configuration()->GetRealtimeReportingServerUrl(),
       /* add_connector_url_params=*/false, std::move(callback));
   DCHECK(extension_install_report_request_job_);
 }
@@ -696,15 +698,16 @@ void CloudPolicyClient::GetDeviceAttributeUpdatePermission(
   // (https://crbug.com/942013).
   // DCHECK(auth->has_oauth_token() || auth->has_enrollment_token());
 
-  bool has_oauth_token = auth->has_oauth_token();
+  const bool has_oauth_token = auth->has_oauth_token();
+  const std::string oauth_token =
+      has_oauth_token ? auth->oauth_token() : std::string();
   std::unique_ptr<DMServerJobConfiguration> config =
       std::make_unique<DMServerJobConfiguration>(
           DeviceManagementService::JobConfiguration::
               TYPE_ATTRIBUTE_UPDATE_PERMISSION,
           this,
           /*critical=*/false,
-          !has_oauth_token ? std::move(auth) : DMAuth::NoAuth(),
-          has_oauth_token ? auth->oauth_token() : std::string(),
+          !has_oauth_token ? std::move(auth) : DMAuth::NoAuth(), oauth_token,
           base::BindOnce(
               &CloudPolicyClient::OnDeviceAttributeUpdatePermissionCompleted,
               weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
@@ -723,14 +726,15 @@ void CloudPolicyClient::UpdateDeviceAttributes(
   CHECK(is_registered());
   DCHECK(auth->has_oauth_token() || auth->has_enrollment_token());
 
-  bool has_oauth_token = auth->has_oauth_token();
+  const bool has_oauth_token = auth->has_oauth_token();
+  const std::string oauth_token =
+      has_oauth_token ? auth->oauth_token() : std::string();
   std::unique_ptr<DMServerJobConfiguration> config =
       std::make_unique<DMServerJobConfiguration>(
           DeviceManagementService::JobConfiguration::TYPE_ATTRIBUTE_UPDATE,
           this,
           /*critical=*/false,
-          !has_oauth_token ? std::move(auth) : DMAuth::NoAuth(),
-          has_oauth_token ? auth->oauth_token() : std::string(),
+          !has_oauth_token ? std::move(auth) : DMAuth::NoAuth(), oauth_token,
           base::BindOnce(&CloudPolicyClient::OnDeviceAttributeUpdated,
                          weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
 
@@ -1037,6 +1041,10 @@ void CloudPolicyClient::OnFetchRobotAuthCodesCompleted(
     DeviceManagementStatus status,
     int net_error,
     const em::DeviceManagementResponse& response) {
+  // Remove the job before executing the callback because |this| might be
+  // deleted during the callback.
+  RemoveJob(job);
+
   if (status == DM_STATUS_SUCCESS &&
       (!response.has_service_api_access_response())) {
     LOG(WARNING) << "Invalid service api access response.";
@@ -1051,6 +1059,7 @@ void CloudPolicyClient::OnFetchRobotAuthCodesCompleted(
   } else {
     std::move(callback).Run(status, std::string());
   }
+  // |this| might be deleted at this point.
 }
 
 void CloudPolicyClient::OnPolicyFetchCompleted(

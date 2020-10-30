@@ -14,8 +14,11 @@
   OP(kColorId_DialogBackground),                                               \
   OP(kColorId_DialogForeground),                                               \
   OP(kColorId_BubbleBackground),                                               \
-  OP(kColorId_BubbleForeground),                                               \
   OP(kColorId_BubbleFooterBackground),                                         \
+  /* Avatar and Header Asset */                                                \
+  OP(kColorId_AvatarHeaderArt),                                                \
+  OP(kColorId_AvatarIconGuest),                                                \
+  OP(kColorId_AvatarIconIncognito),                                            \
   /* FocusableBorder */                                                        \
   OP(kColorId_FocusedBorderColor),                                             \
   OP(kColorId_UnfocusedBorderColor),                                           \
@@ -92,7 +95,9 @@
   OP(kColorId_NotificationLargeImageBackground),                               \
   OP(kColorId_NotificationPlaceholderIconColor),                               \
   OP(kColorId_NotificationEmptyPlaceholderIconColor),                          \
+  OP(kColorId_NotificationEmptyPlaceholderTextColor),                          \
   OP(kColorId_NotificationDefaultAccentColor),                                 \
+  OP(kColorId_NotificationInkDropBase),                                        \
   /* Slider */                                                                 \
   OP(kColorId_SliderThumbDefault),                                             \
   OP(kColorId_SliderTroughDefault),                                            \
@@ -158,9 +163,7 @@
   OP(kColorId_AlertSeverityHigh),                                              \
   /* Colors for icons in non-menu contexts. */                                 \
   OP(kColorId_DefaultIconColor),                                               \
-  OP(kColorId_DisabledIconColor),                                              \
-  /* Default colors for frame caption buttons. */                              \
-  OP(kColorId_DefaultFrameCaptionForegroundColor)
+  OP(kColorId_DisabledIconColor)
 
 #if defined(OS_CHROMEOS)
 #define NATIVE_THEME_CHROMEOS_COLOR_IDS                                        \

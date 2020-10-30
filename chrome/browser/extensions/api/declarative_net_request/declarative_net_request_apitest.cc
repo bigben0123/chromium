@@ -75,7 +75,8 @@ INSTANTIATE_TEST_SUITE_P(PersistentBackground,
 INSTANTIATE_TEST_SUITE_P(EventPage,
                          DeclarativeNetRequestLazyAPItest,
                          ::testing::Values(ContextType::kEventPage));
-INSTANTIATE_TEST_SUITE_P(ServiceWorker,
+// Flaky (https://crbug.com/1111240)
+INSTANTIATE_TEST_SUITE_P(DISABLED_ServiceWorker,
                          DeclarativeNetRequestLazyAPItest,
                          ::testing::Values(ContextType::kServiceWorker));
 
@@ -95,6 +96,10 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestAPItest, ModifyHeaders) {
 
 IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestLazyAPItest, GetMatchedRules) {
   ASSERT_TRUE(RunTest("get_matched_rules")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestLazyAPItest, IsRegexSupported) {
+  ASSERT_TRUE(RunTest("is_regex_supported")) << message_;
 }
 
 }  // namespace

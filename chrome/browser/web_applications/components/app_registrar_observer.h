@@ -20,6 +20,9 @@ class AppRegistrarObserver : public base::CheckedObserver {
  public:
   virtual void OnWebAppInstalled(const AppId& app_id) {}
 
+  // Called when OS hooks installation is finished during Web App installation.
+  virtual void OnWebAppInstalledWithOsHooks(const AppId& app_id) {}
+
   // Called when any field of a web app's local manifest is updated.
   // Note that |old_name| will always be the same as the current name as we
   // don't support name updating yet. See TODO(crbug.com/1088338).
@@ -33,9 +36,9 @@ class AppRegistrarObserver : public base::CheckedObserver {
   virtual void OnWebAppsWillBeUpdatedFromSync(
       const std::vector<const WebApp*>& new_apps_state) {}
 
-  // |app_id| still registered in the AppRegistrar. For bookmark apps, use
-  // BookmarkAppRegistrar::FindExtension to convert this |app_id| to Extension
-  // pointer.
+  // Called before a web app is uninstalled. |app_id| is still registered in the
+  // AppRegistrar. For bookmark apps, use BookmarkAppRegistrar::FindExtension to
+  // convert this |app_id| to Extension pointer.
   virtual void OnWebAppUninstalled(const AppId& app_id) {}
 
   // For bookmark apps, use BookmarkAppRegistrar::FindExtension to convert this

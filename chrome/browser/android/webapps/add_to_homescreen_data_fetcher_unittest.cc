@@ -13,12 +13,15 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
 #include "base/run_loop.h"
-#include "base/strings/nullable_string16.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/flags/android/chrome_feature_list.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/installable/installable_manager.h"
 #include "chrome/browser/installable/installable_metrics.h"
 #include "chrome/common/web_application_info.h"
@@ -97,23 +100,19 @@ class ObserverWaiter : public AddToHomescreenDataFetcher::Observer {
   DISALLOW_COPY_AND_ASSIGN(ObserverWaiter);
 };
 
-// Builds non-null base::NullableString16 from a UTF8 string.
-base::NullableString16 NullableStringFromUTF8(const std::string& value) {
-  return base::NullableString16(base::UTF8ToUTF16(value), false);
-}
-
 // Builds WebAPK compatible blink::Manifest.
 blink::Manifest BuildDefaultManifest() {
   blink::Manifest manifest;
-  manifest.name = NullableStringFromUTF8(kDefaultManifestName);
-  manifest.short_name = NullableStringFromUTF8(kDefaultManifestShortName);
+  manifest.name = base::ASCIIToUTF16(kDefaultManifestName);
+  manifest.short_name = base::ASCIIToUTF16(kDefaultManifestShortName);
   manifest.start_url = GURL(kDefaultStartUrl);
   manifest.display = kDefaultManifestDisplayMode;
 
   blink::Manifest::ImageResource primary_icon;
   primary_icon.type = base::ASCIIToUTF16("image/png");
   primary_icon.sizes.push_back(gfx::Size(144, 144));
-  primary_icon.purpose.push_back(blink::Manifest::ImageResource::Purpose::ANY);
+  primary_icon.purpose.push_back(
+      blink::mojom::ManifestImageResource_Purpose::ANY);
   primary_icon.src = GURL(kDefaultIconUrl);
   manifest.icons.push_back(primary_icon);
 
@@ -208,9 +207,6 @@ class AddToHomescreenDataFetcherTest : public ChromeRenderViewHostTestHarness {
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
 
-    ASSERT_TRUE(profile()->CreateHistoryService(false, true));
-    profile()->CreateFaviconService();
-
     // Manually inject the TestInstallableManager as a "InstallableManager"
     // WebContentsUserData. We can't directly call ::CreateForWebContents due to
     // typing issues since TestInstallableManager doesn't directly inherit from
@@ -222,6 +218,13 @@ class AddToHomescreenDataFetcherTest : public ChromeRenderViewHostTestHarness {
         web_contents()->GetUserData(TestInstallableManager::UserDataKey()));
 
     NavigateAndCommit(GURL(kDefaultStartUrl));
+  }
+
+  TestingProfile::TestingFactories GetTestingFactories() const override {
+    return {{HistoryServiceFactory::GetInstance(),
+             HistoryServiceFactory::GetDefaultFactory()},
+            {FaviconServiceFactory::GetInstance(),
+             FaviconServiceFactory::GetDefaultFactory()}};
   }
 
   std::unique_ptr<AddToHomescreenDataFetcher> BuildFetcher(
@@ -470,7 +473,7 @@ TEST_F(AddToHomescreenDataFetcherTest, ManifestNameClobbersWebApplicationName) {
     // Check the case where we have no icons.
     blink::Manifest manifest = BuildDefaultManifest();
     manifest.icons.clear();
-    manifest.short_name = base::NullableString16();
+    manifest.short_name = base::nullopt;
     SetManifest(manifest);
 
     ObserverWaiter waiter;
@@ -484,7 +487,7 @@ TEST_F(AddToHomescreenDataFetcherTest, ManifestNameClobbersWebApplicationName) {
   }
 
   blink::Manifest manifest(BuildDefaultManifest());
-  manifest.short_name = base::NullableString16();
+  manifest.short_name = base::nullopt;
   SetManifest(manifest);
 
   {
@@ -541,8 +544,8 @@ TEST_F(AddToHomescreenDataFetcherTest, ManifestNoNameNoShortName) {
   //  - WebApplicationInfo::title is used as the "name".
   //  - We still use the icons from the manifest.
   blink::Manifest manifest(BuildDefaultManifest());
-  manifest.name = base::NullableString16();
-  manifest.short_name = base::NullableString16();
+  manifest.name = base::nullopt;
+  manifest.short_name = base::nullopt;
 
   // Check the case where we don't time out waiting for the service worker.
   SetManifest(manifest);

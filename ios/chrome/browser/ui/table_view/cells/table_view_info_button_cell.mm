@@ -6,6 +6,7 @@
 
 #import "ios/chrome/browser/ui/settings/cells/settings_cells_constants.h"
 #include "ios/chrome/browser/ui/table_view/cells/table_view_cells_constants.h"
+#import "ios/chrome/browser/ui/table_view/cells/table_view_cells_constants.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/colors/UIColor+cr_semantic_colors.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
@@ -86,6 +87,7 @@ const CGFloat kCellLabelsWidthProportion = 0.2f;
         [UIFont preferredFontForTextStyle:kTableViewSublabelFontStyle];
     _detailTextLabel.adjustsFontForContentSizeCategory = YES;
     _detailTextLabel.textColor = UIColor.cr_secondaryLabelColor;
+    _detailTextLabel.numberOfLines = 0;
     [self.contentView addSubview:_detailTextLabel];
 
     _statusTextLabel = [[UILabel alloc] init];
@@ -107,6 +109,7 @@ const CGFloat kCellLabelsWidthProportion = 0.2f;
         setContentCompressionResistancePriority:UILayoutPriorityDefaultHigh + 1
                                         forAxis:
                                             UILayoutConstraintAxisHorizontal];
+    _trailingButton.accessibilityIdentifier = kTableViewCellInfoButtonViewId;
     [self.contentView addSubview:_trailingButton];
 
     // Set up the constraints assuming that the icon image is hidden.
@@ -304,15 +307,18 @@ const CGFloat kCellLabelsWidthProportion = 0.2f;
 #pragma mark - UIAccessibility
 
 - (CGPoint)accessibilityActivationPoint {
-  // Center the activation point over the button.
+  // Center the activation point over the info button, so that double-tapping
+  // triggers to show the popover.
   CGRect buttonFrame = UIAccessibilityConvertFrameToScreenCoordinates(
-      self.contentView.frame, self);
+      self.trailingButton.frame, self);
   return CGPointMake(CGRectGetMidX(buttonFrame), CGRectGetMidY(buttonFrame));
 }
 
 - (NSString*)accessibilityHint {
-  return l10n_util::GetNSString(
-      IDS_IOS_TOGGLE_SETTING_MANAGED_ACCESSIBILITY_HINT);
+  if (self.customizedAccessibilityHint.length) {
+    return self.customizedAccessibilityHint;
+  }
+  return l10n_util::GetNSString(IDS_IOS_INFO_BUTTON_ACCESSIBILITY_HINT);
 }
 
 - (NSString*)accessibilityLabel {

@@ -12,6 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
 #include "content/public/browser/bluetooth_chooser.h"
+#include "content/public/browser/storage_partition_config.h"
 #include "extensions/browser/extension_event_histogram_value.h"
 #include "extensions/browser/extension_prefs_observer.h"
 #include "extensions/browser/extensions_browser_api_provider.h"
@@ -41,6 +42,7 @@ class WebContents;
 }  // namespace content
 
 namespace network {
+struct ResourceRequest;
 namespace mojom {
 class NetworkContext;
 }
@@ -48,6 +50,10 @@ class NetworkContext;
 
 namespace update_client {
 class UpdateClient;
+}
+
+namespace url {
+class Origin;
 }
 
 namespace extensions {
@@ -77,6 +83,8 @@ class UserScriptListener;
 class ExtensionsBrowserClient {
  public:
   ExtensionsBrowserClient();
+  ExtensionsBrowserClient(const ExtensionsBrowserClient&) = delete;
+  ExtensionsBrowserClient& operator=(const ExtensionsBrowserClient&) = delete;
   virtual ~ExtensionsBrowserClient();
 
   // Returns the single instance of |this|.
@@ -344,11 +352,6 @@ class ExtensionsBrowserClient {
   virtual bool ShouldSchemeBypassNavigationChecks(
       const std::string& scheme) const;
 
-  // Returns true when we should enforce 'extraHeaders' option for any
-  // webRequest API callbacks so to mitigate CORS related compatibility issues.
-  virtual bool ShouldForceWebRequestExtraHeaders(
-      content::BrowserContext* context) const;
-
   // Gets and sets the last save (download) path for a given context.
   virtual base::FilePath GetSaveFilePath(content::BrowserContext* context);
   virtual void SetLastSaveFilePath(content::BrowserContext* context,
@@ -358,10 +361,17 @@ class ExtensionsBrowserClient {
   virtual const MediaRouterExtensionAccessLogger* GetMediaRouterAccessLogger()
       const;
 
+  // Returns true if the |extension_id| requires its own isolated storage
+  // partition.
+  virtual bool HasIsolatedStorage(const std::string& extension_id,
+                                  content::BrowserContext* context);
+
+  // Returns whether screenshot of |web_contents| is restricted due to Data Leak
+  // Protection policy.
+  virtual bool IsScreenshotRestricted(content::WebContents* web_contents) const;
+
  private:
   std::vector<std::unique_ptr<ExtensionsBrowserAPIProvider>> providers_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionsBrowserClient);
 };
 
 }  // namespace extensions

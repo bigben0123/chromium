@@ -58,9 +58,22 @@ void UpdateGoogleSpeechSynthesisKeepAliveCount(content::BrowserContext* context,
     return;
 
   UpdateGoogleSpeechSynthesisKeepAliveCountHelper(
-      profile->HasOffTheRecordProfile() ? profile->GetOffTheRecordProfile()
-                                        : profile,
+      profile->HasPrimaryOTRProfile() ? profile->GetPrimaryOTRProfile()
+                                      : profile,
       increment);
+}
+
+void UpdateGoogleSpeechSynthesisKeepAliveCountOnReload(
+    content::BrowserContext* browser_context) {
+  if (chromeos::AccessibilityManager::Get()->IsSpokenFeedbackEnabled()) {
+    UpdateGoogleSpeechSynthesisKeepAliveCount(browser_context,
+                                              true /* increment */);
+  }
+
+  if (chromeos::AccessibilityManager::Get()->IsSelectToSpeakEnabled()) {
+    UpdateGoogleSpeechSynthesisKeepAliveCount(browser_context,
+                                              true /* increment */);
+  }
 }
 
 }  // namespace
@@ -139,6 +152,12 @@ const std::set<std::string> TtsEngineExtensionObserver::GetTtsExtensions() {
 #if defined(OS_CHROMEOS)
 void TtsEngineExtensionObserver::BindTtsStream(
     mojo::PendingReceiver<chromeos::tts::mojom::TtsStream> receiver) {
+  // At this point, the component extension has loaded, and the js has requested
+  // a TtsStream be bound. It's safe now to update the keep alive count for
+  // important accessibility features. This path is also encountered if the
+  // component extension background page forceably window.close(s) on error.
+  UpdateGoogleSpeechSynthesisKeepAliveCountOnReload(profile_);
+
   // Always launch a new TtsService. By assigning below, if |tts_service_| held
   // a remote, it will be killed and a new one created, ensuring we only ever
   // have one TtsService running.
@@ -148,7 +167,10 @@ void TtsEngineExtensionObserver::BindTtsStream(
               .WithDisplayName("TtsService")
               .Pass());
 
-  tts_service_->BindTtsStream(std::move(receiver));
+  mojo::PendingRemote<audio::mojom::StreamFactory> factory_remote;
+  auto factory_receiver = factory_remote.InitWithNewPipeAndPassReceiver();
+  content::GetAudioService().BindStreamFactory(std::move(factory_receiver));
+  tts_service_->BindTtsStream(std::move(receiver), std::move(factory_remote));
 }
 #endif  // defined(OS_CHROMEOS)
 
@@ -182,21 +204,10 @@ void TtsEngineExtensionObserver::OnListenerAdded(
 void TtsEngineExtensionObserver::OnExtensionLoaded(
     content::BrowserContext* browser_context,
     const extensions::Extension* extension) {
-  if (!extension->permissions_data()->HasAPIPermission(
-          extensions::APIPermission::kTtsEngine))
-    return;
-
-  engine_extension_ids_.insert(extension->id());
-
-#if defined(OS_CHROMEOS)
-  if (extension->id() != extension_misc::kGoogleSpeechSynthesisExtensionId)
-    return;
-
-  if (chromeos::AccessibilityManager::Get()->IsSpokenFeedbackEnabled()) {
-    UpdateGoogleSpeechSynthesisKeepAliveCount(browser_context,
-                                              true /* increment */);
+  if (extension->permissions_data()->HasAPIPermission(
+          extensions::APIPermission::kTtsEngine)) {
+    engine_extension_ids_.insert(extension->id());
   }
-#endif  // defined(OS_CHROMEOS)
 }
 
 void TtsEngineExtensionObserver::OnExtensionUnloaded(
@@ -219,12 +230,14 @@ void TtsEngineExtensionObserver::OnExtensionUnloaded(
 void TtsEngineExtensionObserver::OnAccessibilityStatusChanged(
     const chromeos::AccessibilityStatusEventDetails& details) {
   if (details.notification_type != chromeos::AccessibilityNotificationType::
-                                       ACCESSIBILITY_TOGGLE_SPOKEN_FEEDBACK)
+                                       ACCESSIBILITY_TOGGLE_SPOKEN_FEEDBACK &&
+      details.notification_type != chromeos::AccessibilityNotificationType::
+                                       ACCESSIBILITY_TOGGLE_SELECT_TO_SPEAK)
     return;
 
   // Google speech synthesis might not be loaded yet. If it isn't, the call in
   // |OnExtensionLoaded| will do the increment. If it is, the call below will
-  // increment. Decrements only occur when toggling off ChromeVox here.
+  // increment. Decrements only occur when toggling off here.
   UpdateGoogleSpeechSynthesisKeepAliveCount(profile(), details.enabled);
 }
 #endif

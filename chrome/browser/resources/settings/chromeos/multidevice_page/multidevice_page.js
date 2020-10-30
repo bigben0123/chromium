@@ -6,6 +6,7 @@ Polymer({
   is: 'settings-multidevice-page',
 
   behaviors: [
+    DeepLinkingBehavior,
     settings.RouteObserverBehavior,
     MultiDeviceFeatureBehavior,
     WebUIListenerBehavior,
@@ -62,6 +63,12 @@ Polymer({
       value: false,
     },
 
+    /** @private {boolean} */
+    showNotificationAccessSetupDialog_: {
+      type: Boolean,
+      value: false,
+    },
+
     /**
      * The value of the Nearby Share feature flag which controls if the
      * Nearby Share settings and subpage are accessible.
@@ -72,6 +79,20 @@ Polymer({
       value: function() {
         return loadTimeData.getBoolean('nearbySharingFeatureFlag');
       }
+    },
+
+    /**
+     * Used by DeepLinkingBehavior to focus this page's deep links.
+     * @type {!Set<!chromeos.settings.mojom.Setting>}
+     */
+    supportedSettingIds: {
+      type: Object,
+      value: () => new Set([
+        chromeos.settings.mojom.Setting.kSetUpMultiDevice,
+        chromeos.settings.mojom.Setting.kVerifyMultiDeviceSetup,
+        chromeos.settings.mojom.Setting.kMultiDeviceOnOff,
+        chromeos.settings.mojom.Setting.kNearbyShareOnOff,
+      ]),
     },
   },
 
@@ -93,15 +114,24 @@ Polymer({
         this.onPageContentDataChanged_.bind(this));
 
     this.browserProxy_.getPageContentData().then(
-        this.onPageContentDataChanged_.bind(this));
+        this.onInitialPageContentDataFetched_.bind(this));
   },
 
   /**
    * Overridden from settings.RouteObserverBehavior.
+   * @param {!settings.Route} route
+   * @param {!settings.Route} oldRoute
    * @protected
    */
-  currentRouteChanged() {
+  currentRouteChanged(route, oldRoute) {
     this.leaveNestedPageIfNoHostIsSet_();
+
+    // Does not apply to this page.
+    if (route !== settings.routes.MULTIDEVICE) {
+      return;
+    }
+
+    this.attemptDeepLink();
   },
 
   /**
@@ -309,19 +339,27 @@ Polymer({
     const feature = event.detail.feature;
     const enabled = event.detail.enabled;
 
-    // Disabling any feature does not require authentication, and enable some
-    // features does not require authentication.
-    if (!enabled || !this.isAuthenticationRequiredToEnable_(feature)) {
-      this.browserProxy_.setFeatureEnabledState(feature, enabled);
-      settings.recordSettingChange();
-      return;
-    }
-
     // If the feature required authentication to be enabled, open the password
     // prompt dialog. This is required every time the user enables a security-
     // sensitive feature (i.e., use of stale auth tokens is not acceptable).
-    this.featureToBeEnabledOnceAuthenticated_ = feature;
-    this.openPasswordPromptDialog_();
+    if (enabled && this.isAuthenticationRequiredToEnable_(feature)) {
+      this.featureToBeEnabledOnceAuthenticated_ = feature;
+      this.openPasswordPromptDialog_();
+      return;
+    }
+
+    // If the feature to enable is Phone Hub Notifications, notification access
+    // must have been granted before the feature can be enabled.
+    if (feature === settings.MultiDeviceFeature.PHONE_HUB_NOTIFICATIONS &&
+        enabled && !this.pageContentData.isNotificationAccessGranted) {
+      this.showNotificationAccessSetupDialog_ = true;
+      return;
+    }
+
+    // Disabling any feature does not require authentication, and enable some
+    // features does not require authentication.
+    this.browserProxy_.setFeatureEnabledState(feature, enabled);
+    settings.recordSettingChange();
   },
 
   /**
@@ -331,13 +369,13 @@ Polymer({
    */
   isAuthenticationRequiredToEnable_(feature) {
     // Enabling SmartLock always requires authentication.
-    if (feature == settings.MultiDeviceFeature.SMART_LOCK) {
+    if (feature === settings.MultiDeviceFeature.SMART_LOCK) {
       return true;
     }
 
     // Enabling any feature besides SmartLock and the Better Together suite does
     // not require authentication.
-    if (feature != settings.MultiDeviceFeature.BETTER_TOGETHER_SUITE) {
+    if (feature !== settings.MultiDeviceFeature.BETTER_TOGETHER_SUITE) {
       return false;
     }
 
@@ -349,9 +387,9 @@ Polymer({
     // SmartLock is implicitly enabled if it is only currently not enabled due
     // to the suite being disabled or due to the SmartLock host device not
     // having a lock screen set.
-    return smartLockState ==
+    return smartLockState ===
         settings.MultiDeviceFeatureState.UNAVAILABLE_SUITE_DISABLED ||
-        smartLockState ==
+        smartLockState ===
         settings.MultiDeviceFeatureState.UNAVAILABLE_INSUFFICIENT_SECURITY;
   },
 
@@ -375,7 +413,7 @@ Polymer({
 
     // Host status doesn't matter if we are navigating to Nearby Share
     // settings.
-    if (settings.routes.NEARBY_SHARE ==
+    if (settings.routes.NEARBY_SHARE ===
         settings.Router.getInstance().getCurrentRoute()) {
       return;
     }
@@ -383,7 +421,7 @@ Polymer({
     // If the user gets to the a nested page without a host (e.g. by clicking a
     // stale 'existing user' notifications after forgetting their host) we
     // direct them back to the main settings page.
-    if (settings.routes.MULTIDEVICE !=
+    if (settings.routes.MULTIDEVICE !==
             settings.Router.getInstance().getCurrentRoute() &&
         settings.routes.MULTIDEVICE.contains(
             settings.Router.getInstance().getCurrentRoute()) &&
@@ -392,6 +430,25 @@ Polymer({
       Polymer.RenderStatus.beforeNextRender(this, () => {
         settings.Router.getInstance().navigateTo(settings.routes.MULTIDEVICE);
       });
+    }
+  },
+
+  /**
+   * @param {!settings.MultiDevicePageContentData} newData
+   * @private
+   */
+  onInitialPageContentDataFetched_(newData) {
+    this.onPageContentDataChanged_(newData);
+
+    if (this.pageContentData.isNotificationAccessGranted) {
+      return;
+    }
+
+    // Show the notification access dialog if the url contains the correct
+    // param.
+    const urlParams = settings.Router.getInstance().getQueryParameters();
+    if (urlParams.get('showNotificationAccessSetupDialog') !== null) {
+      this.showNotificationAccessSetupDialog_ = true;
     }
   },
 
@@ -429,11 +486,29 @@ Polymer({
    * @private
    */
   nearbyShareClick_(event) {
-    if (!this.getPref('nearby_sharing.enabled').value) {
-      this.setPrefValue('nearby_sharing.enabled', true);
-    } else {
-      // Navigate to Nearby Share subpage.
-      settings.Router.getInstance().navigateTo(settings.routes.NEARBY_SHARE);
+    const nearbyEnabled = this.getPref('nearby_sharing.enabled').value;
+    const onboardingComplete =
+        this.getPref('nearby_sharing.onboarding_complete').value;
+    let params = undefined;
+    if (!nearbyEnabled) {
+      if (onboardingComplete) {
+
+        // If we have already run onboarding at least once, we don't need to do
+        // it again, just enabled the feature in place.
+        this.setPrefValue('nearby_sharing.enabled', true);
+        return;
+      }
+      // Otherwise we need to go into the subpage and trigger the onboarding
+      // dialog.
+      params = new URLSearchParams();
+      params.set('onboarding', '');
     }
+    settings.Router.getInstance().navigateTo(
+        settings.routes.NEARBY_SHARE, params);
+  },
+
+  /** @private */
+  onHideNotificationSetupAccessDialog_() {
+    this.showNotificationAccessSetupDialog_ = false;
   },
 });

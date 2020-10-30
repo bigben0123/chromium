@@ -19,7 +19,10 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/test/browser_task_environment.h"
+#include "content/public/test/browser_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/input/synthetic_web_input_event_builders.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
 #include "ui/base/page_transition_types.h"
 
 #if defined(USE_AURA)
@@ -31,6 +34,12 @@ namespace test {
 class AuraTestHelper;
 }
 }  // namespace aura
+
+namespace blink {
+namespace web_pref {
+struct WebPreferences;
+}
+}  // namespace blink
 
 namespace display {
 class Screen;
@@ -49,7 +58,7 @@ class ScopedOleInitializer;
 namespace content {
 
 class BrowserContext;
-class ContentBrowserSanityChecker;
+class ContentBrowserConsistencyChecker;
 class MockRenderProcessHost;
 class MockRenderProcessHostFactory;
 class NavigationController;
@@ -59,7 +68,6 @@ class TestRenderViewHostFactory;
 class TestRenderWidgetHostFactory;
 class TestNavigationURLLoaderFactory;
 class WebContents;
-struct WebPreferences;
 
 // An interface and utility for driving tests of RenderFrameHost.
 class RenderFrameHostTester {
@@ -96,6 +104,12 @@ class RenderFrameHostTester {
   // Gives tests access to RenderFrameHostImpl::OnCreateChild. The returned
   // RenderFrameHost is owned by the parent RenderFrameHost.
   virtual RenderFrameHost* AppendChild(const std::string& frame_name) = 0;
+
+  // Same as AppendChild above, but simulates a custom allow attribute being
+  // used as the container policy.
+  virtual RenderFrameHost* AppendChildWithPolicy(
+      const std::string& frame_name,
+      const blink::ParsedFeaturePolicy& allow) = 0;
 
   // Gives tests access to RenderFrameHostImpl::OnDetach. Destroys |this|.
   virtual void Detach() = 0;
@@ -138,8 +152,12 @@ class RenderViewHostTester {
 
   static void SimulateFirstPaint(RenderViewHost* rvh);
 
-  // Returns whether the underlying web-page has any touch-event handlers.
-  static bool HasTouchEventHandler(RenderViewHost* rvh);
+  static std::unique_ptr<content::InputMsgWatcher> CreateInputWatcher(
+      RenderViewHost* rvh,
+      blink::WebInputEvent::Type type);
+
+  static void SendTouchEvent(RenderViewHost* rvh,
+                             blink::SyntheticWebTouchEvent* touch_event);
 
   virtual ~RenderViewHostTester() {}
 
@@ -155,7 +173,7 @@ class RenderViewHostTester {
   virtual void SimulateWasShown() = 0;
 
   // Promote ComputeWebPreferences to public.
-  virtual WebPreferences TestComputeWebPreferences() = 0;
+  virtual blink::web_pref::WebPreferences TestComputeWebPreferences() = 0;
 };
 
 // You can instantiate only one class like this at a time.  During its
@@ -279,7 +297,7 @@ class RenderViewHostTestHarness : public testing::Test {
 
   std::unique_ptr<BrowserTaskEnvironment> task_environment_;
 
-  std::unique_ptr<ContentBrowserSanityChecker> sanity_checker_;
+  std::unique_ptr<ContentBrowserConsistencyChecker> consistency_checker_;
 
   // TODO(crbug.com/1011275): This is a temporary work around to fix flakiness
   // on tests. The default behavior of the network stack is to allocate a

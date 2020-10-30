@@ -15,8 +15,8 @@
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/user_agent.h"
-#include "content/public/common/web_preferences.h"
 #include "fuchsia/base/fuchsia_dir_scheme.h"
+#include "fuchsia/engine/browser/frame_impl.h"
 #include "fuchsia/engine/browser/url_request_rewrite_rules_manager.h"
 #include "fuchsia/engine/browser/web_engine_browser_context.h"
 #include "fuchsia/engine/browser/web_engine_browser_interface_binders.h"
@@ -26,7 +26,9 @@
 #include "fuchsia/engine/common/web_engine_url_loader_throttle.h"
 #include "fuchsia/engine/switches.h"
 #include "media/base/media_switches.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/mojom/network_service.mojom.h"
+#include "third_party/blink/public/mojom/webpreferences/web_preferences.mojom.h"
 
 namespace {
 
@@ -109,7 +111,7 @@ std::string WebEngineContentBrowserClient::GetUserAgent() {
 
 void WebEngineContentBrowserClient::OverrideWebkitPrefs(
     content::RenderViewHost* rvh,
-    content::WebPreferences* web_prefs) {
+    blink::web_pref::WebPreferences* web_prefs) {
   // Disable WebSQL support since it's being removed from the web platform.
   web_prefs->databases_enabled = false;
 
@@ -118,7 +120,8 @@ void WebEngineContentBrowserClient::OverrideWebkitPrefs(
 
   // Allow media to autoplay.
   // TODO(crbug.com/1067101): Provide a FIDL API to configure AutoplayPolicy.
-  web_prefs->autoplay_policy = content::AutoplayPolicy::kNoUserGestureRequired;
+  web_prefs->autoplay_policy =
+      blink::mojom::AutoplayPolicy::kNoUserGestureRequired;
 }
 
 void WebEngineContentBrowserClient::RegisterBrowserInterfaceBindersForFrame(
@@ -130,11 +133,12 @@ void WebEngineContentBrowserClient::RegisterBrowserInterfaceBindersForFrame(
 void WebEngineContentBrowserClient::
     RegisterNonNetworkNavigationURLLoaderFactories(
         int frame_tree_node_id,
+        ukm::SourceIdObj ukm_source_id,
         NonNetworkURLLoaderFactoryMap* factories) {
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kContentDirectories)) {
-    (*factories)[cr_fuchsia::kFuchsiaDirScheme] =
-        std::make_unique<ContentDirectoryLoaderFactory>();
+    factories->emplace(cr_fuchsia::kFuchsiaDirScheme,
+                       ContentDirectoryLoaderFactory::Create());
   }
 }
 
@@ -145,9 +149,17 @@ void WebEngineContentBrowserClient::
         NonNetworkURLLoaderFactoryMap* factories) {
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kContentDirectories)) {
-    (*factories)[cr_fuchsia::kFuchsiaDirScheme] =
-        std::make_unique<ContentDirectoryLoaderFactory>();
+    factories->emplace(cr_fuchsia::kFuchsiaDirScheme,
+                       ContentDirectoryLoaderFactory::Create());
   }
+}
+
+bool WebEngineContentBrowserClient::ShouldEnableStrictSiteIsolation() {
+  constexpr base::Feature kSitePerProcess{"site-per-process",
+                                          base::FEATURE_ENABLED_BY_DEFAULT};
+  static bool enable_strict_isolation =
+      base::FeatureList::IsEnabled(kSitePerProcess);
+  return enable_strict_isolation;
 }
 
 void WebEngineContentBrowserClient::AppendExtraCommandLineSwitches(
@@ -164,6 +176,7 @@ void WebEngineContentBrowserClient::AppendExtraCommandLineSwitches(
       switches::kForceProtectedVideoOutputBuffers,
       switches::kMaxDecodedImageSizeMb,
       switches::kPlayreadyKeySystem,
+      switches::kUseOverlaysForVideo,
   };
 
   command_line->CopySwitchesFrom(*base::CommandLine::ForCurrentProcess(),
@@ -182,16 +195,10 @@ WebEngineContentBrowserClient::CreateURLLoaderThrottles(
     return {};
   }
 
-  UrlRequestRewriteRulesManager* adapter =
-      UrlRequestRewriteRulesManager::ForFrameTreeNodeId(frame_tree_node_id);
-  if (!adapter) {
-    // No popup support for rules rewriter.
-    return {};
-  }
-
   std::vector<std::unique_ptr<blink::URLLoaderThrottle>> throttles;
   throttles.emplace_back(std::make_unique<WebEngineURLLoaderThrottle>(
-      UrlRequestRewriteRulesManager::ForFrameTreeNodeId(frame_tree_node_id)));
+      FrameImpl::FromWebContents(wc_getter.Run())
+          ->url_request_rewrite_rules_manager()));
   return throttles;
 }
 

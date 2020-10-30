@@ -11,9 +11,6 @@
 #include <unordered_set>
 #include <utility>
 
-#include <memory>
-#include <unordered_set>
-
 #include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
@@ -27,7 +24,6 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/task_environment.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/bookmarks/browser/bookmark_model_observer.h"
 #include "components/bookmarks/browser/bookmark_undo_delegate.h"
@@ -37,6 +33,8 @@
 #include "components/bookmarks/test/bookmark_test_helpers.h"
 #include "components/bookmarks/test/test_bookmark_client.h"
 #include "components/favicon_base/favicon_callback.h"
+#include "components/favicon_base/favicon_types.h"
+#include "components/query_parser/query_parser.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/models/tree_node_iterator.h"
@@ -1230,11 +1228,98 @@ TEST_F(BookmarkModelTest, RenamedFolderNodeExcludedFromIndex) {
   model_->SetTitle(folder, ASCIIToUTF16("MyBookmarks"));
 
   // There should be no matching bookmarks.
-  std::vector<TitledUrlMatch> matches;
-  model_->GetBookmarksMatching(ASCIIToUTF16("MyB"), /*max_count = */ 1,
-                               query_parser::MatchingAlgorithm::DEFAULT,
-                               &matches);
+  std::vector<TitledUrlMatch> matches =
+      model_->GetBookmarksMatching(ASCIIToUTF16("MyB"), /*max_count=*/1,
+                                   query_parser::MatchingAlgorithm::DEFAULT);
   EXPECT_TRUE(matches.empty());
+}
+
+// Verifies that TitledUrlIndex is updated when a bookmark is removed.
+TEST_F(BookmarkModelTest, TitledUrlIndexUpdatedOnRemove) {
+  const base::string16 title = base::ASCIIToUTF16("Title");
+  const GURL url("http://google.com");
+  const BookmarkNode* root = model_->bookmark_bar_node();
+
+  model_->AddURL(root, 0, title, url);
+  ASSERT_EQ(1U, model_
+                    ->GetBookmarksMatching(
+                        title, 1, query_parser::MatchingAlgorithm::DEFAULT)
+                    .size());
+
+  // Remove the node and make sure we don't get back any results.
+  model_->Remove(root->children().front().get());
+  EXPECT_EQ(0U, model_
+                    ->GetBookmarksMatching(
+                        title, 1, query_parser::MatchingAlgorithm::DEFAULT)
+                    .size());
+}
+
+// Verifies that TitledUrlIndex is updated when a bookmark's title changes.
+TEST_F(BookmarkModelTest, TitledUrlIndexUpdatedOnChangeTitle) {
+  const base::string16 initial_title = base::ASCIIToUTF16("Initial");
+  const base::string16 new_title = base::ASCIIToUTF16("New");
+  const GURL url("http://google.com");
+  const BookmarkNode* root = model_->bookmark_bar_node();
+
+  model_->AddURL(root, 0, initial_title, url);
+  ASSERT_EQ(1U,
+            model_
+                ->GetBookmarksMatching(initial_title, 1,
+                                       query_parser::MatchingAlgorithm::DEFAULT)
+                .size());
+  ASSERT_EQ(0U, model_
+                    ->GetBookmarksMatching(
+                        new_title, 1, query_parser::MatchingAlgorithm::DEFAULT)
+                    .size());
+
+  // Change the title.
+  model_->SetTitle(root->children().front().get(), new_title);
+
+  // Verify that we only get results for the new title.
+  EXPECT_EQ(0U,
+            model_
+                ->GetBookmarksMatching(initial_title, 1,
+                                       query_parser::MatchingAlgorithm::DEFAULT)
+                .size());
+  EXPECT_EQ(1U, model_
+                    ->GetBookmarksMatching(
+                        new_title, 1, query_parser::MatchingAlgorithm::DEFAULT)
+                    .size());
+}
+
+// Verifies that TitledUrlIndex is updated when a bookmark's URL changes.
+TEST_F(BookmarkModelTest, TitledUrlIndexUpdatedOnChangeURL) {
+  const base::string16 title = base::ASCIIToUTF16("Title");
+  const GURL initial_url("http://initial");
+  const GURL new_url("http://new");
+  const BookmarkNode* root = model_->bookmark_bar_node();
+
+  model_->AddURL(root, 0, title, initial_url);
+  ASSERT_EQ(1U,
+            model_
+                ->GetBookmarksMatching(base::ASCIIToUTF16("initial"), 1,
+                                       query_parser::MatchingAlgorithm::DEFAULT)
+                .size());
+  ASSERT_EQ(0U,
+            model_
+                ->GetBookmarksMatching(base::ASCIIToUTF16("new"), 1,
+                                       query_parser::MatchingAlgorithm::DEFAULT)
+                .size());
+
+  // Change the URL.
+  model_->SetURL(root->children().front().get(), new_url);
+
+  // Verify that we only get results for the new URL.
+  EXPECT_EQ(0U,
+            model_
+                ->GetBookmarksMatching(base::ASCIIToUTF16("initial"), 1,
+                                       query_parser::MatchingAlgorithm::DEFAULT)
+                .size());
+  EXPECT_EQ(1U,
+            model_
+                ->GetBookmarksMatching(base::ASCIIToUTF16("new"), 1,
+                                       query_parser::MatchingAlgorithm::DEFAULT)
+                .size());
 }
 
 // Verifies the TitledUrlIndex is probably loaded.
@@ -1242,30 +1327,28 @@ TEST(BookmarkModelLoadTest, TitledUrlIndexPopulatedOnLoad) {
   // Create a model with a single url.
   base::ScopedTempDir tmp_dir;
   ASSERT_TRUE(tmp_dir.CreateUniqueTempDir());
-  base::test::TaskEnvironment task_environment;
+  base::test::TaskEnvironment task_environment{
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   std::unique_ptr<BookmarkModel> model =
       std::make_unique<BookmarkModel>(std::make_unique<TestBookmarkClient>());
-  model->Load(nullptr, tmp_dir.GetPath(), base::ThreadTaskRunnerHandle::Get(),
-              base::ThreadTaskRunnerHandle::Get());
+  model->Load(nullptr, tmp_dir.GetPath());
   test::WaitForBookmarkModelToLoad(model.get());
   const GURL node_url("http://google.com");
   model->AddURL(model->bookmark_bar_node(), 0, base::ASCIIToUTF16("User"),
                 node_url);
+
   // This is necessary to ensure the save completes.
-  base::RunLoop().RunUntilIdle();
+  task_environment.FastForwardUntilNoTasksRemain();
 
   // Recreate the model and ensure GetBookmarksMatching() returns the url that
   // was added.
   model =
       std::make_unique<BookmarkModel>(std::make_unique<TestBookmarkClient>());
-  model->Load(nullptr, tmp_dir.GetPath(), base::ThreadTaskRunnerHandle::Get(),
-              base::ThreadTaskRunnerHandle::Get());
+  model->Load(nullptr, tmp_dir.GetPath());
   test::WaitForBookmarkModelToLoad(model.get());
 
-  std::vector<TitledUrlMatch> matches;
-  model->GetBookmarksMatching(base::ASCIIToUTF16("user"), 1,
-                              query_parser::MatchingAlgorithm::DEFAULT,
-                              &matches);
+  std::vector<TitledUrlMatch> matches = model->GetBookmarksMatching(
+      base::ASCIIToUTF16("user"), 1, query_parser::MatchingAlgorithm::DEFAULT);
   ASSERT_EQ(1u, matches.size());
   EXPECT_EQ(node_url, matches[0].node->GetTitledUrlNodeUrl());
 }
@@ -1365,8 +1448,7 @@ class BookmarkModelFaviconTest : public testing::Test,
       favicon_base::FaviconImageResult image_result;
       image_result.image = image;
       image_result.icon_url = icon_url;
-      model_->OnFaviconDataAvailable(node, favicon_base::IconType::kFavicon,
-                                     image_result);
+      model_->OnFaviconDataAvailable(node, image_result);
   }
 
   bool WasNodeUpdated(const BookmarkNode* node) {

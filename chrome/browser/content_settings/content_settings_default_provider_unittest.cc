@@ -170,36 +170,49 @@ TEST_F(ContentSettingsDefaultProviderTest, DiscardObsoletePreferences) {
 }
 
 #if !defined(OS_ANDROID)
-TEST_F(ContentSettingsDefaultProviderTest, DiscardObsoletePluginsAllow) {
+// Tests that file system content settings are migrated.
+TEST_F(ContentSettingsDefaultProviderTest,
+       MigrateDeprecatedFileSystemPreferences) {
+  static const char kDeprecatedNativeFileSystemReadGuardDefaultPref[] =
+      "profile.default_content_setting_values.native_file_system_read_guard";
+  static const char kDeprecatedNativeFileSystemWriteGuardDefaultPref[] =
+      "profile.default_content_setting_values.native_file_system_write_guard";
+
   PrefService* prefs = profile_.GetPrefs();
-  const std::string& plugins_pref_path = WebsiteSettingsRegistry::GetInstance()
-                                             ->Get(ContentSettingsType::PLUGINS)
-                                             ->default_value_pref_name();
+  // Set some pref data.
+  prefs->SetInteger(kDeprecatedNativeFileSystemReadGuardDefaultPref,
+                    CONTENT_SETTING_BLOCK);
+  prefs->SetInteger(kDeprecatedNativeFileSystemWriteGuardDefaultPref,
+                    CONTENT_SETTING_BLOCK);
 
-  // The ALLOW value of the plugins content setting should be discarded.
-  {
-    prefs->SetInteger(plugins_pref_path, CONTENT_SETTING_ALLOW);
-    DefaultProvider provider(prefs, false);
-    EXPECT_FALSE(prefs->HasPrefPath(plugins_pref_path));
-  }
+  // Instantiate a new DefaultProvider; can't use |provider_| because we want to
+  // test the constructor's behavior after setting the above.
+  DefaultProvider provider(prefs, false);
 
-  // Other values of the plugins content setting should be preserved.
-  {
-    prefs->SetInteger(plugins_pref_path, CONTENT_SETTING_BLOCK);
-    DefaultProvider provider(prefs, false);
-    EXPECT_TRUE(prefs->HasPrefPath(plugins_pref_path));
-    EXPECT_EQ(CONTENT_SETTING_BLOCK, prefs->GetInteger(plugins_pref_path));
-  }
+  // Check that settings have been migrated.
+  EXPECT_FALSE(
+      prefs->HasPrefPath(kDeprecatedNativeFileSystemReadGuardDefaultPref));
+  EXPECT_FALSE(
+      prefs->HasPrefPath(kDeprecatedNativeFileSystemWriteGuardDefaultPref));
 
-  {
-    prefs->SetInteger(plugins_pref_path,
-                      CONTENT_SETTING_DETECT_IMPORTANT_CONTENT);
-    DefaultProvider provider(prefs, false);
-
-    EXPECT_TRUE(prefs->HasPrefPath(plugins_pref_path));
-    EXPECT_EQ(CONTENT_SETTING_DETECT_IMPORTANT_CONTENT,
-              prefs->GetInteger(plugins_pref_path));
-  }
+  WebsiteSettingsRegistry* website_settings =
+      WebsiteSettingsRegistry::GetInstance();
+  EXPECT_TRUE(prefs->HasPrefPath(
+      website_settings->Get(ContentSettingsType::FILE_SYSTEM_READ_GUARD)
+          ->default_value_pref_name()));
+  EXPECT_EQ(
+      CONTENT_SETTING_BLOCK,
+      prefs->GetInteger(
+          website_settings->Get(ContentSettingsType::FILE_SYSTEM_READ_GUARD)
+              ->default_value_pref_name()));
+  EXPECT_TRUE(prefs->HasPrefPath(
+      website_settings->Get(ContentSettingsType::FILE_SYSTEM_WRITE_GUARD)
+          ->default_value_pref_name()));
+  EXPECT_EQ(
+      CONTENT_SETTING_BLOCK,
+      prefs->GetInteger(
+          website_settings->Get(ContentSettingsType::FILE_SYSTEM_WRITE_GUARD)
+              ->default_value_pref_name()));
 }
 #endif  // !defined(OS_ANDROID)
 

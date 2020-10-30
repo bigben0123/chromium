@@ -11,7 +11,6 @@
 #include "base/memory/weak_ptr.h"
 #include "ui/events/platform/x11/x11_event_source.h"
 #include "ui/gfx/x/event.h"
-#include "ui/gfx/x/x11.h"
 #include "ui/gfx/x/xproto.h"
 
 namespace ui {
@@ -44,9 +43,6 @@ class COMPONENT_EXPORT(UI_BASE_X) X11WorkspaceHandler
   bool DispatchXEvent(x11::Event* event) override;
 
   void OnWorkspaceResponse(x11::GetPropertyResponse response);
-
-  // The display and the native X window hosting the root window.
-  XDisplay* xdisplay_;
 
   // The native root window.
   x11::Window x_root_window_;

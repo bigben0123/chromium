@@ -39,14 +39,15 @@ class HostStarter : public gaia::GaiaOAuthClient::Delegate,
 
   // Creates a HostStarter.
   static std::unique_ptr<HostStarter> Create(
-      const std::string& remoting_server_endpoint,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
 
   // Registers a new host with the Chromoting service, and starts it.
   // |auth_code| must be a valid OAuth2 authorization code, typically acquired
   // from a browser. This method uses that code to get an OAuth2 refresh token.
-  void StartHost(const std::string& host_name,
+  void StartHost(const std::string& host_id,
+                 const std::string& host_name,
                  const std::string& host_pin,
+                 const std::string& host_owner,
                  bool consent_to_data_collection,
                  const std::string& auth_code,
                  const std::string& redirect_url,
@@ -106,6 +107,7 @@ class HostStarter : public gaia::GaiaOAuthClient::Delegate,
   std::string xmpp_login_;
   scoped_refptr<remoting::RsaKeyPair> key_pair_;
   std::string host_id_;
+  bool auth_code_exchanged_ = false;
 
   // True if the host was not started and unregistration was requested. If this
   // is set and a network/OAuth error occurs during unregistration, this will

@@ -461,8 +461,16 @@ class TabStripModel : public TabGroupController {
 
   TabGroupModel* group_model() const { return group_model_.get(); }
 
+  // Returns true if one or more of the tabs pointed to by |indices| are
+  // supported by read later.
+  bool IsReadLaterSupportedForAny(const std::vector<int> indices);
+
+  // Saves tabs with url supported by Read Later.
+  void AddToReadLater(const std::vector<int>& indices);
+
   // TabGroupController:
   void CreateTabGroup(const tab_groups::TabGroupId& group) override;
+  void OpenTabGroupEditor(const tab_groups::TabGroupId& group) override;
   void ChangeTabGroupContents(const tab_groups::TabGroupId& group) override;
   void ChangeTabGroupVisuals(const tab_groups::TabGroupId& group) override;
   void MoveTabGroup(const tab_groups::TabGroupId& group) override;
@@ -488,6 +496,7 @@ class TabStripModel : public TabGroupController {
     CommandToggleSiteMuted,
     CommandSendTabToSelf,
     CommandSendTabToSelfSingleTarget,
+    CommandAddToReadLater,
     CommandAddToNewGroup,
     CommandAddToExistingGroup,
     CommandRemoveFromGroup,
@@ -495,10 +504,6 @@ class TabStripModel : public TabGroupController {
     CommandMoveTabsToNewWindow,
     CommandLast
   };
-
-  // Range of command IDs reserved for the "Move to another window" submenu.
-  static const int kMinExistingWindowCommandId = 1001;
-  static const int kMaxExistingWindowCommandId = 1200;
 
   // Returns true if the specified command is enabled. If |context_index| is
   // selected the response applies to all selected tabs.
@@ -723,6 +728,8 @@ class TabStripModel : public TabGroupController {
   void MoveAndSetGroup(int index,
                        int new_index,
                        base::Optional<tab_groups::TabGroupId> new_group);
+
+  void AddToReadLaterImpl(const std::vector<int>& indices);
 
   // Helper function for MoveAndSetGroup. Removes the tab at |index| from the
   // group that contains it, if any. Also deletes that group, if it now contains

@@ -88,7 +88,7 @@ PhysicalRect InitializeRootRect(const LayoutObject* root,
     // 2) An element wider than the ICB can cause us to resize the FrameView so
     // we can zoom out to fit the entire element width.
     result = layout_view->OverflowClipRect(PhysicalOffset());
-  } else if (root->IsBox() && root->HasOverflowClip()) {
+  } else if (root->IsBox() && root->IsScrollContainer()) {
     result = ToLayoutBox(root)->PhysicalContentBoxRect();
   } else {
     result = PhysicalRect(ToLayoutBoxModelObject(root)->BorderBoundingBox());
@@ -132,7 +132,7 @@ LayoutView* LocalRootView(const LayoutObject& object) {
 //   https://w3c.github.io/IntersectionObserver/v2/#calculate-visibility-algo
 bool ComputeIsVisible(const LayoutObject* target, const PhysicalRect& rect) {
   if (target->GetDocument().GetFrame()->LocalFrameRoot().GetOcclusionState() !=
-      FrameOcclusionState::kGuaranteedNotOccluded) {
+      mojom::blink::FrameOcclusionState::kGuaranteedNotOccluded) {
     return false;
   }
   if (target->HasDistortingVisualEffects())
@@ -318,7 +318,8 @@ void IntersectionGeometry::ComputeGeometry(const RootGeometry& root_geometry,
   // Map target_rect_ to absolute coordinates for target's document.
   // GeometryMapper is faster, so we use it when possible; otherwise, fall back
   // to LocalToAncestorRect.
-  PropertyTreeState container_properties = PropertyTreeState::Uninitialized();
+  PropertyTreeStateOrAlias container_properties =
+      PropertyTreeState::Uninitialized();
   const LayoutObject* property_container =
       CanUseGeometryMapper(target)
           ? target->GetPropertyContainer(nullptr, &container_properties)
@@ -346,7 +347,7 @@ void IntersectionGeometry::ComputeGeometry(const RootGeometry& root_geometry,
           TransformState::kUnapplyInverseTransformDirection);
       target->GetDocument().GetLayoutView()->MapAncestorToLocal(
           nullptr, implicit_root_to_target_document_transform,
-          kTraverseDocumentBoundaries | kApplyRemoteRootFrameOffset);
+          kTraverseDocumentBoundaries | kApplyRemoteMainFrameTransform);
       TransformationMatrix matrix =
           implicit_root_to_target_document_transform.AccumulatedTransform()
               .Inverse();
@@ -473,7 +474,7 @@ bool IntersectionGeometry::ClipToRoot(const LayoutObject* root,
   if (does_intersect) {
     intersection_rect = unclipped_intersection_rect;
     if (local_ancestor) {
-      if (local_ancestor->HasOverflowClip()) {
+      if (local_ancestor->IsScrollContainer()) {
         PhysicalOffset scroll_offset = -PhysicalOffset(
             LayoutPoint(local_ancestor->ScrollOrigin()) +
             local_ancestor->PixelSnappedScrolledContentOffset());
@@ -503,7 +504,10 @@ bool IntersectionGeometry::ClipToRoot(const LayoutObject* root,
       } else {
         // Map clip_rect from the coordinate system of the local root frame to
         // the coordinate system of the remote main frame.
-        clip_rect.MoveBy(IntPoint(local_root_frame->RemoteViewportOffset()));
+        clip_rect = PixelSnappedIntRect(
+            local_root_frame->ContentLayoutObject()->LocalToAncestorRect(
+                PhysicalRect(clip_rect), nullptr,
+                kTraverseDocumentBoundaries | kApplyRemoteMainFrameTransform));
         does_intersect &=
             intersection_rect.InclusiveIntersect(PhysicalRect(clip_rect));
       }

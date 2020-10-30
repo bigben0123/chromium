@@ -40,6 +40,7 @@
 #include "services/network/public/mojom/web_sandbox_flags.mojom-blink-forward.h"
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/page_state/page_state.mojom-blink.h"
 #include "third_party/blink/public/platform/scheduler/web_scoped_virtual_time_pauser.h"
 #include "third_party/blink/public/web/web_document_loader.h"
 #include "third_party/blink/public/web/web_frame_load_type.h"
@@ -48,7 +49,6 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/frame_types.h"
-#include "third_party/blink/renderer/core/loader/frame_loader_state_machine.h"
 #include "third_party/blink/renderer/core/loader/frame_loader_types.h"
 #include "third_party/blink/renderer/core/loader/history_item.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
@@ -148,16 +148,9 @@ class CORE_EXPORT FrameLoader final {
   // sandbox attribute of any parent frames.
   void ForceSandboxFlags(network::mojom::blink::WebSandboxFlags flags);
 
-  // Set frame_owner's effective sandbox flags, which are sandbox flags value
-  // at the beginning of navigation.
-  void SetFrameOwnerSandboxFlags(network::mojom::blink::WebSandboxFlags flags);
-
-  // Includes the collection of forced, inherited, and FrameOwner's sandbox
-  // flags, where the FrameOwner's flag is snapshotted from the last committed
-  // navigation. Note: with FeaturePolicyForSandbox the frame owner's sandbox
-  // flags only includes the flags which are *not* implemented as feature
-  // policies already present in the FrameOwner's ContainerPolicy.
-  network::mojom::blink::WebSandboxFlags EffectiveSandboxFlags() const;
+  network::mojom::blink::WebSandboxFlags GetForcedSandboxFlags() const {
+    return forced_sandbox_flags_;
+  }
 
   // Includes the collection of forced, inherited, and FrameOwner's sandbox
   // flags. Note: with FeaturePolicyForSandbox the frame owner's sandbox flags
@@ -199,8 +192,6 @@ class CORE_EXPORT FrameLoader final {
   bool DetachDocument(SecurityOrigin* committing_origin,
                       base::Optional<Document::UnloadEventTiming>*);
 
-  FrameLoaderStateMachine* StateMachine() const { return &state_machine_; }
-
   bool ShouldClose(bool is_reload = false);
 
   // Dispatches the Unload event for the current document. If this is due to the
@@ -236,6 +227,13 @@ class CORE_EXPORT FrameLoader final {
 
   bool HasAccessedInitialDocument() { return has_accessed_initial_document_; }
 
+  void SetDidLoadNonEmptyDocument() {
+    empty_document_status_ = EmptyDocumentStatus::kNonEmpty;
+  }
+  bool HasLoadedNonEmptyDocument() {
+    return empty_document_status_ == EmptyDocumentStatus::kNonEmpty;
+  }
+
   static bool NeedsHistoryItemRestore(WebFrameLoadType type);
 
  private:
@@ -260,7 +258,7 @@ class CORE_EXPORT FrameLoader final {
 
   void RestoreScrollPositionAndViewState(WebFrameLoadType,
                                          const HistoryItem::ViewState&,
-                                         HistoryScrollRestorationType);
+                                         mojom::blink::ScrollRestorationType);
 
   void DetachDocumentLoader(Member<DocumentLoader>&,
                             bool flush_microtask_queue = false);
@@ -291,11 +289,6 @@ class CORE_EXPORT FrameLoader final {
 
   Member<LocalFrame> frame_;
 
-  // FIXME: These should be std::unique_ptr<T> to reduce build times and
-  // simplify header dependencies unless performance testing proves otherwise.
-  // Some of these could be lazily created for memory savings on devices.
-  mutable FrameLoaderStateMachine state_machine_;
-
   Member<ProgressTracker> progress_tracker_;
 
   // Document loader for frame loading.
@@ -310,19 +303,22 @@ class CORE_EXPORT FrameLoader final {
   std::unique_ptr<ClientNavigationState> client_navigation_;
 
   network::mojom::blink::WebSandboxFlags forced_sandbox_flags_;
-  // A snapshot value of frame_owner's sandbox flags states at the beginning of
-  // navigation. For main frame which does not have a frame owner, the value is
-  // base::nullopt.
-  // The snapshot value is needed because of potential racing conditions on
-  // sandbox attribute on iframe element.
-  // crbug.com/1026627
-  base::Optional<network::mojom::blink::WebSandboxFlags>
-      frame_owner_sandbox_flags_ = base::nullopt;
+
+  // The state is set to kInitialized when Init() completes, and kDetached
+  // during teardown in Detach().
+  enum class State { kUninitialized, kInitialized, kDetached };
+  State state_ = State::kUninitialized;
 
   bool dispatching_did_clear_window_object_in_main_world_;
-  bool detached_;
   bool committing_navigation_ = false;
   bool has_accessed_initial_document_ = false;
+
+  enum class EmptyDocumentStatus {
+    kOnlyEmpty,
+    kOnlyEmptyButExplicitlyOpened,
+    kNonEmpty
+  };
+  EmptyDocumentStatus empty_document_status_ = EmptyDocumentStatus::kOnlyEmpty;
 
   WebScopedVirtualTimePauser virtual_time_pauser_;
 

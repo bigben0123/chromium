@@ -1,0 +1,33 @@
+<style include="edu-coexistence-css">
+  .buttons {
+     width: 100%;
+  }
+
+  gaia-action-buttons {
+    padding-inline-start: 85%;
+  }
+</style>
+
+<edu-coexistence-template>
+  <span slot="main">
+    <div class="container">
+     <webview id="signinFrame" hidden$="[[loading_]]" class="signin-frame"
+              allowscaling></webview>
+    </div>
+  </span>
+  <span slot="buttons">
+    <div class="buttons" hidden$="[[!showGaiaButtons_]]">
+      <div class="action-buttons">
+        <span>
+          <edu-coexistence-button button-type="back"
+            on-go-back="handleGaiaLoginGoBack_">
+          </edu-coexistence-button>
+        </span>
+        <gaia-action-buttons authenticator="[[controller_.authExtHost_]]" 
+          hidden$="[[!showGaiaNextButton_]]">
+        </gaia-action-buttons>
+      </div>
+    </div>
+  </span>
+
+</edu-coexistence-template>

@@ -6,6 +6,7 @@
 #define GPU_IPC_COMMON_GPU_PREFERENCES_MOJOM_TRAITS_H_
 
 #include <vector>
+#include "build/chromeos_buildflags.h"
 
 #include "gpu/config/gpu_preferences.h"
 #include "gpu/ipc/common/gpu_preferences.mojom-shared.h"
@@ -153,7 +154,7 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
       out->texture_target_exception_list.push_back(usage_format);
     }
 
-    out->ignore_gpu_blacklist = prefs.ignore_gpu_blacklist();
+    out->ignore_gpu_blocklist = prefs.ignore_gpu_blocklist();
     out->enable_oop_rasterization = prefs.enable_oop_rasterization();
     out->disable_oop_rasterization = prefs.disable_oop_rasterization();
     out->enable_oop_rasterization_ddl = prefs.enable_oop_rasterization_ddl();
@@ -162,6 +163,8 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
       return false;
     if (!prefs.ReadUseVulkan(&out->use_vulkan))
       return false;
+    out->enable_vulkan_protected_memory =
+        prefs.enable_vulkan_protected_memory();
     out->enforce_vulkan_protected_memory =
         prefs.enforce_vulkan_protected_memory();
     out->disable_vulkan_surface = prefs.disable_vulkan_surface();
@@ -173,6 +176,7 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
     out->enable_webgpu = prefs.enable_webgpu();
     out->enable_dawn_backend_validation =
         prefs.enable_dawn_backend_validation();
+    out->disable_dawn_robustness = prefs.disable_dawn_robustness();
     out->enable_gpu_blocked_time_metric =
         prefs.enable_gpu_blocked_time_metric();
     out->enable_perf_data_collection = prefs.enable_perf_data_collection();
@@ -185,8 +189,10 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
     out->enable_native_gpu_memory_buffers =
         prefs.enable_native_gpu_memory_buffers();
 
-    out->force_disable_new_accelerated_video_decoder =
-        prefs.force_disable_new_accelerated_video_decoder();
+#if BUILDFLAG(IS_ASH)
+    out->platform_disallows_chromeos_direct_video_decoder =
+        prefs.platform_disallows_chromeos_direct_video_decoder();
+#endif
 
     return true;
   }
@@ -305,8 +311,8 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
   texture_target_exception_list(const gpu::GpuPreferences& prefs) {
     return prefs.texture_target_exception_list;
   }
-  static bool ignore_gpu_blacklist(const gpu::GpuPreferences& prefs) {
-    return prefs.ignore_gpu_blacklist;
+  static bool ignore_gpu_blocklist(const gpu::GpuPreferences& prefs) {
+    return prefs.ignore_gpu_blocklist;
   }
   static bool enable_oop_rasterization(const gpu::GpuPreferences& prefs) {
     return prefs.enable_oop_rasterization;
@@ -326,6 +332,9 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
   static gpu::VulkanImplementationName use_vulkan(
       const gpu::GpuPreferences& prefs) {
     return prefs.use_vulkan;
+  }
+  static bool enable_vulkan_protected_memory(const gpu::GpuPreferences& prefs) {
+    return prefs.enable_vulkan_protected_memory;
   }
   static bool enforce_vulkan_protected_memory(
       const gpu::GpuPreferences& prefs) {
@@ -351,6 +360,9 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
   static bool enable_dawn_backend_validation(const gpu::GpuPreferences& prefs) {
     return prefs.enable_dawn_backend_validation;
   }
+  static bool disable_dawn_robustness(const gpu::GpuPreferences& prefs) {
+    return prefs.disable_dawn_robustness;
+  }
   static bool enable_gpu_blocked_time_metric(const gpu::GpuPreferences& prefs) {
     return prefs.enable_gpu_blocked_time_metric;
   }
@@ -367,10 +379,12 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
       const gpu::GpuPreferences& prefs) {
     return prefs.enable_native_gpu_memory_buffers;
   }
-  static bool force_disable_new_accelerated_video_decoder(
+#if BUILDFLAG(IS_ASH)
+  static bool platform_disallows_chromeos_direct_video_decoder(
       const gpu::GpuPreferences& prefs) {
-    return prefs.force_disable_new_accelerated_video_decoder;
+    return prefs.platform_disallows_chromeos_direct_video_decoder;
   }
+#endif
 };
 
 }  // namespace mojo

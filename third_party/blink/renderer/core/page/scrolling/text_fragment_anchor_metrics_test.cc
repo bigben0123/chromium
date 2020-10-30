@@ -28,7 +28,7 @@ class TextFragmentAnchorMetricsTest : public SimTest {
  public:
   void SetUp() override {
     SimTest::SetUp();
-    WebView().MainFrameWidget()->Resize(WebSize(800, 600));
+    WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   }
 
   void RunAsyncMatchingTasks() {
@@ -137,6 +137,9 @@ TEST_F(TextFragmentAnchorMetricsTest, UMAMetricsCollected) {
   histogram_tester_.ExpectTotalCount("TextFragmentAnchor.TableCellMatch", 1);
   histogram_tester_.ExpectUniqueSample("TextFragmentAnchor.TableCellMatch", 0,
                                        1);
+  histogram_tester_.ExpectTotalCount("TextFragmentAnchor.LinkOpenSource", 1);
+  histogram_tester_.ExpectUniqueSample("TextFragmentAnchor.LinkOpenSource", 0,
+                                       1);
 }
 
 // Test UMA metrics collection when there is no match found
@@ -199,6 +202,10 @@ TEST_F(TextFragmentAnchorMetricsTest, NoMatchFound) {
   histogram_tester_.ExpectTotalCount("TextFragmentAnchor.ListItemMatch", 0);
 
   histogram_tester_.ExpectTotalCount("TextFragmentAnchor.TableCellMatch", 0);
+
+  histogram_tester_.ExpectTotalCount("TextFragmentAnchor.LinkOpenSource", 1);
+  histogram_tester_.ExpectUniqueSample("TextFragmentAnchor.LinkOpenSource", 0,
+                                       1);
 }
 
 // Test that we don't collect any metrics when there is no text directive
@@ -245,6 +252,8 @@ TEST_F(TextFragmentAnchorMetricsTest, NoTextFragmentAnchor) {
   histogram_tester_.ExpectTotalCount("TextFragmentAnchor.ListItemMatch", 0);
 
   histogram_tester_.ExpectTotalCount("TextFragmentAnchor.TableCellMatch", 0);
+
+  histogram_tester_.ExpectTotalCount("TextFragmentAnchor.LinkOpenSource", 0);
 }
 
 // Test that the correct metrics are collected when we found a match but didn't
@@ -311,6 +320,10 @@ TEST_F(TextFragmentAnchorMetricsTest, MatchFoundNoScroll) {
 
   histogram_tester_.ExpectTotalCount("TextFragmentAnchor.TableCellMatch", 1);
   histogram_tester_.ExpectUniqueSample("TextFragmentAnchor.TableCellMatch", 0,
+                                       1);
+
+  histogram_tester_.ExpectTotalCount("TextFragmentAnchor.LinkOpenSource", 1);
+  histogram_tester_.ExpectUniqueSample("TextFragmentAnchor.LinkOpenSource", 0,
                                        1);
 }
 
@@ -405,6 +418,10 @@ TEST_F(TextFragmentAnchorMetricsTest, ExactTextParameters) {
   histogram_tester_.ExpectTotalCount("TextFragmentAnchor.TableCellMatch", 4);
   histogram_tester_.ExpectUniqueSample("TextFragmentAnchor.TableCellMatch", 0,
                                        4);
+
+  histogram_tester_.ExpectTotalCount("TextFragmentAnchor.LinkOpenSource", 1);
+  histogram_tester_.ExpectUniqueSample("TextFragmentAnchor.LinkOpenSource", 0,
+                                       1);
 }
 
 // Test that the correct metrics are collected for all possible combinations of
@@ -510,6 +527,10 @@ TEST_F(TextFragmentAnchorMetricsTest, TextRangeParameters) {
   histogram_tester_.ExpectTotalCount("TextFragmentAnchor.ListItemMatch", 0);
 
   histogram_tester_.ExpectTotalCount("TextFragmentAnchor.TableCellMatch", 0);
+
+  histogram_tester_.ExpectTotalCount("TextFragmentAnchor.LinkOpenSource", 1);
+  histogram_tester_.ExpectUniqueSample("TextFragmentAnchor.LinkOpenSource", 0,
+                                       1);
 }
 
 class TextFragmentAnchorScrollMetricsTest
@@ -634,6 +655,10 @@ TEST_P(TextFragmentAnchorScrollMetricsTest, ScrollCancelled) {
 
   histogram_tester_.ExpectTotalCount("TextFragmentAnchor.TableCellMatch", 1);
   histogram_tester_.ExpectUniqueSample("TextFragmentAnchor.TableCellMatch", 0,
+                                       1);
+
+  histogram_tester_.ExpectTotalCount("TextFragmentAnchor.LinkOpenSource", 1);
+  histogram_tester_.ExpectUniqueSample("TextFragmentAnchor.LinkOpenSource", 0,
                                        1);
 }
 
@@ -1192,14 +1217,14 @@ TEST_P(TextFragmentRelatedMetricTest, NewDelimiterUseCounter) {
   }
 }
 
-// Test use counting the location.fragmentDirective API
+// Test use counting the document.fragmentDirective API
 TEST_P(TextFragmentRelatedMetricTest, TextFragmentAPIUseCounter) {
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
   request.Complete(R"HTML(
     <!DOCTYPE html>
     <script>
-      var textFragmentsSupported = typeof(location.fragmentDirective) == "object";
+      var textFragmentsSupported = typeof(document.fragmentDirective) == "object";
     </script>
     <p>This is a test page</p>
   )HTML");
@@ -1210,7 +1235,7 @@ TEST_P(TextFragmentRelatedMetricTest, TextFragmentAPIUseCounter) {
 
   EXPECT_EQ(text_fragments_enabled,
             GetDocument().IsUseCounted(
-                WebFeature::kLocationFragmentDirectiveAccessed));
+                WebFeature::kV8Document_FragmentDirective_AttributeGetter));
 }
 
 // Test that simply activating a text fragment does not use count the API
@@ -1228,7 +1253,7 @@ TEST_P(TextFragmentRelatedMetricTest, TextFragmentActivationDoesNotCountAPI) {
   EXPECT_EQ(text_fragments_enabled,
             GetDocument().IsUseCounted(WebFeature::kTextFragmentAnchor));
   EXPECT_FALSE(GetDocument().IsUseCounted(
-      WebFeature::kLocationFragmentDirectiveAccessed));
+      WebFeature::kV8Document_FragmentDirective_AttributeGetter));
 }
 
 }  // namespace

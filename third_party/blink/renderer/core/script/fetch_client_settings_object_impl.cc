@@ -38,6 +38,13 @@ FetchClientSettingsObjectImpl::GetReferrerPolicy() const {
   return execution_context_->GetReferrerPolicy();
 }
 
+base::Optional<network::mojom::blink::ReferrerPolicy>
+FetchClientSettingsObjectImpl::
+    GetReferrerPolicyDisregardingMetaTagsContainingLists() const {
+  DCHECK(execution_context_->IsContextThread());
+  return execution_context_->ReferrerPolicyButForMetaTagsWithListsOfPolicies();
+}
+
 const String FetchClientSettingsObjectImpl::GetOutgoingReferrer() const {
   DCHECK(execution_context_->IsContextThread());
   return execution_context_->OutgoingReferrer();
@@ -74,7 +81,7 @@ FetchClientSettingsObjectImpl::MimeTypeCheckForClassicWorkerScript() const {
 
 network::mojom::IPAddressSpace FetchClientSettingsObjectImpl::GetAddressSpace()
     const {
-  return execution_context_->GetSecurityContext().AddressSpace();
+  return execution_context_->AddressSpace();
 }
 
 mojom::blink::InsecureRequestPolicy

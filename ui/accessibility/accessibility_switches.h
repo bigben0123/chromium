@@ -18,17 +18,13 @@ AX_BASE_EXPORT extern const char
     kEnableExperimentalAccessibilityLanguageDetection[];
 AX_BASE_EXPORT extern const char
     kEnableExperimentalAccessibilityLanguageDetectionDynamic[];
-AX_BASE_EXPORT extern const char kEnableExperimentalAccessibilitySwitchAccess[];
 AX_BASE_EXPORT extern const char
     kEnableExperimentalAccessibilitySwitchAccessText[];
 AX_BASE_EXPORT extern const char
     kEnableExperimentalAccessibilityChromeVoxAnnotations[];
 AX_BASE_EXPORT extern const char
-    kDisableExperimentalAccessibilityChromeVoxLanguageSwitching[];
-AX_BASE_EXPORT extern const char
-    kDisableExperimentalAccessibilityChromeVoxSearchMenus[];
-AX_BASE_EXPORT extern const char
     kEnableExperimentalAccessibilityChromeVoxTutorial[];
+AX_BASE_EXPORT extern const char kEnableSwitchAccessPointScanning[];
 
 // Returns true if experimental accessibility language detection is enabled.
 AX_BASE_EXPORT bool IsExperimentalAccessibilityLanguageDetectionEnabled();
@@ -47,6 +43,13 @@ AX_BASE_EXPORT extern const char kEnableExperimentalUIAutomation[];
 
 // Returns true if experimental support for UIAutomation is enabled.
 AX_BASE_EXPORT bool IsExperimentalAccessibilityPlatformUIAEnabled();
+
+// Returns true if Switch Access point scanning is enabled.
+AX_BASE_EXPORT bool IsSwitchAccessPointScanningEnabled();
+
+// Optionally disable AXMenuList, which makes the internal pop-up menu
+// UI for a select element directly accessible.
+AX_BASE_EXPORT extern const char kDisableAXMenuList[];
 
 }  // namespace switches
 

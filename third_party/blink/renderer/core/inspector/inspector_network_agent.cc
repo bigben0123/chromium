@@ -37,9 +37,15 @@
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
+#include "net/base/ip_address.h"
+#include "net/base/ip_endpoint.h"
 #include "net/http/http_status_code.h"
+#include "services/network/public/cpp/cors/cors_error_status.h"
 #include "services/network/public/mojom/referrer_policy.mojom-blink.h"
+#include "services/network/public/mojom/trust_tokens.mojom-blink.h"
 #include "services/network/public/mojom/websocket.mojom-blink.h"
+#include "third_party/blink/public/common/loader/referrer_utils.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/platform/web_effective_connection_type.h"
@@ -57,6 +63,8 @@
 #include "third_party/blink/renderer/core/inspector/identifiers_factory.h"
 #include "third_party/blink/renderer/core/inspector/inspected_frames.h"
 #include "third_party/blink/renderer/core/inspector/network_resources_data.h"
+#include "third_party/blink/renderer/core/inspector/protocol/Network.h"
+#include "third_party/blink/renderer/core/inspector/request_debug_header_scope.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/core/loader/mixed_content_checker.h"
@@ -80,7 +88,6 @@
 #include "third_party/blink/renderer/platform/loader/fetch/unique_identifier.h"
 #include "third_party/blink/renderer/platform/network/http_header_map.h"
 #include "third_party/blink/renderer/platform/network/network_state_notifier.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -363,6 +370,8 @@ String BuildBlockedReason(ResourceRequestBlockedReason reason) {
     case ResourceRequestBlockedReason::kContentType:
       return protocol::Network::BlockedReasonEnum::ContentType;
     case ResourceRequestBlockedReason::kOther:
+    case ResourceRequestBlockedReason::
+        kBlockedByExtensionCrbug1128174Investigation:
       return protocol::Network::BlockedReasonEnum::Other;
     case ResourceRequestBlockedReason::kCollapsedByClient:
       return protocol::Network::BlockedReasonEnum::CollapsedByClient;
@@ -384,6 +393,97 @@ String BuildBlockedReason(ResourceRequestBlockedReason reason) {
   }
   NOTREACHED();
   return protocol::Network::BlockedReasonEnum::Other;
+}
+
+String BuildCorsError(network::mojom::CorsError cors_error) {
+  switch (cors_error) {
+    case network::mojom::CorsError::kDisallowedByMode:
+      return protocol::Network::CorsErrorEnum::DisallowedByMode;
+
+    case network::mojom::CorsError::kInvalidResponse:
+      return protocol::Network::CorsErrorEnum::InvalidResponse;
+
+    case network::mojom::CorsError::kWildcardOriginNotAllowed:
+      return protocol::Network::CorsErrorEnum::WildcardOriginNotAllowed;
+
+    case network::mojom::CorsError::kMissingAllowOriginHeader:
+      return protocol::Network::CorsErrorEnum::MissingAllowOriginHeader;
+
+    case network::mojom::CorsError::kMultipleAllowOriginValues:
+      return protocol::Network::CorsErrorEnum::MultipleAllowOriginValues;
+
+    case network::mojom::CorsError::kInvalidAllowOriginValue:
+      return protocol::Network::CorsErrorEnum::InvalidAllowOriginValue;
+
+    case network::mojom::CorsError::kAllowOriginMismatch:
+      return protocol::Network::CorsErrorEnum::AllowOriginMismatch;
+
+    case network::mojom::CorsError::kInvalidAllowCredentials:
+      return protocol::Network::CorsErrorEnum::InvalidAllowCredentials;
+
+    case network::mojom::CorsError::kCorsDisabledScheme:
+      return protocol::Network::CorsErrorEnum::CorsDisabledScheme;
+
+    case network::mojom::CorsError::kPreflightInvalidStatus:
+      return protocol::Network::CorsErrorEnum::PreflightInvalidStatus;
+
+    case network::mojom::CorsError::kPreflightDisallowedRedirect:
+      return protocol::Network::CorsErrorEnum::PreflightDisallowedRedirect;
+
+    case network::mojom::CorsError::kPreflightWildcardOriginNotAllowed:
+      return protocol::Network::CorsErrorEnum::
+          PreflightWildcardOriginNotAllowed;
+
+    case network::mojom::CorsError::kPreflightMissingAllowOriginHeader:
+      return protocol::Network::CorsErrorEnum::
+          PreflightMissingAllowOriginHeader;
+
+    case network::mojom::CorsError::kPreflightMultipleAllowOriginValues:
+      return protocol::Network::CorsErrorEnum::
+          PreflightMultipleAllowOriginValues;
+
+    case network::mojom::CorsError::kPreflightInvalidAllowOriginValue:
+      return protocol::Network::CorsErrorEnum::PreflightInvalidAllowOriginValue;
+
+    case network::mojom::CorsError::kPreflightAllowOriginMismatch:
+      return protocol::Network::CorsErrorEnum::PreflightAllowOriginMismatch;
+
+    case network::mojom::CorsError::kPreflightInvalidAllowCredentials:
+      return protocol::Network::CorsErrorEnum::PreflightInvalidAllowCredentials;
+
+    case network::mojom::CorsError::kPreflightMissingAllowExternal:
+      return protocol::Network::CorsErrorEnum::PreflightMissingAllowExternal;
+
+    case network::mojom::CorsError::kPreflightInvalidAllowExternal:
+      return protocol::Network::CorsErrorEnum::PreflightInvalidAllowExternal;
+
+    case network::mojom::CorsError::kInvalidAllowMethodsPreflightResponse:
+      return protocol::Network::CorsErrorEnum::
+          InvalidAllowMethodsPreflightResponse;
+
+    case network::mojom::CorsError::kInvalidAllowHeadersPreflightResponse:
+      return protocol::Network::CorsErrorEnum::
+          InvalidAllowHeadersPreflightResponse;
+
+    case network::mojom::CorsError::kMethodDisallowedByPreflightResponse:
+      return protocol::Network::CorsErrorEnum::
+          MethodDisallowedByPreflightResponse;
+
+    case network::mojom::CorsError::kHeaderDisallowedByPreflightResponse:
+      return protocol::Network::CorsErrorEnum::
+          HeaderDisallowedByPreflightResponse;
+
+    case network::mojom::CorsError::kRedirectContainsCredentials:
+      return protocol::Network::CorsErrorEnum::RedirectContainsCredentials;
+  }
+}
+
+std::unique_ptr<protocol::Network::CorsErrorStatus> BuildCorsErrorStatus(
+    network::CorsErrorStatus status) {
+  return protocol::Network::CorsErrorStatus::create()
+      .setCorsError(BuildCorsError(status.cors_error))
+      .setFailedParameter(String::FromUTF8(status.failed_parameter))
+      .build();
 }
 
 String BuildServiceWorkerResponseSource(const ResourceResponse& response) {
@@ -426,7 +526,7 @@ String GetReferrerPolicy(network::mojom::ReferrerPolicy policy) {
     case network::mojom::ReferrerPolicy::kAlways:
       return protocol::Network::Request::ReferrerPolicyEnum::UnsafeUrl;
     case network::mojom::ReferrerPolicy::kDefault:
-      if (RuntimeEnabledFeatures::ReducedReferrerGranularityEnabled()) {
+      if (ReferrerUtils::IsReducedReferrerGranularityEnabled()) {
         return protocol::Network::Request::ReferrerPolicyEnum::
             StrictOriginWhenCrossOrigin;
       } else {
@@ -473,6 +573,47 @@ std::unique_ptr<protocol::Network::WebSocketFrame> WebSocketMessageToProtocol(
       .build();
 }
 
+String GetTrustTokenOperationType(
+    network::mojom::TrustTokenOperationType type) {
+  switch (type) {
+    case network::mojom::TrustTokenOperationType::kIssuance:
+      return protocol::Network::TrustTokenOperationTypeEnum::Issuance;
+    case network::mojom::TrustTokenOperationType::kRedemption:
+      return protocol::Network::TrustTokenOperationTypeEnum::Redemption;
+    case network::mojom::TrustTokenOperationType::kSigning:
+      return protocol::Network::TrustTokenOperationTypeEnum::Signing;
+  }
+}
+
+String GetTrustTokenRefreshPolicy(
+    network::mojom::TrustTokenRefreshPolicy policy) {
+  switch (policy) {
+    case network::mojom::TrustTokenRefreshPolicy::kUseCached:
+      return protocol::Network::TrustTokenParams::RefreshPolicyEnum::UseCached;
+    case network::mojom::TrustTokenRefreshPolicy::kRefresh:
+      return protocol::Network::TrustTokenParams::RefreshPolicyEnum::Refresh;
+  }
+}
+
+std::unique_ptr<protocol::Network::TrustTokenParams> BuildTrustTokenParams(
+    const network::mojom::blink::TrustTokenParams& params) {
+  auto protocol_params =
+      protocol::Network::TrustTokenParams::create()
+          .setType(GetTrustTokenOperationType(params.type))
+          .setRefreshPolicy(GetTrustTokenRefreshPolicy(params.refresh_policy))
+          .build();
+
+  if (!params.issuers.IsEmpty()) {
+    auto issuers = std::make_unique<protocol::Array<protocol::String>>();
+    for (const auto& issuer : params.issuers) {
+      issuers->push_back(issuer->ToString());
+    }
+    protocol_params->setIssuers(std::move(issuers));
+  }
+
+  return protocol_params;
+}
+
 void SetNetworkStateOverride(bool offline,
                              double latency,
                              double download_throughput,
@@ -487,6 +628,15 @@ void SetNetworkStateOverride(bool offline,
   } else {
     GetNetworkStateNotifier().ClearOverride();
   }
+}
+
+String IPAddressToString(const net::IPAddress& address) {
+  String unbracketed = String::FromUTF8(address.ToString());
+  if (!address.IsIPv6()) {
+    return unbracketed;
+  }
+
+  return "[" + unbracketed + "]";
 }
 
 }  // namespace
@@ -523,9 +673,11 @@ static std::unique_ptr<protocol::Network::ResourceTiming> BuildObjectForTiming(
       .build();
 }
 
-static bool FormDataToString(scoped_refptr<EncodedFormData> body,
-                             size_t max_body_size,
-                             String* content) {
+static bool FormDataToString(
+    scoped_refptr<EncodedFormData> body,
+    size_t max_body_size,
+    protocol::Array<protocol::Network::PostDataEntry>* data_entries,
+    String* content) {
   *content = "";
   if (!body || body->IsEmpty())
     return false;
@@ -540,6 +692,15 @@ static bool FormDataToString(scoped_refptr<EncodedFormData> body,
   if (max_body_size != 0 && body->SizeInBytes() > max_body_size)
     return true;
 
+  for (const auto& element : body->Elements()) {
+    auto data_entry = protocol::Network::PostDataEntry::create().build();
+    auto bytes = protocol::Binary::fromSpan(
+        reinterpret_cast<const uint8_t*>(element.data_.data()),
+        element.data_.size());
+    data_entry->setBytes(std::move(bytes));
+    data_entries->push_back(std::move(data_entry));
+  }
+
   Vector<char> bytes;
   body->Flatten(bytes);
   *content = String::FromUTF8WithLatin1Fallback(bytes.data(), bytes.size());
@@ -550,8 +711,11 @@ static std::unique_ptr<protocol::Network::Request>
 BuildObjectForResourceRequest(const ResourceRequest& request,
                               scoped_refptr<EncodedFormData> post_data,
                               size_t max_body_size) {
-  String postData;
-  bool hasPostData = FormDataToString(post_data, max_body_size, &postData);
+  String data_string;
+  auto data_entries =
+      std::make_unique<protocol::Array<protocol::Network::PostDataEntry>>();
+  bool has_post_data = FormDataToString(post_data, max_body_size,
+                                        data_entries.get(), &data_string);
   KURL url = request.Url();
   // protocol::Network::Request doesn't have a separate referrer string member
   // like blink::ResourceRequest, so here we add ResourceRequest's referrer
@@ -572,10 +736,16 @@ BuildObjectForResourceRequest(const ResourceRequest& request,
           .build();
   if (url.FragmentIdentifier())
     result->setUrlFragment("#" + url.FragmentIdentifier());
-  if (!postData.IsEmpty())
-    result->setPostData(postData);
-  if (hasPostData)
+  if (!data_string.IsEmpty())
+    result->setPostData(data_string);
+  if (data_entries->size())
+    result->setPostDataEntries(std::move(data_entries));
+  if (has_post_data)
     result->setHasPostData(true);
+  if (request.TrustTokenParams()) {
+    result->setTrustTokenParams(
+        BuildTrustTokenParams(*request.TrustTokenParams()));
+  }
   return result;
 }
 
@@ -624,9 +794,11 @@ BuildObjectForResourceResponse(const ResourceResponse& response,
       break;
   }
 
-  // Use mime type from cached resource in case the one in response is empty.
+  // Use mime type from cached resource in case the one in response is empty
+  // or the response is a 304 Not Modified.
   String mime_type = response.MimeType();
-  if (mime_type.IsEmpty() && cached_resource)
+  if (cached_resource &&
+      (mime_type.IsEmpty() || response.HttpStatusCode() == 304))
     mime_type = cached_resource->GetResponse().MimeType();
 
   if (is_empty)
@@ -679,10 +851,11 @@ BuildObjectForResourceResponse(const ResourceResponse& response,
     }
   }
 
-  String remote_ip_address = response.RemoteIPAddress();
-  if (!remote_ip_address.IsEmpty()) {
-    response_object->setRemoteIPAddress(remote_ip_address);
-    response_object->setRemotePort(response.RemotePort());
+  const net::IPEndPoint& remote_ip_endpoint = response.RemoteIPEndpoint();
+  if (remote_ip_endpoint.address().IsValid()) {
+    response_object->setRemoteIPAddress(
+        IPAddressToString(remote_ip_endpoint.address()));
+    response_object->setRemotePort(remote_ip_endpoint.port());
   }
 
   String protocol = response.AlpnNegotiatedProtocol();
@@ -984,7 +1157,8 @@ void InspectorNetworkAgent::PrepareRequest(
 
   if (cache_disabled_.Get()) {
     if (LoadsFromCacheOnly(request) &&
-        request.GetRequestContext() != mojom::RequestContextType::INTERNAL) {
+        request.GetRequestContext() !=
+            mojom::blink::RequestContextType::INTERNAL) {
       request.SetCacheMode(mojom::FetchCacheMode::kUnspecifiedForceCacheMiss);
     } else {
       request.SetCacheMode(mojom::FetchCacheMode::kBypassCache);
@@ -993,6 +1167,21 @@ void InspectorNetworkAgent::PrepareRequest(
   }
   if (bypass_service_worker_.Get())
     request.SetSkipServiceWorker(true);
+
+  if (attach_debug_stack_enabled_.Get()) {
+    DCHECK(!request.GetDevToolsStackId().has_value());
+    ExecutionContext* context = nullptr;
+    if (worker_global_scope_) {
+      context = worker_global_scope_.Get();
+    } else if (loader && loader->GetFrame()) {
+      context = loader->GetFrame()->GetDocument()->ExecutingWindow();
+    }
+    String stack_id =
+        RequestDebugHeaderScope::CaptureStackIdForCurrentLocation(context);
+    if (!stack_id.IsNull()) {
+      request.SetDevToolsStackId(stack_id);
+    }
+  }
 }
 
 void InspectorNetworkAgent::WillSendRequest(
@@ -1193,15 +1382,21 @@ void InspectorNetworkAgent::DidFailLoading(
       error.GetResourceRequestBlockedReason();
   protocol::Maybe<String> blocked_reason;
   if (resource_request_blocked_reason) {
-    blocked_reason =
-        BuildBlockedReason(resource_request_blocked_reason.value());
+    blocked_reason = BuildBlockedReason(*resource_request_blocked_reason);
+  }
+  auto cors_error_status = error.CorsErrorStatus();
+  protocol::Maybe<protocol::Network::CorsErrorStatus>
+      protocol_cors_error_status;
+  if (cors_error_status) {
+    protocol_cors_error_status = BuildCorsErrorStatus(*cors_error_status);
   }
   is_handling_sync_xhr_ = false;
   GetFrontend()->loadingFailed(
       request_id, base::TimeTicks::Now().since_origin().InSecondsF(),
       InspectorPageAgent::ResourceTypeJson(
           resources_data_->GetResourceType(request_id)),
-      error.LocalizedDescription(), canceled, std::move(blocked_reason));
+      error.LocalizedDescription(), canceled, std::move(blocked_reason),
+      std::move(protocol_cors_error_status));
 }
 
 void InspectorNetworkAgent::ScriptImported(uint64_t identifier,
@@ -1272,6 +1467,8 @@ InspectorNetworkAgent::BuildInitiatorObject(
     initiator_object->setUrl(initiator_info.referrer);
     initiator_object->setLineNumber(
         initiator_info.position.line_.ZeroBasedInt());
+    initiator_object->setColumnNumber(
+        initiator_info.position.column_.ZeroBasedInt());
     return initiator_object;
   }
 
@@ -1315,12 +1512,19 @@ InspectorNetworkAgent::BuildInitiatorObject(
             .setType(protocol::Network::Initiator::TypeEnum::Parser)
             .build();
     initiator_object->setUrl(UrlWithoutFragment(document->Url()).GetString());
-    if (TextPosition::BelowRangePosition() != initiator_info.position)
+    if (TextPosition::BelowRangePosition() != initiator_info.position) {
       initiator_object->setLineNumber(
           initiator_info.position.line_.ZeroBasedInt());
-    else
-      initiator_object->setLineNumber(
-          document->GetScriptableDocumentParser()->LineNumber().ZeroBasedInt());
+      initiator_object->setColumnNumber(
+          initiator_info.position.column_.ZeroBasedInt());
+    } else {
+      initiator_object->setLineNumber(document->GetScriptableDocumentParser()
+                                          ->GetTextPosition()
+                                          .line_.ZeroBasedInt());
+      initiator_object->setColumnNumber(document->GetScriptableDocumentParser()
+                                            ->GetTextPosition()
+                                            .column_.ZeroBasedInt());
+    }
     return initiator_object;
   }
 
@@ -1503,6 +1707,13 @@ Response InspectorNetworkAgent::setExtraHTTPHeaders(
     if (entry.second && entry.second->asString(&value))
       extra_request_headers_.Set(entry.first, value);
   }
+  return Response::Success();
+}
+
+Response InspectorNetworkAgent::setAttachDebugStack(bool enabled) {
+  if (enabled && !enabled_.Get())
+    return Response::InvalidParams("Domain must be enabled");
+  attach_debug_stack_enabled_.Set(enabled);
   return Response::Success();
 }
 
@@ -1785,7 +1996,7 @@ bool InspectorNetworkAgent::FetchResourceContent(Document* document,
   Resource* cached_resource = document->Fetcher()->CachedResource(url);
   if (!cached_resource) {
     cached_resource = GetMemoryCache()->ResourceForURL(
-        url, document->Fetcher()->GetCacheIdentifier());
+        url, document->Fetcher()->GetCacheIdentifier(url));
   }
   if (cached_resource && InspectorPageAgent::CachedResourceContent(
                              cached_resource, content, base64_encoded))
@@ -1841,6 +2052,7 @@ InspectorNetworkAgent::InspectorNetworkAgent(
       bypass_service_worker_(&agent_state_, /*default_value=*/false),
       blocked_urls_(&agent_state_, /*default_value=*/false),
       extra_request_headers_(&agent_state_, /*default_value=*/WTF::String()),
+      attach_debug_stack_enabled_(&agent_state_, /*default_value=*/false),
       total_buffer_size_(&agent_state_,
                          /*default_value=*/kDefaultTotalBufferSize),
       resource_buffer_size_(&agent_state_,

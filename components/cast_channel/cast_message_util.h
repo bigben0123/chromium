@@ -17,8 +17,6 @@ using ::cast::channel::CastMessage;
 using ::cast::channel::DeviceAuthMessage;
 
 // Reserved message namespaces for internal messages.
-static constexpr char kCastInternalNamespacePrefix[] =
-    "urn:x-cast:com.google.cast.";
 static constexpr char kAuthNamespace[] =
     "urn:x-cast:com.google.cast.tp.deviceauth";
 static constexpr char kHeartbeatNamespace[] =
@@ -138,7 +136,7 @@ enum class V2MessageType {
 // Receiver App Type determines App types that can be supported by a Cast media
 // source. All Cast media sources support the web type.
 // Please keep it in sync with the EnumTable in
-// chrome/common/media_router/providers/cast/cast_media_source.cc.
+// components/media_router/common/providers/cast/cast_media_source.cc.
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused. Please keep it in sync with
 // MediaRouterResponseReceiverAppType in tools/metrics/histograms/enums.xml.
@@ -164,7 +162,7 @@ bool IsCastMessageValid(const CastMessage& message_proto);
 
 // Returns true if |message_namespace| is a namespace reserved for internal
 // messages.
-bool IsCastInternalNamespace(const std::string& message_namespace);
+bool IsCastReservedNamespace(base::StringPiece message_namespace);
 
 // Returns the value in the "type" field or |kOther| if the field is not found.
 // The result is only valid if |payload| is a Cast application protocol message.
@@ -307,12 +305,17 @@ struct LaunchSessionResponse {
   enum Result { kOk, kError, kTimedOut, kUnknown, kMaxValue = kUnknown };
 
   LaunchSessionResponse();
+  LaunchSessionResponse(const LaunchSessionResponse& other) = delete;
   LaunchSessionResponse(LaunchSessionResponse&& other);
+  LaunchSessionResponse& operator=(const LaunchSessionResponse& other) = delete;
+  LaunchSessionResponse& operator=(LaunchSessionResponse&& other);
   ~LaunchSessionResponse();
 
   Result result = Result::kUnknown;
   // Populated if |result| is |kOk|.
   base::Optional<base::Value> receiver_status;
+  // Populated if |result| is |kError|.
+  std::string error_msg;
 };
 
 // Parses |payload| into a LaunchSessionResponse. Returns an empty
@@ -320,6 +323,11 @@ struct LaunchSessionResponse {
 // response. |payload| must be a dictionary from the string payload of a
 // CastMessage.
 LaunchSessionResponse GetLaunchSessionResponse(const base::Value& payload);
+
+LaunchSessionResponse GetLaunchSessionResponseError(std::string error_msg);
+
+// Returns what connection type should be used based on the destination ID.
+VirtualConnectionType GetConnectionType(const std::string& destination_id);
 
 }  // namespace cast_channel
 

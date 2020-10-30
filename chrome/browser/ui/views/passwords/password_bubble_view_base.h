@@ -10,10 +10,17 @@
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_bubble_delegate_view.h"
+#include "components/password_manager/core/browser/password_form_forward.h"
 
 namespace content {
 class WebContents;
 }
+
+namespace views {
+class Label;
+}
+
+class FeaturePromoControllerViews;
 class PasswordBubbleControllerBase;
 
 // Base class for all manage-passwords bubbles. Provides static methods for
@@ -41,7 +48,8 @@ class PasswordBubbleViewBase : public LocationBarBubbleDelegateView {
   static PasswordBubbleViewBase* CreateBubble(
       content::WebContents* web_contents,
       views::View* anchor_view,
-      DisplayReason reason);
+      DisplayReason reason,
+      FeaturePromoControllerViews* promo_controller);
 
   // Closes the existing bubble.
   static void CloseCurrentBubble();
@@ -65,6 +73,11 @@ class PasswordBubbleViewBase : public LocationBarBubbleDelegateView {
                          bool easily_dismissable);
 
   ~PasswordBubbleViewBase() override;
+
+  static std::unique_ptr<views::Label> CreateUsernameLabel(
+      const password_manager::PasswordForm& form);
+  static std::unique_ptr<views::Label> CreatePasswordLabel(
+      const password_manager::PasswordForm& form);
 
  private:
   // views::BubbleDialogDelegateView:

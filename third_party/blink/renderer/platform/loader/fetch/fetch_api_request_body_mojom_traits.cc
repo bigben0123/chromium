@@ -28,7 +28,7 @@ StructTraits<blink::mojom::FetchAPIRequestBodyDataView,
 
   if (mutable_body.StreamBody()) {
     auto out = blink::mojom::blink::FetchAPIDataElement::New();
-    out->type = network::mojom::DataElementType::kChunkedDataPipe;
+    out->type = network::mojom::DataElementType::kReadOnceStream;
     out->chunked_data_pipe_getter = mutable_body.TakeStreamBody();
     out_elements.push_back(std::move(out));
     return out_elements;
@@ -53,25 +53,19 @@ StructTraits<blink::mojom::FetchAPIRequestBodyDataView,
         out->expected_modification_time =
             element.expected_file_modification_time_.value_or(base::Time());
         break;
-      case blink::FormDataElement::kEncodedBlob:
-        if (element.optional_blob_data_handle_) {
-          out->type = network::mojom::DataElementType::kDataPipe;
-          out->length = element.optional_blob_data_handle_->size();
+      case blink::FormDataElement::kEncodedBlob: {
+        out->type = network::mojom::DataElementType::kDataPipe;
+        out->length = element.optional_blob_data_handle_->size();
 
-          mojo::Remote<blink::mojom::blink::Blob> blob_remote(
-              mojo::PendingRemote<blink::mojom::blink::Blob>(
-                  element.optional_blob_data_handle_->CloneBlobRemote()
-                      .PassPipe(),
-                  blink::mojom::blink::Blob::Version_));
-          mojo::PendingRemote<network::mojom::blink::DataPipeGetter>
-              data_pipe_getter_remote;
-          blob_remote->AsDataPipeGetter(
-              out->data_pipe_getter.InitWithNewPipeAndPassReceiver());
-        } else {
-          out->type = network::mojom::DataElementType::kBlob;
-          out->blob_uuid = element.blob_uuid_;
-        }
+        mojo::Remote<blink::mojom::blink::Blob> blob_remote(
+            mojo::PendingRemote<blink::mojom::blink::Blob>(
+                element.optional_blob_data_handle_->CloneBlobRemote()
+                    .PassPipe(),
+                blink::mojom::blink::Blob::Version_));
+        blob_remote->AsDataPipeGetter(
+            out->data_pipe_getter.InitWithNewPipeAndPassReceiver());
         break;
+      }
       case blink::FormDataElement::kDataPipe:
         out->type = network::mojom::DataElementType::kDataPipe;
         if (element.data_pipe_getter_) {
@@ -105,7 +99,7 @@ bool StructTraits<blink::mojom::FetchAPIRequestBodyDataView,
     if (!view.ReadType(&type)) {
       return false;
     }
-    if (type == network::mojom::DataElementType::kChunkedDataPipe) {
+    if (type == network::mojom::DataElementType::kReadOnceStream) {
       auto chunked_data_pipe_getter = view.TakeChunkedDataPipeGetter<
           mojo::PendingRemote<network::mojom::blink::ChunkedDataPipeGetter>>();
       *out = blink::ResourceRequestBody(std::move(chunked_data_pipe_getter));
@@ -159,10 +153,9 @@ bool StructTraits<blink::mojom::FetchAPIRequestBodyDataView,
 
         break;
       }
-      case network::mojom::DataElementType::kBlob:
       case network::mojom::DataElementType::kUnknown:
       case network::mojom::DataElementType::kChunkedDataPipe:
-      case network::mojom::DataElementType::kRawFile:
+      case network::mojom::DataElementType::kReadOnceStream:
         NOTREACHED();
         return false;
     }

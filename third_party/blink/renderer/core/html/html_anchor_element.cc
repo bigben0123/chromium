@@ -28,6 +28,7 @@
 #include "base/time/time.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/feature_policy/feature_policy_feature.mojom-blink.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_prescient_networking.h"
@@ -84,7 +85,7 @@ bool ShouldInterveneDownloadByFramePolicy(LocalFrame* frame) {
         should_intervene_download = true;
     }
   }
-  if (document.IsSandboxed(
+  if (frame->DomWindow()->IsSandboxed(
           network::mojom::blink::WebSandboxFlags::kDownloads)) {
     UseCounter::Count(document, WebFeature::kDownloadInSandbox);
     if (RuntimeEnabledFeatures::BlockingDownloadsInSandboxEnabled())
@@ -352,6 +353,10 @@ base::Optional<WebImpression> HTMLAnchorElement::GetImpressionForNavigation()
     const {
   DCHECK(HasImpression());
 
+  if (!RuntimeEnabledFeatures::ConversionMeasurementEnabled(
+          GetExecutionContext()))
+    return base::nullopt;
+
   if (!GetExecutionContext()->IsFeatureEnabled(
           mojom::blink::FeaturePolicyFeature::kConversionMeasurement)) {
     String message =
@@ -418,6 +423,11 @@ base::Optional<WebImpression> HTMLAnchorElement::GetImpressionForNavigation()
     if (expiry_is_valid)
       expiry = base::TimeDelta::FromMilliseconds(expiry_milliseconds);
   }
+
+  UseCounter::Count(GetExecutionContext(),
+                    mojom::blink::WebFeature::kConversionAPIAll);
+  UseCounter::Count(GetExecutionContext(),
+                    mojom::blink::WebFeature::kImpressionRegistration);
 
   return WebImpression{conversion_destination, reporting_origin,
                        impression_data, expiry};
@@ -494,18 +504,26 @@ void HTMLAnchorElement::HandleClick(Event& event) {
   LocalFrame* frame = window->GetFrame();
   if (FastHasAttribute(html_names::kDownloadAttr) &&
       NavigationPolicyFromEvent(&event) != kNavigationPolicyDownload &&
-      GetDocument().GetSecurityOrigin()->CanReadContent(completed_url)) {
+      window->GetSecurityOrigin()->CanReadContent(completed_url)) {
     if (ShouldInterveneDownloadByFramePolicy(frame))
       return;
     request.SetSuggestedFilename(
         static_cast<String>(FastGetAttribute(html_names::kDownloadAttr)));
-    request.SetRequestContext(mojom::RequestContextType::DOWNLOAD);
-    request.SetRequestorOrigin(GetDocument().GetSecurityOrigin());
+    request.SetRequestContext(mojom::blink::RequestContextType::DOWNLOAD);
+    request.SetRequestorOrigin(window->GetSecurityOrigin());
+    network::mojom::ReferrerPolicy referrer_policy =
+        request.GetReferrerPolicy();
+    if (referrer_policy == network::mojom::ReferrerPolicy::kDefault)
+      referrer_policy = window->GetReferrerPolicy();
+    Referrer referrer = SecurityPolicy::GenerateReferrer(
+        referrer_policy, completed_url, window->OutgoingReferrer());
+    request.SetReferrerString(referrer.referrer);
+    request.SetReferrerPolicy(referrer.referrer_policy);
     frame->DownloadURL(request, network::mojom::blink::RedirectMode::kManual);
     return;
   }
 
-  request.SetRequestContext(mojom::RequestContextType::HYPERLINK);
+  request.SetRequestContext(mojom::blink::RequestContextType::HYPERLINK);
   request.SetHasUserGesture(LocalFrame::HasTransientUserActivation(frame));
   const AtomicString& target = FastGetAttribute(html_names::kTargetAttr);
   FrameLoadRequest frame_request(window, request);
@@ -543,9 +561,7 @@ void HTMLAnchorElement::HandleClick(Event& event) {
   }
 
   // Only attach impressions for main frame navigations.
-  if (RuntimeEnabledFeatures::ConversionMeasurementEnabled(
-          GetExecutionContext()) &&
-      target_frame && target_frame->IsMainFrame() && request.HasUserGesture() &&
+  if (target_frame && target_frame->IsMainFrame() && request.HasUserGesture() &&
       HasImpression()) {
     base::Optional<WebImpression> impression = GetImpressionForNavigation();
     if (impression)

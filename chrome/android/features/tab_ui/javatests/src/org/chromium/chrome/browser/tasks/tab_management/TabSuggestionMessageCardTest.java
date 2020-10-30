@@ -24,7 +24,6 @@ import androidx.test.filters.MediumTest;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
@@ -47,7 +46,7 @@ import org.chromium.ui.test.util.UiRestriction;
 @RunWith(ChromeJUnit4ClassRunner.class)
 // clang-format off
 @Restriction(UiRestriction.RESTRICTION_TYPE_PHONE)
-@Features.EnableFeatures({ChromeFeatureList.TAB_GRID_LAYOUT_ANDROID,
+@Features.EnableFeatures({ChromeFeatureList.TAB_GRID_LAYOUT_ANDROID+"<Study",
         ChromeFeatureList.TAB_GROUPS_ANDROID,
         ChromeFeatureList.CLOSE_TAB_SUGGESTIONS+"<Study"})
 // Disable TAB_TO_GTS_ANIMATION to make it less flaky. When animation is enabled, the suggestion
@@ -58,12 +57,9 @@ import org.chromium.ui.test.util.UiRestriction;
 public class TabSuggestionMessageCardTest {
     // clang-format on
     private static final String BASE_PARAMS = "force-fieldtrial-params="
-            + "Study.Group:baseline_tab_suggestions/true";
+            + "Study.Group:baseline_tab_suggestions/true/enable_launch_polish/true";
     @Rule
     public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
-
-    @Rule
-    public TestRule mProcessor = new Features.InstrumentationProcessor();
 
     private final TabSelectionEditorTestingRobot mTabSelectionEditorTestingRobot =
             new TabSelectionEditorTestingRobot();
@@ -154,9 +150,12 @@ public class TabSuggestionMessageCardTest {
 
     @Test
     @MediumTest
-    @CommandLineFlags.
-    Add({BASE_PARAMS + "/baseline_group_tab_suggestions/true/min_time_between_prefetches/0"})
+    // clang-format off
+    @CommandLineFlags.Add({BASE_PARAMS +
+        "/baseline_group_tab_suggestions/true/min_time_between_prefetches/0"})
+    @DisableIf.Build(supported_abis_includes = "x86", message = "https://crbug.com/1102423")
     public void groupTabSuggestionReviewedAndDismissed() {
+        // clang-format on
         CriteriaHelper.pollUiThread(TabSuggestionMessageService::isSuggestionAvailableForTesting);
 
         enteringTabSwitcherAndVerifySuggestionIsShown(mGroupingSuggestionMessage);
@@ -189,6 +188,7 @@ public class TabSuggestionMessageCardTest {
 
     @Test
     @MediumTest
+    @DisabledTest(message = "crbug.com/1085452")
     // clang-format off
     @CommandLineFlags.Add({BASE_PARAMS + "/baseline_group_tab_suggestions/true" +
             "/baseline_close_tab_suggestions/true/min_time_between_prefetches/0"})

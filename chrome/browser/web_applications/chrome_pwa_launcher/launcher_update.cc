@@ -50,8 +50,7 @@ void DeleteHardLinkOrCopyCallback(const base::FilePath& launcher_path,
 }
 
 void RecordWebAppLauncherUpdateResult(WebAppLauncherUpdateResult result) {
-  base::UmaHistogramEnumeration("WebApp.Launcher.WebAppLauncherUpdateResult",
-                                result);
+  base::UmaHistogramEnumeration("WebApp.Launcher.UpdateResult", result);
 }
 
 // Replaces |launcher_path| with the one at |latest_version_path|. This is done
@@ -145,7 +144,8 @@ void UpdatePwaLaunchers(std::vector<base::FilePath> launcher_paths) {
 
     // Make a hardlink or copy of |latest_version_path|, and replace the current
     // launcher with it.
-    ReplaceLauncherWithLatestVersion(path, latest_version_path, old_path);
+    if (base::PathExists(path))
+      ReplaceLauncherWithLatestVersion(path, latest_version_path, old_path);
   }
 }
 

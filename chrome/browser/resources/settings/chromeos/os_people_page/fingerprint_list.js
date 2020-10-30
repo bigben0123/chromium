@@ -2,9 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-(function() {
-'use strict';
-
 /**
  * The duration in ms of a background flash when a user touches the fingerprint
  * sensor on this page.
@@ -16,6 +13,7 @@ Polymer({
   is: 'settings-fingerprint-list',
 
   behaviors: [
+    DeepLinkingBehavior,
     I18nBehavior,
     WebUIListenerBehavior,
     settings.RouteObserverBehavior,
@@ -53,6 +51,18 @@ Polymer({
     allowAddAnotherFinger_: {
       type: Boolean,
       value: true,
+    },
+
+    /**
+     * Used by DeepLinkingBehavior to focus this page's deep links.
+     * @type {!Set<!chromeos.settings.mojom.Setting>}
+     */
+    supportedSettingIds: {
+      type: Object,
+      value: () => new Set([
+        chromeos.settings.mojom.Setting.kAddFingerprint,
+        chromeos.settings.mojom.Setting.kRemoveFingerprint,
+      ]),
     },
   },
 
@@ -94,12 +104,15 @@ Polymer({
    * @protected
    */
   currentRouteChanged(newRoute, oldRoute) {
-    if (newRoute != settings.routes.FINGERPRINT) {
+    if (newRoute !== settings.routes.FINGERPRINT) {
       if (this.browserProxy_) {
         this.browserProxy_.endCurrentAuthentication();
       }
       this.showSetupFingerprintDialog_ = false;
-    } else if (oldRoute == settings.routes.LOCK_SCREEN) {
+      return;
+    }
+
+    if (oldRoute === settings.routes.LOCK_SCREEN) {
       // Start fingerprint authentication when going from LOCK_SCREEN to
       // FINGERPRINT page.
       this.browserProxy_.startAuthentication();
@@ -108,6 +121,8 @@ Polymer({
     if (this.requestPasswordIfApplicable_()) {
       this.showSetupFingerprintDialog_ = false;
     }
+
+    this.attemptDeepLink();
   },
 
   /**
@@ -117,7 +132,8 @@ Polymer({
    */
   onAttemptReceived_(fingerprintAttempt) {
     /** @type {NodeList<!HTMLElement>} */ const listItems =
-        this.$.fingerprintsList.querySelectorAll('.list-item');
+        /** @type {NodeList<!HTMLElement>} */
+        (this.$.fingerprintsList.querySelectorAll('.list-item'));
     /** @type {Array<number>} */ const filteredIndexes =
         fingerprintAttempt.indexes.filter(function(index) {
           return index >= 0 && index < listItems.length;
@@ -210,7 +226,7 @@ Polymer({
    */
   onScreenLocked_(screenIsLocked) {
     if (!screenIsLocked &&
-        settings.Router.getInstance().getCurrentRoute() ==
+        settings.Router.getInstance().getCurrentRoute() ===
             settings.routes.FINGERPRINT) {
       this.onSetupFingerprintDialogClose_();
     }
@@ -220,6 +236,13 @@ Polymer({
   onAuthTokenChanged_() {
     if (this.requestPasswordIfApplicable_()) {
       this.showSetupFingerprintDialog_ = false;
+      return;
+    }
+
+    if (settings.Router.getInstance().getCurrentRoute() ===
+        settings.routes.FINGERPRINT) {
+      // Show deep links again if the user authentication dialog just closed.
+      this.attemptDeepLink();
     }
   },
 
@@ -232,4 +255,3 @@ Polymer({
     return this.i18n('lockScreenDeleteFingerprintLabel', item);
   },
 });
-})();

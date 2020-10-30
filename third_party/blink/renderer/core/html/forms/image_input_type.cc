@@ -105,10 +105,6 @@ void ImageInputType::HandleDOMActivateEvent(Event& event) {
   event.SetDefaultHandled();
 }
 
-bool ImageInputType::TypeShouldForceLegacyLayout() const {
-  return true;
-}
-
 LayoutObject* ImageInputType::CreateLayoutObject(const ComputedStyle& style,
                                                  LegacyLayout legacy) const {
   if (use_fallback_content_) {
@@ -192,7 +188,7 @@ unsigned ImageInputType::Height() const {
     HTMLImageLoader* image_loader = GetElement().ImageLoader();
     if (image_loader && image_loader->GetContent()) {
       return image_loader->GetContent()
-          ->IntrinsicSize(LayoutObject::ShouldRespectImageOrientation(nullptr))
+          ->IntrinsicSize(kRespectImageOrientation)
           .Height();
     }
   }
@@ -218,7 +214,7 @@ unsigned ImageInputType::Width() const {
     HTMLImageLoader* image_loader = GetElement().ImageLoader();
     if (image_loader && image_loader->GetContent()) {
       return image_loader->GetContent()
-          ->IntrinsicSize(LayoutObject::ShouldRespectImageOrientation(nullptr))
+          ->IntrinsicSize(kRespectImageOrientation)
           .Width();
     }
   }

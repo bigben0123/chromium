@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/callback.h"
 #include "base/files/file_path.h"
 #include "chromeos/dbus/concierge/concierge_service.pb.h"
 
@@ -83,6 +84,9 @@ enum class CrostiniResult {
   // the top of this enum.
 };
 
+using CrostiniSuccessCallback =
+    base::OnceCallback<void(bool success, const std::string& failure_reason)>;
+
 enum class InstallLinuxPackageProgressStatus {
   SUCCEEDED,
   FAILED,
@@ -133,7 +137,6 @@ enum class ContainerVersion {
 struct VmInfo {
   VmState state;
   vm_tools::concierge::VmInfo info;
-  bool usb_devices_shared = false;
 };
 
 struct StreamingExportStatus {

@@ -4,18 +4,24 @@
 
 #include "ui/views/window/frame_caption_button.h"
 
+#include <memory>
+#include <utility>
+
 #include "ui/base/hit_test.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/animation/throb_animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/gfx/rrect_f.h"
 #include "ui/views/animation/flood_fill_ink_drop_ripple.h"
 #include "ui/views/animation/ink_drop_highlight.h"
 #include "ui/views/animation/ink_drop_impl.h"
-#include "ui/views/animation/ink_drop_mask.h"
 #include "ui/views/animation/ink_drop_ripple.h"
+#include "ui/views/controls/focus_ring.h"
+#include "ui/views/controls/highlight_path_generator.h"
 #include "ui/views/window/caption_button_layout_constants.h"
 #include "ui/views/window/hit_test_utils.h"
 
@@ -35,13 +41,36 @@ constexpr float kDisabledButtonAlphaRatio = 0.5f;
 
 }  // namespace
 
+// Custom highlight path generator for clipping ink drops and drawing focus
+// rings.
+class FrameCaptionButton::HighlightPathGenerator
+    : public views::HighlightPathGenerator {
+ public:
+  explicit HighlightPathGenerator(FrameCaptionButton* frame_caption_button)
+      : frame_caption_button_(frame_caption_button) {}
+  HighlightPathGenerator(const HighlightPathGenerator&) = delete;
+  HighlightPathGenerator& operator=(const HighlightPathGenerator&) = delete;
+  ~HighlightPathGenerator() override = default;
+
+  // views::HighlightPathGenerator:
+  base::Optional<gfx::RRectF> GetRoundRect(const gfx::RectF& rect) override {
+    gfx::Rect bounds = gfx::ToRoundedRect(rect);
+    bounds.Inset(frame_caption_button_->GetInkdropInsets(bounds.size()));
+    return gfx::RRectF(gfx::RectF(bounds),
+                       frame_caption_button_->ink_drop_corner_radius());
+  }
+
+ private:
+  FrameCaptionButton* const frame_caption_button_;
+};
+
 // static
 const char FrameCaptionButton::kViewClassName[] = "FrameCaptionButton";
 
-FrameCaptionButton::FrameCaptionButton(views::ButtonListener* listener,
+FrameCaptionButton::FrameCaptionButton(PressedCallback callback,
                                        CaptionButtonIcon icon,
                                        int hit_test_type)
-    : Button(listener),
+    : Button(std::move(callback)),
       icon_(icon),
       background_color_(SK_ColorWHITE),
       paint_as_active_(false),
@@ -49,14 +78,19 @@ FrameCaptionButton::FrameCaptionButton(views::ButtonListener* listener,
       ink_drop_corner_radius_(kCaptionButtonInkDropDefaultCornerRadius),
       swap_images_animation_(new gfx::SlideAnimation(this)) {
   views::SetHitTestComponent(this, hit_test_type);
+  // Not focusable by default, only for accessibility.
+  SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
 
-  set_animate_on_state_change(true);
+  SetAnimateOnStateChange(true);
   swap_images_animation_->Reset(1);
 
-  set_has_ink_drop_action_on_click(true);
+  SetHasInkDropActionOnClick(true);
   SetInkDropMode(InkDropMode::ON);
-  set_ink_drop_visible_opacity(kInkDropVisibleOpacity);
+  SetInkDropVisibleOpacity(kInkDropVisibleOpacity);
   UpdateInkDropBaseColor();
+
+  views::HighlightPathGenerator::Install(
+      this, std::make_unique<HighlightPathGenerator>(this));
 
   // Do not flip the gfx::Canvas passed to the OnPaint() method. The snap left
   // and snap right button icons should not be flipped. The other icons are
@@ -64,6 +98,26 @@ FrameCaptionButton::FrameCaptionButton(views::ButtonListener* listener,
 }
 
 FrameCaptionButton::~FrameCaptionButton() = default;
+
+// static
+SkColor FrameCaptionButton::GetButtonColor(SkColor background_color) {
+  // Use IsDark() to change target colors instead of PickContrastingColor(), so
+  // that DefaultFrameHeader::GetTitleColor() (which uses different target
+  // colors) can change between light/dark targets at the same time.  It looks
+  // bad when the title and caption buttons disagree about whether to be light
+  // or dark.
+  const SkColor default_foreground = color_utils::IsDark(background_color)
+                                         ? gfx::kGoogleGrey200
+                                         : gfx::kGoogleGrey700;
+  const SkColor high_contrast_foreground =
+      color_utils::GetColorWithMaxContrast(background_color);
+  // Guarantee the caption buttons reach at least contrast ratio 3; this ratio
+  // matches that used for focus indicators, large text, and other "have to see
+  // it but perhaps don't have to read fine detail" cases.
+  return color_utils::BlendForMinContrast(default_foreground, background_color,
+                                          high_contrast_foreground, 3.0f)
+      .color;
+}
 
 // static
 float FrameCaptionButton::GetInactiveButtonColorAlphaRatio() {
@@ -74,7 +128,7 @@ void FrameCaptionButton::SetImage(CaptionButtonIcon icon,
                                   Animate animate,
                                   const gfx::VectorIcon& icon_definition) {
   gfx::ImageSkia new_icon_image =
-      gfx::CreateVectorIcon(icon_definition, button_color_);
+      gfx::CreateVectorIcon(icon_definition, GetButtonColor(background_color_));
 
   // The early return is dependent on |animate| because callers use SetImage()
   // with ANIMATE_NO to progress the crossfade animation to the end.
@@ -156,13 +210,7 @@ std::unique_ptr<views::InkDropRipple> FrameCaptionButton::CreateInkDropRipple()
     const {
   return std::make_unique<views::FloodFillInkDropRipple>(
       size(), GetInkdropInsets(size()), GetInkDropCenterBasedOnLastEvent(),
-      GetInkDropBaseColor(), ink_drop_visible_opacity());
-}
-
-std::unique_ptr<views::InkDropMask> FrameCaptionButton::CreateInkDropMask()
-    const {
-  return std::make_unique<views::RoundRectInkDropMask>(
-      size(), GetInkdropInsets(size()), ink_drop_corner_radius_);
+      GetInkDropBaseColor(), GetInkDropVisibleOpacity());
 }
 
 void FrameCaptionButton::SetBackgroundColor(SkColor background_color) {
@@ -170,8 +218,6 @@ void FrameCaptionButton::SetBackgroundColor(SkColor background_color) {
     return;
 
   background_color_ = background_color;
-  button_color_ =
-      GetNativeTheme()->GetFrameCaptionButtonForegroundColor(background_color_);
   // Refresh the icon since the color may have changed.
   if (icon_definition_)
     SetImage(icon_, ANIMATE_NO, *icon_definition_);
@@ -184,7 +230,7 @@ void FrameCaptionButton::PaintButtonContents(gfx::Canvas* canvas) {
   if (hover_animation().is_animating()) {
     highlight_alpha = hover_animation().CurrentValueBetween(
         SK_AlphaTRANSPARENT, kHighlightVisibleOpacity);
-  } else if (state() == STATE_HOVERED || state() == STATE_PRESSED) {
+  } else if (GetState() == STATE_HOVERED || GetState() == STATE_PRESSED) {
     // Painting a circular highlight in both "hovered" and "pressed" states
     // simulates and ink drop highlight mode of
     // AutoHighlightMode::SHOW_ON_RIPPLE.
@@ -246,7 +292,7 @@ int FrameCaptionButton::GetAlphaForIcon(int base_alpha) const {
   if (hover_animation().is_animating()) {
     inactive_alpha =
         hover_animation().CurrentValueBetween(inactive_alpha, 1.0f);
-  } else if (state() == STATE_PRESSED || state() == STATE_HOVERED) {
+  } else if (GetState() == STATE_PRESSED || GetState() == STATE_HOVERED) {
     inactive_alpha = 1.0f;
   }
   return base_alpha * inactive_alpha;
@@ -270,8 +316,9 @@ void FrameCaptionButton::UpdateInkDropBaseColor() {
   // glyph color.
   // TODO(pkasting): It would likely be better to make the button glyph always
   // be an alpha-blended version of GetColorWithMaxContrast(background_color_).
-  set_ink_drop_base_color(
-      GetColorWithMaxContrast(GetColorWithMaxContrast(button_color_)));
+  const SkColor button_color = GetButtonColor(background_color_);
+  SetInkDropBaseColor(
+      GetColorWithMaxContrast(GetColorWithMaxContrast(button_color)));
 }
 
 }  // namespace views

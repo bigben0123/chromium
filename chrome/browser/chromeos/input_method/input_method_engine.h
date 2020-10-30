@@ -16,9 +16,9 @@
 #include "chrome/browser/chromeos/input_method/input_method_engine_base.h"
 #include "chrome/browser/chromeos/input_method/suggestion_handler_interface.h"
 #include "ui/base/ime/candidate_window.h"
+#include "ui/base/ime/chromeos/ime_engine_handler_interface.h"
 #include "ui/base/ime/chromeos/input_method_descriptor.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
-#include "ui/base/ime/ime_engine_handler_interface.h"
 #include "url/gurl.h"
 
 namespace ui {
@@ -118,17 +118,21 @@ class InputMethodEngine : public InputMethodEngineBase,
   void OnSuggestionsChanged(
       const std::vector<std::string>& suggestions) override;
 
-  bool ShowMultipleSuggestions(int context_id,
-                               const std::vector<base::string16>& suggestions,
-                               std::string* error) override;
+  bool SetButtonHighlighted(int context_id,
+                            const ui::ime::AssistiveWindowButton& button,
+                            bool highlighted,
+                            std::string* error) override;
 
-  bool HighlightSuggestionCandidate(int context_id,
-                                    int index,
-                                    std::string* error) override;
+  void ClickButton(const ui::ime::AssistiveWindowButton& button) override;
 
   bool AcceptSuggestionCandidate(int context_id,
                                  const base::string16& candidate,
                                  std::string* error) override;
+
+  bool SetAssistiveWindowProperties(
+      int context_id,
+      const AssistiveWindowProperties& assistive_window,
+      std::string* error) override;
 
   // This function returns the current property of the candidate window of the
   // corresponding engine_id. If the CandidateWindowProperty is not set for the
@@ -153,12 +157,6 @@ class InputMethodEngine : public InputMethodEngineBase,
   // Set the position of the cursor in the candidate window.
   bool SetCursorPosition(int context_id, int candidate_id, std::string* error);
 
-  // Show/Hide given assistive window.
-  bool SetAssistiveWindowProperties(
-      int context_id,
-      const AssistiveWindowProperties& assistive_window,
-      std::string* error);
-
   // Set the list of items that appears in the language menu when this IME is
   // active.
   bool SetMenuItems(
@@ -177,6 +175,16 @@ class InputMethodEngine : public InputMethodEngineBase,
   // event handler.
   bool IsValidKeyEvent(const ui::KeyEvent* ui_event) override;
 
+  // Sets a range as autocorrected to display a special dashed underline.  Start
+  // and end are code point offsets in the surroundingTextInfo which control the
+  // start and end point of the underline which is added to the text to show a
+  // word was autocorrected.
+  // TODO(b/171924748): Improve documentation for this function all the way down
+  // the stack.
+  bool SetAutocorrectRange(const base::string16& autocorrect_text,
+                           uint32_t start,
+                           uint32_t end) override;
+
  private:
   // InputMethodEngineBase:
   void UpdateComposition(const ui::CompositionText& composition_text,
@@ -186,10 +194,15 @@ class InputMethodEngine : public InputMethodEngineBase,
       uint32_t before,
       uint32_t after,
       const std::vector<ui::ImeTextSpan>& text_spans) override;
+  bool SetComposingRange(
+      uint32_t start,
+      uint32_t end,
+      const std::vector<ui::ImeTextSpan>& text_spans) override;
 
-  bool SetAutocorrectRange(const base::string16& autocorrect_text,
-                           uint32_t start,
-                           uint32_t end) override;
+  gfx::Range GetAutocorrectRange() override;
+
+  gfx::Rect GetAutocorrectCharacterBounds() override;
+
 
   bool SetSelectionRange(uint32_t start, uint32_t end) override;
 

@@ -15,12 +15,11 @@ namespace component_updater {
 
 // Success callback to be run after the component is downloaded.
 using OnSODAComponentReadyCallback =
-    base::Callback<void(const base::FilePath&)>;
+    base::RepeatingCallback<void(const base::FilePath&)>;
 
 class SODAComponentInstallerPolicy : public ComponentInstallerPolicy {
  public:
-  explicit SODAComponentInstallerPolicy(
-      const OnSODAComponentReadyCallback& callback);
+  explicit SODAComponentInstallerPolicy(OnSODAComponentReadyCallback callback);
   ~SODAComponentInstallerPolicy() override;
 
   SODAComponentInstallerPolicy(const SODAComponentInstallerPolicy&) = delete;
@@ -61,7 +60,8 @@ void RegisterSODAComponent(ComponentUpdateService* cus,
                            PrefService* prefs,
                            base::OnceClosure callback);
 
-bool UninstallSODAComponent(ComponentUpdateService* cus, PrefService* prefs);
+void RegisterSodaLanguageComponent(ComponentUpdateService* cus,
+                                   PrefService* prefs);
 
 }  // namespace component_updater
 

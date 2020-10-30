@@ -75,12 +75,28 @@ ShareToData* ShareToDataForWebState(web::WebState* web_state,
   return [[ShareToData alloc] initWithShareURL:finalURLToShare
                                     visibleURL:web_state->GetVisibleURL()
                                          title:tab_title
+                                additionalText:nil
                                isOriginalTitle:is_original_title
                                isPagePrintable:is_page_printable
                               isPageSearchable:is_page_searchable
                               canSendTabToSelf:can_send_tab_to_self
                                      userAgent:userAgent
                             thumbnailGenerator:thumbnail_generator];
+}
+
+ShareToData* ShareToDataForURL(const GURL& URL,
+                               NSString* title,
+                               NSString* additionalText) {
+  return [[ShareToData alloc] initWithShareURL:URL
+                                    visibleURL:URL
+                                         title:title
+                                additionalText:additionalText
+                               isOriginalTitle:YES
+                               isPagePrintable:NO
+                              isPageSearchable:NO
+                              canSendTabToSelf:NO
+                                     userAgent:web::UserAgentType::NONE
+                            thumbnailGenerator:nil];
 }
 
 }  // namespace activity_services

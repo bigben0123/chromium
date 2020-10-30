@@ -12,6 +12,7 @@
 #include "ash/system/tray/tray_popup_ink_drop_style.h"
 #include "ash/system/tray/tri_view.h"
 #include "base/strings/string16.h"
+#include "ui/views/controls/button/button.h"
 
 namespace views {
 class ButtonListener;
@@ -25,8 +26,6 @@ class Label;
 class LabelButton;
 class Painter;
 class Separator;
-class Slider;
-class SliderListener;
 class ToggleButton;
 }  // namespace views
 
@@ -105,11 +104,10 @@ class TrayPopupUtils {
   // TODO(bruthig): Update all system menu rows to use this.
   static views::ImageView* CreateMainImageView();
 
-  // Returns a slider configured for proper layout within a TriView container
-  // with a FillLayout.
-  static views::Slider* CreateSlider(views::SliderListener* listener);
-
   // Returns a ToggleButton that has been configured for system menu layout.
+  static views::ToggleButton* CreateToggleButton(
+      views::Button::PressedCallback callback,
+      int accessible_name_id);
   static views::ToggleButton* CreateToggleButton(
       views::ButtonListener* listener,
       int accessible_name_id);
@@ -158,18 +156,14 @@ class TrayPopupUtils {
   static std::unique_ptr<views::InkDropRipple> CreateInkDropRipple(
       TrayPopupInkDropStyle ink_drop_style,
       const views::View* host,
-      const gfx::Point& center_point,
-      SkColor background_color);
+      const gfx::Point& center_point);
 
-  // Creates in InkDropHighlight instance for |host| according to the
-  // |ink_drop_style|.
+  // Creates in InkDropHighlight instance for |host|.
   //
   // All targetable views in the system menu should delegate
   // InkDropHost::CreateInkDropHighlight() calls here.
   static std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight(
-      TrayPopupInkDropStyle ink_drop_style,
-      const views::View* host,
-      SkColor background_color);
+      const views::View* host);
 
   // Installs a HighlightPathGenerator matching the TrayPopupInkDropStyle.
   static void InstallHighlightPathGenerator(
@@ -196,6 +190,9 @@ class TrayPopupUtils {
   // Updates the visibility and a11y state of the checkable row |container|.
   static void UpdateCheckMarkVisibility(HoverHighlightView* container,
                                         bool visible);
+
+  // Sets up the font and padding for sub labels used in some detailed views.
+  static void SetupTraySubLabel(views::Label* label);
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(TrayPopupUtils);

@@ -66,8 +66,8 @@ TranslateClientImpl::TranslateClientImpl(content::WebContents* web_contents)
 
 TranslateClientImpl::~TranslateClientImpl() = default;
 
-translate::LanguageState& TranslateClientImpl::GetLanguageState() {
-  return translate_manager_->GetLanguageState();
+const translate::LanguageState& TranslateClientImpl::GetLanguageState() {
+  return *translate_manager_->GetLanguageState();
 }
 
 bool TranslateClientImpl::ShowTranslateUI(
@@ -130,6 +130,11 @@ int TranslateClientImpl::GetInfobarIconID() const {
 
 bool TranslateClientImpl::IsTranslatableURL(const GURL& url) {
   return translate::IsTranslatableURL(url);
+}
+
+bool TranslateClientImpl::IsAutofillAssistantRunning() const {
+  // TODO(crbug.com/1051559): Revise if/when WebLayer supports Autobot.
+  return false;
 }
 
 void TranslateClientImpl::ShowReportLanguageDetectionErrorUI(

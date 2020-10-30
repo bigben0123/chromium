@@ -47,6 +47,7 @@ void AddStringResources(content::WebUIDataSource* source) {
       {"done", IDS_CROSTINI_UPGRADER_DONE_BUTTON},
       {"restore", IDS_CROSTINI_UPGRADER_RESTORE_BUTTON},
       {"learnMore", IDS_LEARN_MORE},
+      {"notNow", IDS_CROSTINI_UPGRADER_NOT_NOW},
 
       {"promptTitle", IDS_CROSTINI_UPGRADER_TITLE},
       {"backingUpTitle", IDS_CROSTINI_UPGRADER_BACKING_UP_TITLE},
@@ -101,6 +102,7 @@ CrostiniUpgraderUI::CrostiniUpgraderUI(content::WebUI* web_ui)
   source->OverrideContentSecurityPolicy(
       network::mojom::CSPDirectiveName::ScriptSrc,
       "script-src chrome://resources chrome://test 'self';");
+  source->DisableTrustedTypesCSP();
   AddStringResources(source);
 
   source->AddResourcePath("images/linux_illustration.png",
@@ -114,8 +116,8 @@ CrostiniUpgraderUI::CrostiniUpgraderUI(content::WebUI* web_ui)
                           IDR_CROSTINI_UPGRADER_BROWSER_PROXY_JS);
   source->AddResourcePath("crostini_upgrader.mojom-lite.js",
                           IDR_CROSTINI_UPGRADER_MOJO_LITE_JS);
-  source->AddResourcePath("test_loader.js", IDR_WEBUI_JS_TEST_LOADER);
-  source->AddResourcePath("test_loader.html", IDR_WEBUI_HTML_TEST_LOADER);
+  source->AddResourcePath("test_loader.js", IDR_WEBUI_JS_TEST_LOADER_JS);
+  source->AddResourcePath("test_loader.html", IDR_WEBUI_HTML_TEST_LOADER_HTML);
   source->SetDefaultResource(IDR_CROSTINI_UPGRADER_INDEX_HTML);
   source->UseStringsJs();
   source->EnableReplaceI18nInJS();

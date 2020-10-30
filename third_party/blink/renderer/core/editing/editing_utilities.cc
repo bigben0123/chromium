@@ -556,12 +556,15 @@ static PositionTemplate<Strategy> NextVisuallyDistinctCandidateAlgorithm(
   PositionIteratorAlgorithm<Strategy> p(position);
   const PositionTemplate<Strategy> downstream_start =
       MostForwardCaretPosition(position);
+  const PositionTemplate<Strategy> upstream_start =
+      MostBackwardCaretPosition(position);
 
   p.Increment();
   while (!p.AtEnd()) {
     PositionTemplate<Strategy> candidate = p.ComputePosition();
     if (IsVisuallyEquivalentCandidate(candidate) &&
-        MostForwardCaretPosition(candidate) != downstream_start)
+        MostForwardCaretPosition(candidate) != downstream_start &&
+        MostBackwardCaretPosition(candidate) != upstream_start)
       return candidate;
 
     p.Increment();
@@ -620,12 +623,15 @@ PositionTemplate<Strategy> PreviousVisuallyDistinctCandidateAlgorithm(
   PositionIteratorAlgorithm<Strategy> p(position);
   PositionTemplate<Strategy> downstream_start =
       MostForwardCaretPosition(position);
+  const PositionTemplate<Strategy> upstream_start =
+      MostBackwardCaretPosition(position);
 
   p.Decrement();
   while (!p.AtStart()) {
     PositionTemplate<Strategy> candidate = p.ComputePosition();
     if (IsVisuallyEquivalentCandidate(candidate) &&
-        MostForwardCaretPosition(candidate) != downstream_start)
+        MostForwardCaretPosition(candidate) != downstream_start &&
+        MostBackwardCaretPosition(candidate) != upstream_start)
       return candidate;
 
     p.Decrement();
@@ -1346,6 +1352,25 @@ PositionWithAffinity PositionRespectingEditingBoundary(
   }
 
   return target_object->PositionForPoint(selection_end_point);
+}
+
+PositionWithAffinity AdjustForEditingBoundary(
+    const PositionWithAffinity& position_with_affinity) {
+  if (position_with_affinity.IsNull())
+    return position_with_affinity;
+  const Position& position = position_with_affinity.GetPosition();
+  const Node& node = *position.ComputeContainerNode();
+  if (HasEditableStyle(node))
+    return position_with_affinity;
+  const Position& forward =
+      MostForwardCaretPosition(position, kCanCrossEditingBoundary);
+  if (HasEditableStyle(*forward.ComputeContainerNode()))
+    return PositionWithAffinity(forward);
+  const Position& backward =
+      MostBackwardCaretPosition(position, kCanCrossEditingBoundary);
+  if (HasEditableStyle(*backward.ComputeContainerNode()))
+    return PositionWithAffinity(backward);
+  return position_with_affinity;
 }
 
 Position ComputePositionForNodeRemoval(const Position& position,

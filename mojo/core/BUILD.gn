@@ -19,6 +19,7 @@ component("embedder_internal") {
     ":test_sources",
     "//mojo:*",
     "//mojo/core/embedder",
+    "//mojo/core/test:test_support",
   ]
 }
 
@@ -58,6 +59,7 @@ template("core_impl_source_set") {
       "handle_table.h",
       "invitation_dispatcher.h",
       "message_pipe_dispatcher.h",
+      "node_channel.h",
       "node_controller.h",
       "options_validation.h",
       "platform_handle_dispatcher.h",
@@ -72,9 +74,7 @@ template("core_impl_source_set") {
     sources = [
       "atomic_flag.h",
       "broker.h",
-      "broker_win.cc",
       "channel.cc",
-      "channel_win.cc",
       "configuration.cc",
       "connection_params.cc",
       "core.cc",
@@ -87,7 +87,6 @@ template("core_impl_source_set") {
       "invitation_dispatcher.cc",
       "message_pipe_dispatcher.cc",
       "node_channel.cc",
-      "node_channel.h",
       "node_controller.cc",
       "platform_handle_dispatcher.cc",
       "platform_handle_in_transit.cc",
@@ -155,6 +154,10 @@ template("core_impl_source_set") {
     }
 
     if (is_win) {
+      sources += [
+        "broker_win.cc",
+        "channel_win.cc",
+      ]
       cflags = [ "/wd4324" ]  # Structure was padded due to __declspec(align()),
                               # which is uninteresting.
     }
@@ -216,16 +219,16 @@ if (is_chromeos || is_linux || is_android || is_win) {
     }
 
     copy("shared_library_arc32") {
-      sources = [ "${root_out_dir}/${android32_toolchain}/libmojo_core.so" ]
-      outputs = [ "${root_out_dir}/libmojo_core_arc32.so" ]
+      sources = [ "${root_build_dir}/${android32_toolchain}/libmojo_core.so" ]
+      outputs = [ "${root_build_dir}/libmojo_core_arc32.so" ]
       deps = [
         ":shared_library(//build/toolchain/android:${android32_toolchain})",
       ]
     }
 
     copy("shared_library_arc64") {
-      sources = [ "${root_out_dir}/${android64_toolchain}/libmojo_core.so" ]
-      outputs = [ "${root_out_dir}/libmojo_core_arc64.so" ]
+      sources = [ "${root_build_dir}/${android64_toolchain}/libmojo_core.so" ]
+      outputs = [ "${root_build_dir}/libmojo_core_arc64.so" ]
       deps = [
         ":shared_library(//build/toolchain/android:${android64_toolchain})",
       ]
@@ -293,6 +296,7 @@ source_set("test_sources") {
     "handle_table_unittest.cc",
     "message_pipe_unittest.cc",
     "message_unittest.cc",
+    "node_channel_unittest.cc",
     "options_validation_unittest.cc",
     "platform_handle_dispatcher_unittest.cc",
     "quota_unittest.cc",
@@ -391,6 +395,7 @@ fuzzer_test("mojo_core_node_channel_fuzzer") {
   deps = [
     ":core_impl_for_fuzzers",
     "//base",
+    "//mojo/core/test:test_support",
     "//mojo/public/cpp/platform",
   ]
 }

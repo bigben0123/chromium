@@ -9,7 +9,6 @@ import android.text.TextUtils;
 
 import androidx.annotation.DrawableRes;
 
-import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
@@ -18,11 +17,12 @@ import org.chromium.chrome.browser.omnibox.OmniboxSuggestionType;
 import org.chromium.chrome.browser.omnibox.UrlBarEditingTextStateProvider;
 import org.chromium.chrome.browser.omnibox.suggestions.OmniboxSuggestion;
 import org.chromium.chrome.browser.omnibox.suggestions.OmniboxSuggestionUiType;
+import org.chromium.chrome.browser.omnibox.suggestions.SuggestionHost;
 import org.chromium.chrome.browser.omnibox.suggestions.base.BaseSuggestionViewProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.base.SuggestionDrawableState;
 import org.chromium.chrome.browser.omnibox.suggestions.base.SuggestionSpannable;
 import org.chromium.chrome.browser.omnibox.suggestions.basic.SuggestionViewProperties.SuggestionIcon;
-import org.chromium.chrome.browser.ui.favicon.LargeIconBridge;
+import org.chromium.components.favicon.LargeIconBridge;
 import org.chromium.ui.modelutil.PropertyModel;
 
 import java.util.ArrayList;
@@ -66,13 +66,6 @@ public class BasicSuggestionProcessor extends BaseSuggestionViewProcessor {
         return new PropertyModel(SuggestionViewProperties.ALL_KEYS);
     }
 
-    @Override
-    public void recordItemPresented(PropertyModel model) {
-        RecordHistogram.recordEnumeratedHistogram("Omnibox.IconOrFaviconShown",
-                model.get(SuggestionViewProperties.SUGGESTION_ICON_TYPE),
-                SuggestionIcon.TOTAL_COUNT);
-    }
-
     /**
      * Returns suggestion icon to be presented for specified omnibox suggestion.
      *
@@ -91,6 +84,9 @@ public class BasicSuggestionProcessor extends BaseSuggestionViewProcessor {
                     return SuggestionIcon.HISTORY;
 
                 default:
+                    if (suggestion.getSubtypes().contains(/* SUBTYPE_TRENDS = */ 143)) {
+                        return SuggestionIcon.TRENDS;
+                    }
                     return SuggestionIcon.MAGNIFIER;
             }
         } else {
@@ -127,6 +123,10 @@ public class BasicSuggestionProcessor extends BaseSuggestionViewProcessor {
 
             case SuggestionIcon.VOICE:
                 icon = R.drawable.btn_mic;
+                break;
+
+            case SuggestionIcon.TRENDS:
+                icon = R.drawable.trending_up_black_24dp;
                 break;
 
             default:

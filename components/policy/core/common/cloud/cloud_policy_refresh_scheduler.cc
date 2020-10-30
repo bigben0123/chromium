@@ -303,6 +303,7 @@ void CloudPolicyRefreshScheduler::ScheduleRefresh() {
       return;
     case DM_STATUS_SERVICE_ACTIVATION_PENDING:
     case DM_STATUS_SERVICE_POLICY_NOT_FOUND:
+    case DM_STATUS_SERVICE_TOO_MANY_REQUESTS:
       RefreshAfter(GetActualRefreshDelay());
       return;
     case DM_STATUS_REQUEST_FAILED:
@@ -327,6 +328,7 @@ void CloudPolicyRefreshScheduler::ScheduleRefresh() {
     case DM_STATUS_SERVICE_CONSUMER_ACCOUNT_WITH_PACKAGED_LICENSE:
     case DM_STATUS_SERVICE_ENTERPRISE_ACCOUNT_IS_NOT_ELIGIBLE_TO_ENROLL:
     case DM_STATUS_SERVICE_ENTERPRISE_TOS_HAS_NOT_BEEN_ACCEPTED:
+    case DM_STATUS_SERVICE_ILLEGAL_ACCOUNT_FOR_PACKAGED_EDU_LICENSE:
       // Need a re-registration, no use in retrying.
       CancelRefresh();
       return;

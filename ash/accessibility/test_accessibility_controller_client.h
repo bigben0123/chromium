@@ -40,6 +40,7 @@ class TestAccessibilityControllerClient : public AccessibilityControllerClient {
   void RequestSelectToSpeakStateChange() override;
   void RequestAutoclickScrollableBoundsForPoint(
       gfx::Point& point_in_screen) override;
+  void MagnifierBoundsChanged(const gfx::Rect& bounds_in_screen) override;
   void OnSwitchAccessDisabled() override;
 
   int32_t GetPlayedEarconAndReset();
@@ -49,10 +50,11 @@ class TestAccessibilityControllerClient : public AccessibilityControllerClient {
   int select_to_speak_change_change_requests() const {
     return select_to_speak_state_change_requests_;
   }
+  const std::string& last_alert_message() const { return last_alert_message_; }
 
  private:
   AccessibilityAlert last_a11y_alert_ = AccessibilityAlert::NONE;
-
+  std::string last_alert_message_;
   int32_t sound_key_ = -1;
   bool is_dictation_active_ = false;
 

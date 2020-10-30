@@ -12,7 +12,6 @@
 #include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "chrome/common/chrome_render_frame.mojom.h"
-#include "components/prerender/common/prerender_types.mojom.h"
 #include "components/safe_browsing/buildflags.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "mojo/public/cpp/bindings/associated_receiver_set.h"
@@ -92,8 +91,6 @@ class ChromeRenderFrameObserver : public content::RenderFrameObserver,
   void SetCCTClientHeader(const std::string& header) override;
 #endif
   void GetMediaFeedURL(GetMediaFeedURLCallback callback) override;
-  void SetIsPrerendering(prerender::mojom::PrerenderMode mode,
-                         const std::string& histogram_prefix) override;
 
   // Initialize a |phishing_classifier_delegate_|.
   void SetClientSidePhishingDetection();
@@ -128,7 +125,7 @@ class ChromeRenderFrameObserver : public content::RenderFrameObserver,
 
   // Have the same lifetime as us.
   translate::TranslateAgent* translate_agent_;
-#if BUILDFLAG(FULL_SAFE_BROWSING)
+#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
   safe_browsing::PhishingClassifierDelegate* phishing_classifier_ = nullptr;
 #endif
 

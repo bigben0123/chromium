@@ -2,8 +2,10 @@
 
 <link rel="import" href="chrome://resources/cr_components/chromeos/network/network_select.html">
 <link rel="import" href="chrome://resources/cr_components/chromeos/network/onc_mojo.html">
+<link rel="import" href="chrome://resources/cr_components/chromeos/network_health/network_diagnostics.html">
 <link rel="import" href="chrome://resources/cr_components/chromeos/network_health/network_health_summary.html">
 <link rel="import" href="chrome://resources/cr_elements/cr_button/cr_button.html">
+<link rel="import" href="chrome://resources/cr_elements/cr_input/cr_input.html">
 <link rel="import" href="chrome://resources/cr_elements/cr_tabs/cr_tabs.html">
 <link rel="import" href="chrome://resources/mojo/mojo/public/js/mojo_bindings_lite.html">
 <link rel="import" href="chrome://resources/mojo/chromeos/services/network_config/public/mojom/cros_network_config.mojom.html">
@@ -37,7 +39,7 @@
         flex: 1;
         position: relative;
       }
-      
+
       network-select {
         flex: 1;
       }
@@ -55,6 +57,13 @@
         <div>
           <h2>$i18n{globalPolicyLabel}</h2>
           <div id="global-policy"></div>
+        </div>
+
+        <div>
+          <h2>$i18n{dhcpHostnameLabel}</h2>
+          <cr-input id="hostnameInput" value="{{hostname_}}"
+              on-change="onHostnameChanged_">
+          </cr-input>
         </div>
 
         <div>
@@ -86,6 +95,10 @@
       <div class="tabpanel" id="health">
         <h2>$i18n{networkHealthLabel}</h2>
         <network-health-summary></network-health-summary>
+        <h2>$i18n{networkDiagnosticsLabel}</h2>
+        <network-diagnostics
+            on-open-feedback-dialog="onOpenFeedbackDialog_">
+        </network-diagnostics>
       </div>
 
       <div class="tabpanel" id="logs">

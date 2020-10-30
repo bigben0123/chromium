@@ -107,9 +107,8 @@ struct CORE_EXPORT FrameLoadRequest {
   }
 
   // The javascript world in which this request initiated.
-  const DOMWrapperWorld& JavascriptWorld() const {
-    // Assume the main world if |world_| is not specified.
-    return world_ ? *world_ : DOMWrapperWorld::MainWorld();
+  const scoped_refptr<const DOMWrapperWorld>& JavascriptWorld() const {
+    return world_;
   }
 
   // The BlobURLToken that should be used when fetching the resource. This
@@ -136,9 +135,7 @@ struct CORE_EXPORT FrameLoadRequest {
   }
   void SetFeaturesForWindowOpen(const WebWindowFeatures& features) {
     window_features_ = features;
-    is_window_open_ = true;
   }
-  bool IsWindowOpen() const { return is_window_open_; }
 
   void SetNoOpener() { window_features_.noopener = true; }
   void SetNoReferrer() {
@@ -176,7 +173,6 @@ struct CORE_EXPORT FrameLoadRequest {
   mojom::RequestContextFrameType frame_type_ =
       mojom::RequestContextFrameType::kNone;
   WebWindowFeatures window_features_;
-  bool is_window_open_ = false;
   base::Optional<WebImpression> impression_;
 };
 

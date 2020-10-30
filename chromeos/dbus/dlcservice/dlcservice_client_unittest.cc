@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/run_loop.h"
 #include "base/test/task_environment.h"
 #include "dbus/mock_bus.h"
@@ -60,6 +61,8 @@ class DlcserviceClientTest : public testing::Test {
     EXPECT_CALL(*mock_proxy_.get(),
                 DoConnectToSignal(dlcservice::kDlcServiceInterface, _, _, _))
         .WillOnce(Invoke(this, &DlcserviceClientTest::ConnectToSignal));
+
+    EXPECT_CALL(*mock_proxy_.get(), DoWaitForServiceToBeAvailable(_)).Times(1);
 
     DlcserviceClient::Initialize(mock_bus_.get());
     client_ = DlcserviceClient::Get();
@@ -280,8 +283,7 @@ TEST_F(DlcserviceClientTest, InstallSuccessTest) {
       base::BindOnce([](const DlcserviceClient::InstallResult& install_result) {
         EXPECT_EQ(dlcservice::kErrorNone, install_result.error);
       });
-  client_->Install("foo-dlc", std::move(install_callback),
-                   DlcserviceClient::IgnoreProgress);
+  client_->Install("foo-dlc", std::move(install_callback), base::DoNothing());
   base::RunLoop().RunUntilIdle();
 }
 
@@ -300,8 +302,7 @@ TEST_F(DlcserviceClientTest, InstallFailureTest) {
       base::BindOnce([](const DlcserviceClient::InstallResult& install_result) {
         EXPECT_EQ(dlcservice::kErrorInternal, install_result.error);
       });
-  client_->Install("foo-dlc", std::move(install_callback),
-                   DlcserviceClient::IgnoreProgress);
+  client_->Install("foo-dlc", std::move(install_callback), base::DoNothing());
   base::RunLoop().RunUntilIdle();
 }
 
@@ -371,8 +372,7 @@ TEST_F(DlcserviceClientTest, InstallBusyStatusTest) {
       base::BindOnce([](const DlcserviceClient::InstallResult& install_result) {
         EXPECT_EQ(dlcservice::kErrorNone, install_result.error);
       });
-  client_->Install("foo-dlc", std::move(install_callback),
-                   DlcserviceClient::IgnoreProgress);
+  client_->Install("foo-dlc", std::move(install_callback), base::DoNothing());
   base::RunLoop().RunUntilIdle();
 }
 
@@ -393,8 +393,7 @@ TEST_F(DlcserviceClientTest, PendingTaskTest) {
         },
         &counter);
     responses_.push_back(dbus::Response::CreateEmpty());
-    client_->Install({}, std::move(install_callback),
-                     DlcserviceClient::IgnoreProgress);
+    client_->Install({}, std::move(install_callback), base::DoNothing());
   }
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(0u, counter.load());

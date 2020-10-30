@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/events/event.h"
 #include "ui/ozone/platform/wayland/common/wayland_object.h"
 #include "ui/ozone/platform/wayland/host/wayland_clipboard.h"
 #include "ui/ozone/platform/wayland/host/wayland_data_drag_controller.h"
@@ -35,9 +36,17 @@ class WaylandDataDeviceManager;
 class WaylandCursorPosition;
 class WaylandWindowDragController;
 class GtkPrimarySelectionDeviceManager;
+class ZwpPrimarySelectionDeviceManager;
+class XdgForeignWrapper;
 
 class WaylandConnection {
  public:
+  // Stores the last serial and the event type it is associated with.
+  struct EventSerial {
+    uint32_t serial = 0;
+    EventType event_type = EventType::ET_UNKNOWN;
+  };
+
   WaylandConnection();
   WaylandConnection(const WaylandConnection&) = delete;
   WaylandConnection& operator=(const WaylandConnection&) = delete;
@@ -48,23 +57,40 @@ class WaylandConnection {
   // Schedules a flush of the Wayland connection.
   void ScheduleFlush();
 
+  // Sets a callback that that shutdowns the browser in case of unrecoverable
+  // error. Called by WaylandEventWatcher.
+  void SetShutdownCb(base::OnceCallback<void()> shutdown_cb);
+
   wl_display* display() const { return display_.get(); }
   wl_compositor* compositor() const { return compositor_.get(); }
   uint32_t compositor_version() const { return compositor_version_; }
   wl_subcompositor* subcompositor() const { return subcompositor_.get(); }
+  wp_viewporter* viewporter() const { return viewporter_.get(); }
   xdg_wm_base* shell() const { return shell_.get(); }
   zxdg_shell_v6* shell_v6() const { return shell_v6_.get(); }
+  zaura_shell* aura_shell() const { return aura_shell_.get(); }
   wl_seat* seat() const { return seat_.get(); }
   wp_presentation* presentation() const { return presentation_.get(); }
   zwp_text_input_manager_v1* text_input_manager_v1() const {
     return text_input_manager_v1_.get();
   }
+  zwp_linux_explicit_synchronization_v1* linux_explicit_synchronization_v1()
+      const {
+    return linux_explicit_synchronization_.get();
+  }
+  zxdg_decoration_manager_v1* xdg_decoration_manager_v1() const {
+    return xdg_decoration_manager_.get();
+  }
 
-  void set_serial(uint32_t serial) { serial_ = serial; }
-  uint32_t serial() const { return serial_; }
+  void set_serial(uint32_t serial, EventType event_type) {
+    serial_ = {serial, event_type};
+  }
+  uint32_t serial() const { return serial_.serial; }
+  EventSerial event_serial() const { return serial_; }
 
   void SetCursorBitmap(const std::vector<SkBitmap>& bitmaps,
-                       const gfx::Point& location);
+                       const gfx::Point& hotspot_in_dips,
+                       int buffer_scale);
 
   WaylandEventSource* event_source() const { return event_source_.get(); }
 
@@ -106,8 +132,13 @@ class WaylandConnection {
     return data_device_manager_.get();
   }
 
-  GtkPrimarySelectionDeviceManager* primary_selection_device_manager() const {
-    return primary_selection_device_manager_.get();
+  GtkPrimarySelectionDeviceManager* gtk_primary_selection_device_manager()
+      const {
+    return gtk_primary_selection_device_manager_.get();
+  }
+
+  ZwpPrimarySelectionDeviceManager* zwp_primary_selection_device_manager() const {
+    return zwp_primary_selection_device_manager_.get();
   }
 
   WaylandDataDragController* data_drag_controller() const {
@@ -117,6 +148,8 @@ class WaylandConnection {
   WaylandWindowDragController* window_drag_controller() const {
     return window_drag_controller_.get();
   }
+
+  XdgForeignWrapper* xdg_foreign() const { return xdg_foreign_.get(); }
 
   // Returns true when dragging is entered or started.
   bool IsDragInProgress() const;
@@ -163,8 +196,13 @@ class WaylandConnection {
   wl::Object<xdg_wm_base> shell_;
   wl::Object<zxdg_shell_v6> shell_v6_;
   wl::Object<wp_presentation> presentation_;
+  wl::Object<wp_viewporter> viewporter_;
   wl::Object<zcr_keyboard_extension_v1> keyboard_extension_v1_;
   wl::Object<zwp_text_input_manager_v1> text_input_manager_v1_;
+  wl::Object<zaura_shell> aura_shell_;
+  wl::Object<zwp_linux_explicit_synchronization_v1>
+      linux_explicit_synchronization_;
+  wl::Object<zxdg_decoration_manager_v1> xdg_decoration_manager_;
 
   // Event source instance. Must be declared before input objects so it
   // outlives them so thus being able to properly handle their destruction.
@@ -184,9 +222,13 @@ class WaylandConnection {
   std::unique_ptr<WaylandDrm> drm_;
   std::unique_ptr<WaylandShm> shm_;
   std::unique_ptr<WaylandBufferManagerHost> buffer_manager_host_;
+  std::unique_ptr<XdgForeignWrapper> xdg_foreign_;
 
   std::unique_ptr<GtkPrimarySelectionDeviceManager>
-      primary_selection_device_manager_;
+      gtk_primary_selection_device_manager_;
+
+  std::unique_ptr<ZwpPrimarySelectionDeviceManager>
+      zwp_primary_selection_device_manager_;
 
   std::unique_ptr<WaylandDataDragController> data_drag_controller_;
   std::unique_ptr<WaylandWindowDragController> window_drag_controller_;
@@ -196,7 +238,7 @@ class WaylandConnection {
 
   bool scheduled_flush_ = false;
 
-  uint32_t serial_ = 0;
+  EventSerial serial_;
 };
 
 }  // namespace ui

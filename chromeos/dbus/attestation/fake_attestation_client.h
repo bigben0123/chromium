@@ -8,6 +8,9 @@
 #include "chromeos/dbus/attestation/attestation_client.h"
 
 #include <deque>
+#include <map>
+#include <string>
+#include <vector>
 
 #include "base/component_export.h"
 #include "chromeos/dbus/attestation/interface.pb.h"
@@ -94,12 +97,75 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS_ATTESTATION) FakeAttestationClient
   void ConfigureEnrollmentPreparations(bool is_prepared) override;
   void ConfigureEnrollmentPreparationsSequence(
       std::deque<bool> sequence) override;
+  void ConfigureEnrollmentPreparationsStatus(
+      ::attestation::AttestationStatus status) override;
+  ::attestation::GetStatusReply* mutable_status_reply() override;
+  void AllowlistCertificateRequest(
+      const ::attestation::GetCertificateRequest& request) override;
+  void AllowlistLegacyCreateCertificateRequest(
+      const std::string& username,
+      const std::string& request_origin,
+      ::attestation::CertificateProfile profile,
+      ::attestation::KeyType key_type) override;
+  ::attestation::CreateCertificateRequestReply*
+  mutable_certificate_request_reply() override;
+  const std::vector<::attestation::DeleteKeysRequest>& delete_keys_history()
+      const override;
+  void ClearDeleteKeysHistory() override;
+  void set_enrollment_id_ignore_cache(const std::string& id) override;
+  void set_cached_enrollment_id(const std::string& id) override;
+  void set_enrollment_id_dbus_error_count(int count) override;
+  ::attestation::GetKeyInfoReply* GetMutableKeyInfoReply(
+      const std::string& username,
+      const std::string& label) override;
 
   AttestationClient::TestInterface* GetTestInterface() override;
 
  private:
-  bool is_prepared_{false};
+  ::attestation::AttestationStatus preparations_status_ =
+      ::attestation::STATUS_SUCCESS;
+  bool is_prepared_ = true;
   std::deque<bool> preparation_sequences_;
+
+  ::attestation::GetStatusReply status_reply_;
+
+  ::attestation::CreateCertificateRequestReply certificate_request_reply_;
+
+  // Maintains the allowlisted certificate requests.
+  std::vector<::attestation::GetCertificateRequest> allowlisted_requests_;
+
+  // Maintains the allowlisted legacy create-certificate requests.
+  std::vector<::attestation::CreateCertificateRequestRequest>
+      allowlisted_create_requests_;
+
+  // Maintains the numbers assigned to the allowlisted requests.
+  std::vector<int> certificate_indices_;
+  // The count of certificates that has been issued.
+  int certificate_count_ = 0;
+
+  // Maintains the input request history of `DeleteKeys()`.
+  std::vector<::attestation::DeleteKeysRequest> delete_keys_history_;
+
+  // Maintains building components reply to `GetEnrollmentId()`.
+  std::string enrollment_id_;
+  std::string enrollment_id_ignore_cache_;
+  int enrollment_id_dbus_error_count_ = 0;
+
+  class GetKeyInfoRequestComparator {
+   public:
+    bool operator()(const ::attestation::GetKeyInfoRequest& r1,
+                    const ::attestation::GetKeyInfoRequest& r2) const {
+      return r1.username() == r2.username() ? r1.key_label() < r2.key_label()
+                                            : r1.username() < r2.username();
+    }
+  };
+  // The fake key info database. std::map is chosen because we don't have to
+  // implement the hash function for the `GetKeyInfoRequest`, which could be
+  // expensive and contributes unreasonable overhead at smaller scale, anyway.
+  std::map<::attestation::GetKeyInfoRequest,
+           ::attestation::GetKeyInfoReply,
+           GetKeyInfoRequestComparator>
+      key_info_database_;
 };
 
 }  // namespace chromeos

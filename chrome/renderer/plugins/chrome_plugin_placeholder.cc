@@ -14,7 +14,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/buildflags.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/renderer_resources.h"
@@ -22,9 +21,8 @@
 #include "chrome/renderer/custom_menu_commands.h"
 #include "chrome/renderer/plugins/plugin_preroller.h"
 #include "chrome/renderer/plugins/plugin_uma.h"
-#include "chrome/renderer/prerender/prerender_observer_list.h"
 #include "components/content_settings/renderer/content_settings_agent_impl.h"
-#include "components/prerender/common/prerender_messages.h"
+#include "components/prerender/renderer/prerender_observer_list.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/untrustworthy_context_menu_params.h"
@@ -77,8 +75,11 @@ ChromePluginPlaceholder::ChromePluginPlaceholder(
 
 ChromePluginPlaceholder::~ChromePluginPlaceholder() {
   RenderThread::Get()->RemoveObserver(this);
-  prerender::PrerenderObserverList::RemoveObserverForFrame(render_frame(),
-                                                           this);
+
+  if (render_frame()) {
+    prerender::PrerenderObserverList::RemoveObserverForFrame(render_frame(),
+                                                             this);
+  }
 
   if (context_menu_request_id_ && render_frame())
     render_frame()->CancelContextMenu(context_menu_request_id_);

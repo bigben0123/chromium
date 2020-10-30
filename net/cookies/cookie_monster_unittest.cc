@@ -59,11 +59,6 @@ using base::Time;
 using base::TimeDelta;
 using CookieDeletionInfo = net::CookieDeletionInfo;
 using features::kCookiesWithoutSameSiteMustBeSecure;
-using features::kRecentCreationTimeGrantsLegacyCookieSemantics;
-using features::kRecentCreationTimeGrantsLegacyCookieSemanticsMilliseconds;
-using features::kRecentHttpSameSiteAccessGrantsLegacyCookieSemantics;
-using features::
-    kRecentHttpSameSiteAccessGrantsLegacyCookieSemanticsMilliseconds;
 using features::kSameSiteByDefaultCookies;
 
 namespace {
@@ -148,10 +143,10 @@ class CookieMonsterTestBase : public CookieStoreTest<T> {
 
   bool SetAllCookies(CookieMonster* cm, const CookieList& list) {
     DCHECK(cm);
-    ResultSavingCookieCallback<CookieInclusionStatus> callback;
+    ResultSavingCookieCallback<CookieAccessResult> callback;
     cm->SetAllCookiesAsync(list, callback.MakeCallback());
     callback.WaitUntilDone();
-    return callback.result().IsInclude();
+    return callback.result().status.IsInclude();
   }
 
   bool SetCookieWithCreationTime(CookieMonster* cm,
@@ -160,13 +155,13 @@ class CookieMonsterTestBase : public CookieStoreTest<T> {
                                  base::Time creation_time) {
     DCHECK(cm);
     DCHECK(!creation_time.is_null());
-    ResultSavingCookieCallback<CookieInclusionStatus> callback;
+    ResultSavingCookieCallback<CookieAccessResult> callback;
     cm->SetCanonicalCookieAsync(
         CanonicalCookie::Create(url, cookie_line, creation_time,
                                 base::nullopt /* server_time */),
         url, CookieOptions::MakeAllInclusive(), callback.MakeCallback());
     callback.WaitUntilDone();
-    return callback.result().IsInclude();
+    return callback.result().status.IsInclude();
   }
 
   uint32_t DeleteAllCreatedInTimeRange(CookieMonster* cm,
@@ -981,7 +976,7 @@ TEST_F(DeferredCookieTaskTest, DeferredSetCookie) {
   // Generate puts to store w/o needing a proper expiration.
   cookie_monster_->SetPersistSessionCookies(true);
 
-  ResultSavingCookieCallback<CookieInclusionStatus> call1;
+  ResultSavingCookieCallback<CookieAccessResult> call1;
   cookie_monster_->SetCanonicalCookieAsync(
       CanonicalCookie::Create(http_www_foo_.url(), "A=B", base::Time::Now(),
                               base::nullopt /* server_time */),
@@ -992,17 +987,17 @@ TEST_F(DeferredCookieTaskTest, DeferredSetCookie) {
 
   ExecuteLoads(CookieStoreCommand::LOAD_COOKIES_FOR_KEY);
   call1.WaitUntilDone();
-  EXPECT_TRUE(call1.result().IsInclude());
+  EXPECT_TRUE(call1.result().status.IsInclude());
   EXPECT_EQ("LOAD; LOAD_FOR_KEY:foo.com; ADD; ", TakeCommandSummary());
 
-  ResultSavingCookieCallback<CookieInclusionStatus> call2;
+  ResultSavingCookieCallback<CookieAccessResult> call2;
   cookie_monster_->SetCanonicalCookieAsync(
       CanonicalCookie::Create(http_www_foo_.url(), "X=Y", base::Time::Now(),
                               base::nullopt /* server_time */),
       http_www_foo_.url(), CookieOptions::MakeAllInclusive(),
       call2.MakeCallback());
   ASSERT_TRUE(call2.was_run());
-  EXPECT_TRUE(call2.result().IsInclude());
+  EXPECT_TRUE(call2.result().status.IsInclude());
   EXPECT_EQ("ADD; ", TakeCommandSummary());
 }
 
@@ -1020,21 +1015,21 @@ TEST_F(DeferredCookieTaskTest, DeferredSetAllCookies) {
                                  false, true, CookieSameSite::NO_RESTRICTION,
                                  COOKIE_PRIORITY_DEFAULT));
 
-  ResultSavingCookieCallback<CookieInclusionStatus> call1;
+  ResultSavingCookieCallback<CookieAccessResult> call1;
   cookie_monster_->SetAllCookiesAsync(list, call1.MakeCallback());
   base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(call1.was_run());
 
   ExecuteLoads(CookieStoreCommand::LOAD);
   call1.WaitUntilDone();
-  EXPECT_TRUE(call1.result().IsInclude());
+  EXPECT_TRUE(call1.result().status.IsInclude());
   EXPECT_EQ("LOAD; ADD; ADD; ", TakeCommandSummary());
 
   // 2nd set doesn't need to read from store. It erases the old cookies, though.
-  ResultSavingCookieCallback<CookieInclusionStatus> call2;
+  ResultSavingCookieCallback<CookieAccessResult> call2;
   cookie_monster_->SetAllCookiesAsync(list, call2.MakeCallback());
   ASSERT_TRUE(call2.was_run());
-  EXPECT_TRUE(call2.result().IsInclude());
+  EXPECT_TRUE(call2.result().status.IsInclude());
   EXPECT_EQ("REMOVE; REMOVE; ADD; ADD; ", TakeCommandSummary());
 }
 
@@ -1232,7 +1227,7 @@ TEST_F(DeferredCookieTaskTest, DeferredTaskOrder) {
 
   bool get_cookie_list_callback_was_run = false;
   GetCookieListCallback get_cookie_list_callback_deferred;
-  ResultSavingCookieCallback<CookieInclusionStatus> set_cookies_callback;
+  ResultSavingCookieCallback<CookieAccessResult> set_cookies_callback;
   base::RunLoop run_loop;
   cookie_monster_->GetCookieListWithOptionsAsync(
       http_www_foo_.url(), CookieOptions::MakeAllInclusive(),
@@ -1273,7 +1268,7 @@ TEST_F(DeferredCookieTaskTest, DeferredTaskOrder) {
   EXPECT_EQ("LOAD; LOAD_FOR_KEY:foo.com; ADD; ", TakeCommandSummary());
   EXPECT_TRUE(get_cookie_list_callback_was_run);
   ASSERT_TRUE(set_cookies_callback.was_run());
-  EXPECT_TRUE(set_cookies_callback.result().IsInclude());
+  EXPECT_TRUE(set_cookies_callback.result().status.IsInclude());
 
   ASSERT_TRUE(get_cookie_list_callback_deferred.was_run());
   EXPECT_THAT(get_cookie_list_callback_deferred.cookies(),
@@ -1487,38 +1482,38 @@ TEST_F(CookieMonsterTest, SetCookieableSchemes) {
   base::Optional<base::Time> server_time = base::nullopt;
   EXPECT_TRUE(
       CreateAndSetCookieReturnStatus(cm.get(), http_url, "x=1").IsInclude());
-  EXPECT_TRUE(SetCanonicalCookieReturnStatus(
+  EXPECT_TRUE(SetCanonicalCookieReturnAccessResult(
                   cm.get(),
                   CanonicalCookie::Create(http_url, "y=1", now, server_time),
                   http_url, false /*modify_httponly*/)
-                  .IsInclude());
+                  .status.IsInclude());
 
   EXPECT_TRUE(CreateAndSetCookieReturnStatus(cm.get(), foo_url, "x=1")
                   .HasExactlyExclusionReasonsForTesting(
                       {CookieInclusionStatus::EXCLUDE_NONCOOKIEABLE_SCHEME}));
-  EXPECT_TRUE(SetCanonicalCookieReturnStatus(
+  EXPECT_TRUE(SetCanonicalCookieReturnAccessResult(
                   cm.get(),
                   CanonicalCookie::Create(foo_url, "y=1", now, server_time),
                   foo_url, false /*modify_httponly*/)
-                  .HasExactlyExclusionReasonsForTesting(
+                  .status.HasExactlyExclusionReasonsForTesting(
                       {CookieInclusionStatus::EXCLUDE_NONCOOKIEABLE_SCHEME}));
 
   EXPECT_TRUE(
       CreateAndSetCookieReturnStatus(cm_foo.get(), foo_url, "x=1").IsInclude());
-  EXPECT_TRUE(SetCanonicalCookieReturnStatus(
+  EXPECT_TRUE(SetCanonicalCookieReturnAccessResult(
                   cm_foo.get(),
                   CanonicalCookie::Create(foo_url, "y=1", now, server_time),
                   foo_url, false /*modify_httponly*/)
-                  .IsInclude());
+                  .status.IsInclude());
 
   EXPECT_TRUE(CreateAndSetCookieReturnStatus(cm_foo.get(), http_url, "x=1")
                   .HasExactlyExclusionReasonsForTesting(
                       {CookieInclusionStatus::EXCLUDE_NONCOOKIEABLE_SCHEME}));
-  EXPECT_TRUE(SetCanonicalCookieReturnStatus(
+  EXPECT_TRUE(SetCanonicalCookieReturnAccessResult(
                   cm_foo.get(),
                   CanonicalCookie::Create(http_url, "y=1", now, server_time),
                   http_url, false /*modify_httponly*/)
-                  .HasExactlyExclusionReasonsForTesting(
+                  .status.HasExactlyExclusionReasonsForTesting(
                       {CookieInclusionStatus::EXCLUDE_NONCOOKIEABLE_SCHEME}));
 }
 
@@ -2234,7 +2229,7 @@ TEST_F(CookieMonsterTest, WhileLoadingLoadCompletesBeforeKeyLoadCompletes) {
 
   auto cookie = CanonicalCookie::Create(kUrl, "a=b", base::Time::Now(),
                                         base::nullopt /* server_time */);
-  ResultSavingCookieCallback<CookieInclusionStatus> set_cookie_callback;
+  ResultSavingCookieCallback<CookieAccessResult> set_cookie_callback;
   cm->SetCanonicalCookieAsync(std::move(cookie), kUrl,
                               CookieOptions::MakeAllInclusive(),
                               set_cookie_callback.MakeCallback());
@@ -2254,7 +2249,7 @@ TEST_F(CookieMonsterTest, WhileLoadingLoadCompletesBeforeKeyLoadCompletes) {
   // The tasks should run in order, and the get should see the cookies.
 
   set_cookie_callback.WaitUntilDone();
-  EXPECT_TRUE(set_cookie_callback.result().IsInclude());
+  EXPECT_TRUE(set_cookie_callback.result().status.IsInclude());
 
   get_cookies_callback1.WaitUntilDone();
   EXPECT_EQ(1u, get_cookies_callback1.cookies().size());
@@ -2322,7 +2317,7 @@ TEST_F(CookieMonsterTest, WhileLoadingGetAllSetGetAll) {
 
   auto cookie = CanonicalCookie::Create(kUrl, "a=b", base::Time::Now(),
                                         base::nullopt /* server_time */);
-  ResultSavingCookieCallback<CookieInclusionStatus> set_cookie_callback;
+  ResultSavingCookieCallback<CookieAccessResult> set_cookie_callback;
   cm->SetCanonicalCookieAsync(std::move(cookie), kUrl,
                               CookieOptions::MakeAllInclusive(),
                               set_cookie_callback.MakeCallback());
@@ -2341,7 +2336,7 @@ TEST_F(CookieMonsterTest, WhileLoadingGetAllSetGetAll) {
   EXPECT_EQ(0u, get_cookies_callback1.cookies().size());
 
   set_cookie_callback.WaitUntilDone();
-  EXPECT_TRUE(set_cookie_callback.result().IsInclude());
+  EXPECT_TRUE(set_cookie_callback.result().status.IsInclude());
 
   get_cookies_callback2.WaitUntilDone();
   EXPECT_EQ(1u, get_cookies_callback2.cookies().size());
@@ -2369,7 +2364,7 @@ TEST_F(CookieMonsterTest, CheckOrderOfCookieTaskQueueWhenLoadingCompletes) {
   // Get all cookies task that queues a task to set a cookie when executed.
   auto cookie = CanonicalCookie::Create(kUrl, "a=b", base::Time::Now(),
                                         base::nullopt /* server_time */);
-  ResultSavingCookieCallback<CookieInclusionStatus> set_cookie_callback;
+  ResultSavingCookieCallback<CookieAccessResult> set_cookie_callback;
   cm->GetAllCookiesAsync(base::BindOnce(
       &RunClosureOnAllCookiesReceived,
       base::BindOnce(&CookieStore::SetCanonicalCookieAsync,
@@ -2394,7 +2389,7 @@ TEST_F(CookieMonsterTest, CheckOrderOfCookieTaskQueueWhenLoadingCompletes) {
   EXPECT_EQ(0u, get_cookies_callback1.cookies().size());
 
   set_cookie_callback.WaitUntilDone();
-  EXPECT_TRUE(set_cookie_callback.result().IsInclude());
+  EXPECT_TRUE(set_cookie_callback.result().status.IsInclude());
 
   // A subsequent get cookies call should see the new cookie.
   GetAllCookiesCallback get_cookies_callback2;
@@ -2551,7 +2546,7 @@ TEST_F(CookieMonsterTest, HistogramCheck) {
   // since the histogram should have been initialized by the CM construction
   // above.
   base::HistogramBase* expired_histogram = base::Histogram::FactoryGet(
-      "Cookie.ExpirationDurationMinutes", 1, 10 * 365 * 24 * 60, 50,
+      "Cookie.ExpirationDurationMinutesSecure", 1, 10 * 365 * 24 * 60, 50,
       base::Histogram::kUmaTargetedHistogramFlag);
 
   std::unique_ptr<base::HistogramSamples> samples1(
@@ -2859,10 +2854,10 @@ TEST_F(CookieMonsterTest, MaybeDeleteEquivalentCookieAndUpdateStatus) {
   auto preexisting_cookie = CanonicalCookie::Create(
       https_www_foo_.url(), "A=B;Secure;HttpOnly", base::Time::Now(),
       base::nullopt /* server_time */);
-  CookieInclusionStatus status = SetCanonicalCookieReturnStatus(
+  CookieAccessResult access_result = SetCanonicalCookieReturnAccessResult(
       cm.get(), std::move(preexisting_cookie), https_www_foo_.url(),
       true /* can_modify_httponly */);
-  ASSERT_TRUE(status.IsInclude());
+  ASSERT_TRUE(access_result.status.IsInclude());
 
   // Set a new cookie with a different name. Should work because cookies with
   // different names are not considered equivalent nor "equivalent for secure
@@ -2879,10 +2874,10 @@ TEST_F(CookieMonsterTest, MaybeDeleteEquivalentCookieAndUpdateStatus) {
                               base::nullopt /* server_time */);
   // Allow modifying HttpOnly, so that we don't skip preexisting cookies for
   // being HttpOnly.
-  status = SetCanonicalCookieReturnStatus(cm.get(), std::move(bad_cookie),
-                                          http_www_foo_.url(),
-                                          true /* can_modify_httponly */);
-  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
+  access_result = SetCanonicalCookieReturnAccessResult(
+      cm.get(), std::move(bad_cookie), http_www_foo_.url(),
+      true /* can_modify_httponly */);
+  EXPECT_TRUE(access_result.status.HasExactlyExclusionReasonsForTesting(
       {CookieInclusionStatus::EXCLUDE_OVERWRITE_SECURE}));
   // The preexisting cookie should still be there.
   EXPECT_THAT(GetCookiesWithOptions(cm.get(), https_www_foo_.url(),
@@ -2910,10 +2905,10 @@ TEST_F(CookieMonsterTest, MaybeDeleteEquivalentCookieAndUpdateStatus) {
       base::nullopt /* server_time */);
   // Allow modifying HttpOnly, so that we don't skip preexisting cookies for
   // being HttpOnly.
-  status = SetCanonicalCookieReturnStatus(cm.get(), std::move(bad_cookie),
-                                          http_www_foo_.url(),
-                                          true /* can_modify_httponly */);
-  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
+  access_result = SetCanonicalCookieReturnAccessResult(
+      cm.get(), std::move(bad_cookie), http_www_foo_.url(),
+      true /* can_modify_httponly */);
+  EXPECT_TRUE(access_result.status.HasExactlyExclusionReasonsForTesting(
       {CookieInclusionStatus::EXCLUDE_OVERWRITE_SECURE}));
   // The preexisting cookie should still be there.
   EXPECT_THAT(GetCookiesWithOptions(cm.get(), https_www_foo_.url(),
@@ -2938,10 +2933,10 @@ TEST_F(CookieMonsterTest, MaybeDeleteEquivalentCookieAndUpdateStatus) {
   bad_cookie = CanonicalCookie::Create(https_www_foo_.url(), "A=E; Secure",
                                        base::Time::Now(),
                                        base::nullopt /* server_time */);
-  status = SetCanonicalCookieReturnStatus(cm.get(), std::move(bad_cookie),
-                                          https_www_foo_.url(),
-                                          false /* can_modify_httponly */);
-  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
+  access_result = SetCanonicalCookieReturnAccessResult(
+      cm.get(), std::move(bad_cookie), https_www_foo_.url(),
+      false /* can_modify_httponly */);
+  EXPECT_TRUE(access_result.status.HasExactlyExclusionReasonsForTesting(
       {CookieInclusionStatus::EXCLUDE_OVERWRITE_HTTP_ONLY}));
 
   entries = net_log_.GetEntries();
@@ -2962,20 +2957,20 @@ TEST_F(CookieMonsterTest, SkipDontOverwriteForMultipleReasons) {
   auto preexisting_cookie = CanonicalCookie::Create(
       https_www_foo_.url(), "A=B;Secure;HttpOnly", base::Time::Now(),
       base::nullopt /* server_time */);
-  CookieInclusionStatus status = SetCanonicalCookieReturnStatus(
+  CookieAccessResult access_result = SetCanonicalCookieReturnAccessResult(
       cm.get(), std::move(preexisting_cookie), https_www_foo_.url(),
       true /* can_modify_httponly */);
-  ASSERT_TRUE(status.IsInclude());
+  ASSERT_TRUE(access_result.status.IsInclude());
 
   // Attempt to set a new cookie with the same name that is not Secure or
   // Httponly from an insecure scheme.
   auto cookie =
       CanonicalCookie::Create(http_www_foo_.url(), "A=B", base::Time::Now(),
                               base::nullopt /* server_time */);
-  status = SetCanonicalCookieReturnStatus(cm.get(), std::move(cookie),
-                                          http_www_foo_.url(),
-                                          false /* can_modify_httponly */);
-  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
+  access_result = SetCanonicalCookieReturnAccessResult(
+      cm.get(), std::move(cookie), http_www_foo_.url(),
+      false /* can_modify_httponly */);
+  EXPECT_TRUE(access_result.status.HasExactlyExclusionReasonsForTesting(
       {CookieInclusionStatus::EXCLUDE_OVERWRITE_SECURE,
        CookieInclusionStatus::EXCLUDE_OVERWRITE_HTTP_ONLY}));
 
@@ -2997,18 +2992,18 @@ TEST_F(CookieMonsterTest, DontDeleteEquivalentCookieIfSetIsRejected) {
   auto preexisting_cookie = CanonicalCookie::Create(
       http_www_foo_.url(), "cookie=foo", base::Time::Now(),
       base::nullopt /* server_time */);
-  CookieInclusionStatus status = SetCanonicalCookieReturnStatus(
+  CookieAccessResult access_result = SetCanonicalCookieReturnAccessResult(
       cm.get(), std::move(preexisting_cookie), http_www_foo_.url(),
       false /* can_modify_httponly */);
-  ASSERT_TRUE(status.IsInclude());
+  ASSERT_TRUE(access_result.status.IsInclude());
 
   auto bad_cookie = CanonicalCookie::Create(
       http_www_foo_.url(), "cookie=bar;secure", base::Time::Now(),
       base::nullopt /* server_time */);
-  CookieInclusionStatus status2 = SetCanonicalCookieReturnStatus(
+  CookieAccessResult access_result2 = SetCanonicalCookieReturnAccessResult(
       cm.get(), std::move(bad_cookie), http_www_foo_.url(),
       false /* can_modify_httponly */);
-  EXPECT_TRUE(status2.HasExactlyExclusionReasonsForTesting(
+  EXPECT_TRUE(access_result2.status.HasExactlyExclusionReasonsForTesting(
       {CookieInclusionStatus::EXCLUDE_SECURE_ONLY}));
 
   // Check that the original cookie is still there.
@@ -3613,7 +3608,7 @@ TEST_F(CookieMonsterTest, SetCanonicalCookieDoesNotBlockForLoadAll) {
   CookieMonster cm(persistent_store.get(), nullptr);
 
   // Start of a canonical cookie set.
-  ResultSavingCookieCallback<CookieInclusionStatus> callback_set;
+  ResultSavingCookieCallback<CookieAccessResult> callback_set;
   GURL cookie_url("http://a.com/");
   cm.SetCanonicalCookieAsync(
       CanonicalCookie::Create(cookie_url, "A=B", base::Time::Now(),
@@ -3699,14 +3694,14 @@ TEST_F(CookieMonsterTest, DeleteCookieWithInheritedTimestamps) {
 
   // Write a cookie created at |t1|.
   auto cookie = CanonicalCookie::Create(url, cookie_line, t1, server_time);
-  ResultSavingCookieCallback<CookieInclusionStatus> set_callback_1;
+  ResultSavingCookieCallback<CookieAccessResult> set_callback_1;
   cm.SetCanonicalCookieAsync(std::move(cookie), url, options,
                              set_callback_1.MakeCallback());
   set_callback_1.WaitUntilDone();
 
   // Overwrite the cookie at |t2|.
   cookie = CanonicalCookie::Create(url, cookie_line, t2, server_time);
-  ResultSavingCookieCallback<CookieInclusionStatus> set_callback_2;
+  ResultSavingCookieCallback<CookieAccessResult> set_callback_2;
   cm.SetCanonicalCookieAsync(std::move(cookie), url, options,
                              set_callback_2.MakeCallback());
   set_callback_2.WaitUntilDone();
@@ -3739,11 +3734,11 @@ TEST_F(CookieMonsterTest, RejectCreatedSameSiteCookieOnSet) {
   ASSERT_TRUE(status.IsInclude());
 
   // ... but the environment is checked on set, so this may be rejected then.
-  ResultSavingCookieCallback<CookieInclusionStatus> callback;
+  ResultSavingCookieCallback<CookieAccessResult> callback;
   cm.SetCanonicalCookieAsync(std::move(cookie), url, env_cross_site,
                              callback.MakeCallback());
   callback.WaitUntilDone();
-  EXPECT_TRUE(callback.result().HasExactlyExclusionReasonsForTesting(
+  EXPECT_TRUE(callback.result().status.HasExactlyExclusionReasonsForTesting(
       {CookieInclusionStatus::EXCLUDE_SAMESITE_LAX}));
 }
 
@@ -3763,12 +3758,12 @@ TEST_F(CookieMonsterTest, RejectCreatedSecureCookieOnSet) {
   ASSERT_TRUE(status.IsInclude());
 
   // Cookie is rejected when attempting to set from a non-secure scheme.
-  ResultSavingCookieCallback<CookieInclusionStatus> callback;
+  ResultSavingCookieCallback<CookieAccessResult> callback;
   cm.SetCanonicalCookieAsync(std::move(cookie), http_url,
                              CookieOptions::MakeAllInclusive(),
                              callback.MakeCallback());
   callback.WaitUntilDone();
-  EXPECT_TRUE(callback.result().HasExactlyExclusionReasonsForTesting(
+  EXPECT_TRUE(callback.result().status.HasExactlyExclusionReasonsForTesting(
       {CookieInclusionStatus::EXCLUDE_SECURE_ONLY}));
 }
 
@@ -3793,11 +3788,11 @@ TEST_F(CookieMonsterTest, RejectCreatedHttpOnlyCookieOnSet) {
       CookieOptions::SameSiteCookieContext(
           CookieOptions::SameSiteCookieContext::ContextType::SAME_SITE_STRICT));
   options_no_httponly.set_exclude_httponly();  // Default, but make it explicit.
-  ResultSavingCookieCallback<CookieInclusionStatus> callback;
+  ResultSavingCookieCallback<CookieAccessResult> callback;
   cm.SetCanonicalCookieAsync(std::move(cookie), url, options_no_httponly,
                              callback.MakeCallback());
   callback.WaitUntilDone();
-  EXPECT_TRUE(callback.result().HasExactlyExclusionReasonsForTesting(
+  EXPECT_TRUE(callback.result().status.HasExactlyExclusionReasonsForTesting(
       {CookieInclusionStatus::EXCLUDE_HTTP_ONLY}));
 }
 
@@ -3910,16 +3905,15 @@ TEST_F(CookieMonsterTest, CookiesWithoutSameSiteMustBeSecure) {
                                           base::nullopt /* server_time */);
     // Make a copy so we can delete it after the test.
     CanonicalCookie cookie_copy = *cookie;
-    CookieInclusionStatus result = SetCanonicalCookieReturnStatus(
+    CookieAccessResult result = SetCanonicalCookieReturnAccessResult(
         cm.get(), std::move(cookie), url,
         true /* can_modify_httponly (irrelevant) */);
-    EXPECT_EQ(test.expected_set_cookie_result, result)
+    EXPECT_EQ(test.expected_set_cookie_result, result.status)
         << "Test case " << i << " failed.";
-    if (result.IsInclude()) {
+    if (result.status.IsInclude()) {
       auto cookies = GetAllCookiesForURL(cm.get(), url);
       ASSERT_EQ(1u, cookies.size());
-      EXPECT_EQ(test.expected_effective_samesite,
-                cookies[0].GetEffectiveSameSiteForTesting())
+      EXPECT_EQ(test.expected_effective_samesite, result.effective_same_site)
           << "Test case " << i << " failed.";
       DeleteCanonicalCookie(cm.get(), cookie_copy);
     }
@@ -4024,59 +4018,26 @@ class CookieMonsterLegacyCookieAccessTest : public CookieMonsterTest {
 
   ~CookieMonsterLegacyCookieAccessTest() override {}
 
-  // The third parameter is nullopt if
-  // kRecentHttpSameSiteAccessGrantsLegacyCookieSemantics is not enabled.
-  // Otherwise it gives the value of the corresponding parameter.
-  // Similarly for the fourth parameter, which is for
-  // kRecentCreationTimeGrantsLegacyCookieSemantics.
-  void SetFeatures(
-      bool is_same_site_by_default_cookies_enabled,
-      bool is_cookies_without_samesite_must_be_secure_enabled,
-      base::Optional<int>
-          milliseconds_for_http_same_site_access_grants_legacy_semantics,
-      base::Optional<int>
-          milliseconds_for_creation_time_grants_legacy_semantics) {
+  void SetFeatures(bool is_same_site_by_default_cookies_enabled,
+                   bool is_cookies_without_samesite_must_be_secure_enabled) {
     feature_list_ = std::make_unique<base::test::ScopedFeatureList>();
 
-    std::vector<base::test::ScopedFeatureList::FeatureAndParams> enabled;
+    std::vector<base::Feature> enabled;
     std::vector<base::Feature> disabled;
 
     if (is_same_site_by_default_cookies_enabled) {
-      enabled.push_back({kSameSiteByDefaultCookies, {}});
+      enabled.push_back(kSameSiteByDefaultCookies);
     } else {
       disabled.push_back(kSameSiteByDefaultCookies);
     }
 
     if (is_cookies_without_samesite_must_be_secure_enabled) {
-      enabled.push_back({kCookiesWithoutSameSiteMustBeSecure, {}});
+      enabled.push_back(kCookiesWithoutSameSiteMustBeSecure);
     } else {
       disabled.push_back(kCookiesWithoutSameSiteMustBeSecure);
     }
 
-    if (milliseconds_for_http_same_site_access_grants_legacy_semantics) {
-      enabled.push_back(
-          {kRecentHttpSameSiteAccessGrantsLegacyCookieSemantics,
-           {{kRecentHttpSameSiteAccessGrantsLegacyCookieSemanticsMilliseconds
-                 .name,
-             base::NumberToString(
-                 milliseconds_for_http_same_site_access_grants_legacy_semantics
-                     .value())}}});
-    } else {
-      disabled.push_back(kRecentHttpSameSiteAccessGrantsLegacyCookieSemantics);
-    }
-
-    if (milliseconds_for_creation_time_grants_legacy_semantics) {
-      enabled.push_back(
-          {kRecentCreationTimeGrantsLegacyCookieSemantics,
-           {{kRecentCreationTimeGrantsLegacyCookieSemanticsMilliseconds.name,
-             base::NumberToString(
-                 milliseconds_for_creation_time_grants_legacy_semantics
-                     .value())}}});
-    } else {
-      disabled.push_back(kRecentCreationTimeGrantsLegacyCookieSemantics);
-    }
-
-    feature_list_->InitWithFeaturesAndParameters(enabled, disabled);
+    feature_list_->InitWithFeatures(enabled, disabled);
   }
 
  protected:
@@ -4092,7 +4053,7 @@ class CookieMonsterLegacyCookieAccessTest : public CookieMonsterTest {
 };
 
 TEST_F(CookieMonsterLegacyCookieAccessTest, SetLegacyNoSameSiteCookie) {
-  SetFeatures(true, true, base::nullopt, base::nullopt);
+  SetFeatures(true, true);
   // Check that setting unspecified-SameSite cookie from cross-site context
   // fails if not set to Legacy semantics, but succeeds if set to legacy.
   EXPECT_FALSE(CreateAndSetCookie(cm_.get(), kHttpUrl, "cookie=chocolate_chip",
@@ -4114,13 +4075,13 @@ TEST_F(CookieMonsterLegacyCookieAccessTest, SetLegacyNoSameSiteCookie) {
 TEST_F(CookieMonsterLegacyCookieAccessTest, GetLegacyNoSameSiteCookie) {
   // Set an unspecified-SameSite cookie with SameSite features turned off.
   // Getting the cookie will succeed.
-  SetFeatures(false, false, base::nullopt, base::nullopt);
+  SetFeatures(false, false);
   ASSERT_TRUE(CreateAndSetCookie(cm_.get(), kHttpUrl, "cookie=chocolate_chip",
                                  CookieOptions()));
   EXPECT_EQ("cookie=chocolate_chip",
             GetCookiesWithOptions(cm_.get(), kHttpUrl, CookieOptions()));
   // Turn on the features. Now getting the cookie fails.
-  SetFeatures(true, true, base::nullopt, base::nullopt);
+  SetFeatures(true, true);
   access_delegate_->SetExpectationForCookieDomain(
       kDomain, CookieAccessSemantics::UNKNOWN);
   EXPECT_EQ("", GetCookiesWithOptions(cm_.get(), kHttpUrl, CookieOptions()));
@@ -4136,7 +4097,7 @@ TEST_F(CookieMonsterLegacyCookieAccessTest, GetLegacyNoSameSiteCookie) {
 
 TEST_F(CookieMonsterLegacyCookieAccessTest,
        SetLegacySameSiteNoneInsecureCookie) {
-  SetFeatures(true, true, base::nullopt, base::nullopt);
+  SetFeatures(true, true);
   access_delegate_->SetExpectationForCookieDomain(
       kDomain, CookieAccessSemantics::UNKNOWN);
   EXPECT_FALSE(CreateAndSetCookie(cm_.get(), kHttpsUrl,
@@ -4161,14 +4122,14 @@ TEST_F(CookieMonsterLegacyCookieAccessTest,
        GetLegacySameSiteNoneInsecureCookie) {
   // Set an SameSite=None insecure cookie with SameSite features turned off.
   // Getting the cookie will succeed.
-  SetFeatures(false, false, base::nullopt, base::nullopt);
+  SetFeatures(false, false);
   ASSERT_TRUE(CreateAndSetCookie(cm_.get(), kHttpUrl,
                                  "cookie=oatmeal_raisin; SameSite=None",
                                  CookieOptions()));
   EXPECT_EQ("cookie=oatmeal_raisin",
             GetCookiesWithOptions(cm_.get(), kHttpUrl, CookieOptions()));
   // Turn on the features. Now getting the cookie fails.
-  SetFeatures(true, true, base::nullopt, base::nullopt);
+  SetFeatures(true, true);
   access_delegate_->SetExpectationForCookieDomain(
       kDomain, CookieAccessSemantics::UNKNOWN);
   EXPECT_EQ("", GetCookiesWithOptions(cm_.get(), kHttpUrl, CookieOptions()));
@@ -4184,7 +4145,7 @@ TEST_F(CookieMonsterLegacyCookieAccessTest,
 
 TEST_F(CookieMonsterLegacyCookieAccessTest, NonlegacyCookie) {
   // Nonlegacy cookie will have default as Lax.
-  SetFeatures(false, false, base::nullopt, base::nullopt);
+  SetFeatures(false, false);
   access_delegate_->SetExpectationForCookieDomain(
       kDomain, CookieAccessSemantics::NONLEGACY);
   EXPECT_FALSE(CreateAndSetCookie(cm_.get(), kHttpUrl, "cookie=chocolate_chip",
@@ -4197,166 +4158,6 @@ TEST_F(CookieMonsterLegacyCookieAccessTest, NonlegacyCookie) {
                                  CookieOptions()));
   EXPECT_EQ("cookie=oatmeal_raisin",
             GetCookiesWithOptions(cm_.get(), kHttpUrl, CookieOptions()));
-}
-
-// Test the RecentHttpSameSiteAccessGrantsLegacyCookieSemantics feature.
-TEST_F(CookieMonsterLegacyCookieAccessTest, RecentHttpSameSiteAccess) {
-  SetFeatures(true, true, 100, base::nullopt);
-  // This feature overrides the CookieAccessDelegate setting.
-  access_delegate_->SetExpectationForCookieDomain(
-      kDomain, CookieAccessSemantics::NONLEGACY);
-
-  // Set a cookie from a qualifying (HTTP and same-site) context.
-  CookieOptions http_lax_options;
-  http_lax_options.set_include_httponly();
-  http_lax_options.set_same_site_cookie_context(
-      CookieOptions::SameSiteCookieContext(
-          CookieOptions::SameSiteCookieContext::ContextType::SAME_SITE_LAX));
-  // This one only works because it's treated as Legacy, otherwise it would be
-  // rejected for being SameSite=None without secure.
-  EXPECT_TRUE(CreateAndSetCookie(cm_.get(), kHttpUrl, "cookie=1;SameSite=None",
-                                 http_lax_options));
-  // Subsequently getting the cookie from a cross-site context also works
-  // because we just accessed it in an eligible context.
-  EXPECT_EQ("cookie=1",
-            GetCookiesWithOptions(cm_.get(), kHttpUrl, CookieOptions()));
-  // This one should work regardless.
-  EXPECT_TRUE(
-      CreateAndSetCookie(cm_.get(), kHttpUrl, "cookie=2", http_lax_options));
-  // Subsequently getting the cookie from a cross-site context works even though
-  // it defaults to Lax, because we just accessed it in an eligible context.
-  EXPECT_EQ("cookie=2",
-            GetCookiesWithOptions(cm_.get(), kHttpUrl, CookieOptions()));
-  // After some delay less than the recency threshold, we can still get the
-  // cookie from a cross-site context because the last eligible access was
-  // recent enough.
-  task_environment_->FastForwardBy(TimeDelta::FromMilliseconds(90));
-  EXPECT_EQ("cookie=2",
-            GetCookiesWithOptions(cm_.get(), kHttpUrl, CookieOptions()));
-  // After a further delay that passes the recency threshold, we can no longer
-  // get the cookie from a cross-site context.
-  // Notably, the last access didn't reset the timer because it wasn't a
-  // same-site access.
-  task_environment_->FastForwardBy(TimeDelta::FromMilliseconds(20));
-  EXPECT_EQ("", GetCookiesWithOptions(cm_.get(), kHttpUrl, CookieOptions()));
-
-  // Deleting the cookie clears the last access time.
-  DeleteAll(cm_.get());
-
-  // Set a cookie from a same-site but not Http context. This should work
-  // because it's same-site, but does not activate the feature because it isn't
-  // http.
-  CookieOptions exclude_http_lax_options;
-  exclude_http_lax_options.set_exclude_httponly();
-  exclude_http_lax_options.set_same_site_cookie_context(
-      CookieOptions::SameSiteCookieContext(
-          CookieOptions::SameSiteCookieContext::ContextType::SAME_SITE_LAX));
-  EXPECT_TRUE(CreateAndSetCookie(cm_.get(), kHttpUrl, "cookie=1",
-                                 exclude_http_lax_options));
-  // There is no recent eligible last access time, because we deleted the
-  // cookie and subsequently re-set it from a non-eligible context.
-  EXPECT_EQ("", GetCookiesWithOptions(cm_.get(), kHttpUrl, CookieOptions()));
-  // Accessing it from a laxly same-site context works (because the cookie
-  // defaults to lax).
-  EXPECT_EQ("cookie=1",
-            GetCookiesWithOptions(cm_.get(), kHttpUrl, http_lax_options));
-  // However that doesn't count as a recent http same-site access because it was
-  // only laxly (not strictly) same-site, so getting the cookie from a
-  // cross-site context does not currently work.
-  EXPECT_EQ("", GetCookiesWithOptions(cm_.get(), kHttpUrl, CookieOptions()));
-  // Attempting to set a cookie (unsuccessfully) from an eligible context does
-  // not count.
-  CookieOptions http_strict_options;
-  http_strict_options.set_include_httponly();
-  http_strict_options.set_same_site_cookie_context(
-      CookieOptions::SameSiteCookieContext(
-          CookieOptions::SameSiteCookieContext::ContextType::SAME_SITE_STRICT));
-  EXPECT_FALSE(CreateAndSetCookie(cm_.get(), kHttpUrl, "cookie=2;Secure",
-                                  http_strict_options));
-  EXPECT_EQ("", GetCookiesWithOptions(cm_.get(), kHttpUrl, CookieOptions()));
-  // Now get the cookie from an eligible, Http and strictly same-site context.
-  EXPECT_EQ("cookie=1",
-            GetCookiesWithOptions(cm_.get(), kHttpUrl, http_strict_options));
-  // Subsequently getting the cookie from a cross-site context also works
-  // because we just accessed it in an eligible context.
-  EXPECT_EQ("cookie=1",
-            GetCookiesWithOptions(cm_.get(), kHttpUrl, CookieOptions()));
-  // After some delay less than the recency threshold, we can still get the
-  // cookie from a cross-site context because the last eligible access was
-  // recent enough.
-  task_environment_->FastForwardBy(TimeDelta::FromMilliseconds(90));
-  EXPECT_EQ("cookie=1",
-            GetCookiesWithOptions(cm_.get(), kHttpUrl, CookieOptions()));
-  // After a further delay that passes the recency threshold, we can no longer
-  // get the cookie from a cross-site context.
-  // Notably, the last access didn't reset the timer because it wasn't a
-  // same-site access.
-  task_environment_->FastForwardBy(TimeDelta::FromMilliseconds(20));
-  EXPECT_EQ("", GetCookiesWithOptions(cm_.get(), kHttpUrl, CookieOptions()));
-}
-
-// Test the RecentCreationTimeGrantsLegacyCookieSemantics feature.
-TEST_F(CookieMonsterLegacyCookieAccessTest, RecentCreationTime) {
-  SetFeatures(true, true, base::nullopt, 100);
-  // This feature overrides the CookieAccessDelegate setting.
-  access_delegate_->SetExpectationForCookieDomain(
-      kDomain, CookieAccessSemantics::NONLEGACY);
-
-  // While the grace period is active, even if the delegate returns NONLEGACY
-  // semantics, we are able to set unspecified-SameSite cookies from a
-  // cross-site context, and we are allowed to set SameSite=None cookies without
-  // Secure. We are also allowed to get such cookies.
-  EXPECT_TRUE(CreateAndSetCookie(cm_.get(), kHttpUrl, "cookie1=chocolate_chip",
-                                 CookieOptions()));
-  EXPECT_TRUE(CreateAndSetCookie(cm_.get(), kHttpUrl,
-                                 "cookie2=oatmeal_raisin; SameSite=None",
-                                 CookieOptions()));
-  EXPECT_EQ("cookie1=chocolate_chip; cookie2=oatmeal_raisin",
-            GetCookiesWithOptions(cm_.get(), kHttpUrl, CookieOptions()));
-
-  // After some time passes, but we are still under the time threshold,
-  // the cookie is still accessible in a cross-site context.
-  task_environment_->FastForwardBy(TimeDelta::FromMilliseconds(90));
-  EXPECT_EQ("cookie1=chocolate_chip; cookie2=oatmeal_raisin",
-            GetCookiesWithOptions(cm_.get(), kHttpUrl, CookieOptions()));
-  // After the grace period expires, these cookies are now blocked.
-  task_environment_->FastForwardBy(TimeDelta::FromMilliseconds(20));
-  EXPECT_EQ("", GetCookiesWithOptions(cm_.get(), kHttpUrl, CookieOptions()));
-
-  // Also, now that there is a preexisting cookie in the store that's older than
-  // the grace period, the same cookie will not be granted legacy semantics
-  // again because the creation date of the preexisting identical cookie is
-  // inherited. (This disallows refreshing the grace period by repeatedly
-  // setting an identical cookie.)
-  EXPECT_FALSE(CreateAndSetCookie(cm_.get(), kHttpUrl, "cookie1=chocolate_chip",
-                                  CookieOptions()));
-  EXPECT_FALSE(CreateAndSetCookie(cm_.get(), kHttpUrl,
-                                  "cookie2=oatmeal_raisin; SameSite=None",
-                                  CookieOptions()));
-  // However, an equivalent (but not identical) cookie can still be set with
-  // legacy semantics, because now the creation date isn't inherited from the
-  // preexisting cookie.
-  // TODO(chlily): It might not actually make sense to allow this... This could
-  // in effect allow repeatedly refreshing the grace period by setting a cookie
-  // with a different value and then immediately setting it back to the original
-  // value.
-  EXPECT_TRUE(CreateAndSetCookie(cm_.get(), kHttpUrl, "cookie1=snickerdoodle",
-                                 CookieOptions()));
-  EXPECT_TRUE(CreateAndSetCookie(cm_.get(), kHttpUrl,
-                                 "cookie2=gingerbread; SameSite=None",
-                                 CookieOptions()));
-
-  // Test the behavior when the time threshold is 0 (the default value).
-  SetFeatures(true, true, base::nullopt, 0);
-  // No legacy behavior is used if there is no active, non-zero grace period.
-  // In particular, if there is a zero grace period, we don't allow setting the
-  // cookie even if it was created at the very instant it was attempted to be
-  // set.
-  EXPECT_FALSE(CreateAndSetCookie(cm_.get(), kHttpUrl, "cookie1=chocolate_chip",
-                                  CookieOptions()));
-  EXPECT_FALSE(CreateAndSetCookie(cm_.get(), kHttpUrl,
-                                  "cookie2=oatmeal_raisin; SameSite=None",
-                                  CookieOptions()));
 }
 
 }  // namespace net

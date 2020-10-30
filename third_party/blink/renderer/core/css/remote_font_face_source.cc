@@ -31,7 +31,7 @@
 namespace blink {
 
 bool RemoteFontFaceSource::NeedsInterventionToAlignWithLCPGoal() const {
-  DCHECK_EQ(display_, kFontDisplayAuto);
+  DCHECK_EQ(display_, FontDisplay::kAuto);
   if (!base::FeatureList::IsEnabled(
           features::kAlignFontDisplayAutoTimeoutWithLCPGoal)) {
     return false;
@@ -51,7 +51,7 @@ bool RemoteFontFaceSource::NeedsInterventionToAlignWithLCPGoal() const {
 
 RemoteFontFaceSource::DisplayPeriod
 RemoteFontFaceSource::ComputeFontDisplayAutoPeriod() const {
-  DCHECK_EQ(display_, kFontDisplayAuto);
+  DCHECK_EQ(display_, FontDisplay::kAuto);
   if (NeedsInterventionToAlignWithLCPGoal()) {
     using Mode = features::AlignFontDisplayAutoTimeoutWithLCPGoalMode;
     Mode mode =
@@ -79,9 +79,9 @@ RemoteFontFaceSource::ComputeFontDisplayAutoPeriod() const {
 RemoteFontFaceSource::DisplayPeriod RemoteFontFaceSource::ComputePeriod()
     const {
   switch (display_) {
-    case kFontDisplayAuto:
+    case FontDisplay::kAuto:
       return ComputeFontDisplayAutoPeriod();
-    case kFontDisplayBlock:
+    case FontDisplay::kBlock:
       switch (phase_) {
         case kNoLimitExceeded:
         case kShortLimitExceeded:
@@ -90,10 +90,10 @@ RemoteFontFaceSource::DisplayPeriod RemoteFontFaceSource::ComputePeriod()
           return kSwapPeriod;
       }
 
-    case kFontDisplaySwap:
+    case FontDisplay::kSwap:
       return kSwapPeriod;
 
-    case kFontDisplayFallback:
+    case FontDisplay::kFallback:
       switch (phase_) {
         case kNoLimitExceeded:
           return kBlockPeriod;
@@ -103,7 +103,7 @@ RemoteFontFaceSource::DisplayPeriod RemoteFontFaceSource::ComputePeriod()
           return kFailurePeriod;
       }
 
-    case kFontDisplayOptional: {
+    case FontDisplay::kOptional: {
       const bool use_phase_value =
           !base::FeatureList::IsEnabled(
               features::kFontPreloadingDelaysRendering) ||
@@ -124,16 +124,14 @@ RemoteFontFaceSource::DisplayPeriod RemoteFontFaceSource::ComputePeriod()
 
       if (GetDocument()->GetFontPreloadManager().RenderingHasBegun()) {
         if (FinishedFromMemoryCache() ||
-            finished_before_document_rendering_begin_)
+            finished_before_document_rendering_begin_ ||
+            !has_been_requested_while_pending_)
           return kSwapPeriod;
         return kFailurePeriod;
       }
 
       return kSwapPeriod;
     }
-    case kFontDisplayEnumMax:
-      NOTREACHED();
-      break;
   }
   NOTREACHED();
   return kSwapPeriod;
@@ -146,12 +144,13 @@ RemoteFontFaceSource::RemoteFontFaceSource(CSSFontFace* css_font_face,
       font_selector_(font_selector),
       // No need to report the violation here since the font is not loaded yet
       display_(
-          GetFontDisplayWithFeaturePolicyCheck(display,
-                                               font_selector,
-                                               ReportOptions::kDoNotReport)),
+          GetFontDisplayWithDocumentPolicyCheck(display,
+                                                font_selector,
+                                                ReportOptions::kDoNotReport)),
       phase_(kNoLimitExceeded),
       is_intervention_triggered_(ShouldTriggerWebFontsIntervention()),
       finished_before_document_rendering_begin_(false),
+      has_been_requested_while_pending_(false),
       finished_before_lcp_limit_(false) {
   DCHECK(face_);
   period_ = ComputePeriod();
@@ -196,6 +195,7 @@ void RemoteFontFaceSource::NotifyFinished(Resource* resource) {
   histograms_.RecordRemoteFont(font);
 
   custom_font_data_ = font->GetCustomFontData();
+  url_ = resource->Url().GetString();
 
   // FIXME: Provide more useful message such as OTS rejection reason.
   // See crbug.com/97467
@@ -263,7 +263,7 @@ void RemoteFontFaceSource::SetDisplay(FontDisplay display) {
   // using the loaded font.
   if (IsLoaded())
     return;
-  display_ = GetFontDisplayWithFeaturePolicyCheck(
+  display_ = GetFontDisplayWithDocumentPolicyCheck(
       display, font_selector_, ReportOptions::kReportOnFailure);
   UpdatePeriod();
 }
@@ -287,16 +287,16 @@ bool RemoteFontFaceSource::UpdatePeriod() {
   return changed;
 }
 
-FontDisplay RemoteFontFaceSource::GetFontDisplayWithFeaturePolicyCheck(
+FontDisplay RemoteFontFaceSource::GetFontDisplayWithDocumentPolicyCheck(
     FontDisplay display,
     const FontSelector* font_selector,
     ReportOptions report_option) const {
   ExecutionContext* context = font_selector->GetExecutionContext();
-  if (display != kFontDisplayFallback && display != kFontDisplayOptional &&
+  if (display != FontDisplay::kFallback && display != FontDisplay::kOptional &&
       context && context->IsWindow() &&
       !context->IsFeatureEnabled(
           mojom::blink::DocumentPolicyFeature::kFontDisplay, report_option)) {
-    return kFontDisplayOptional;
+    return FontDisplay::kOptional;
   }
   return display;
 }
@@ -312,7 +312,7 @@ bool RemoteFontFaceSource::ShouldTriggerWebFontsIntervention() {
       WebEffectiveConnectionType::kTypeOffline <= connection_type &&
       connection_type <= WebEffectiveConnectionType::kType3G;
 
-  return network_is_slow && display_ == kFontDisplayAuto;
+  return network_is_slow && display_ == FontDisplay::kAuto;
 }
 
 bool RemoteFontFaceSource::IsLowPriorityLoadingAllowedForRemoteFont() const {
@@ -356,6 +356,7 @@ RemoteFontFaceSource::CreateLoadingFallbackFontData(
   scoped_refptr<CSSCustomFontData> css_font_data = CSSCustomFontData::Create(
       this, period_ == kBlockPeriod ? CSSCustomFontData::kInvisibleFallback
                                     : CSSCustomFontData::kVisibleFallback);
+  has_been_requested_while_pending_ = true;
   return SimpleFontData::Create(temporary_font->PlatformData(), css_font_data);
 }
 

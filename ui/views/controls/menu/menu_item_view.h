@@ -117,7 +117,7 @@ class VIEWS_EXPORT MenuItemView : public View {
 
   // Constructor for use with the top level menu item. This menu is never
   // shown to the user, rather its use as the parent for all menu items.
-  explicit MenuItemView(MenuDelegate* delegate);
+  explicit MenuItemView(MenuDelegate* delegate = nullptr);
 
   // Overridden from View:
   base::string16 GetTooltipText(const gfx::Point& p) const override;
@@ -138,7 +138,8 @@ class VIEWS_EXPORT MenuItemView : public View {
   // removed and the menu item accelerator text is appended.
   static base::string16 GetAccessibleNameForMenuItem(
       const base::string16& item_text,
-      const base::string16& accelerator_text);
+      const base::string16& accelerator_text,
+      bool is_new_feature);
 
   // Hides and cancels the menu. This does nothing if the menu is not open.
   void Cancel();
@@ -235,6 +236,11 @@ class VIEWS_EXPORT MenuItemView : public View {
 
   // Returns true if the item is selected.
   bool IsSelected() const { return selected_; }
+
+  // Adds a callback subscription associated with the above selected property.
+  // The callback will be invoked whenever the selected property changes.
+  PropertyChangedSubscription AddSelectedChangedCallback(
+      PropertyChangedCallback callback) WARN_UNUSED_RESULT;
 
   // Sets whether the submenu area of an ACTIONABLE_SUBMENU is selected.
   void SetSelectionOfActionableSubmenu(
@@ -352,6 +358,10 @@ class VIEWS_EXPORT MenuItemView : public View {
   // run.
   void SetAlerted();
   bool is_alerted() const { return is_alerted_; }
+
+  // Returns whether or not a "new" badge should be shown on this menu item.
+  // Takes into account whether the badging feature is enabled.
+  bool ShouldShowNewBadge() const;
 
  protected:
   // Creates a MenuItemView. This is used by the various AddXXX methods.
@@ -483,20 +493,6 @@ class VIEWS_EXPORT MenuItemView : public View {
 
   // Returns true if the menu has items with a checkbox or a radio button.
   bool HasChecksOrRadioButtons() const;
-
-  // Returns whether or not a "new" badge should be shown on this menu item.
-  // Takes into account whether the badging feature is enabled.
-  bool ShouldShowNewBadge() const;
-
-  // Renders a "New" badge on |canvas| in the given |badge_bounds|, which should
-  // be roughly adjacent to the menu item label.
-  void DrawNewBadge(gfx::Canvas* canvas,
-                    gfx::Rect badge_bounds,
-                    int render_flags,
-                    const gfx::FontList& font_list);
-
-  // Returns the additional width required for a "New" badge.
-  int GetNewBadgeRequiredWidth(const gfx::FontList& font_list) const;
 
   void invalidate_dimensions() { dimensions_.height = 0; }
   bool is_dimensions_valid() const { return dimensions_.height > 0; }

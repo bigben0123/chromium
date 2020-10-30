@@ -9,7 +9,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #import "base/strings/sys_string_conversions.h"
-#include "components/policy/core/browser/url_blacklist_manager.h"
+#include "components/policy/core/browser/url_blocklist_manager.h"
 #include "components/reading_list/core/reading_list_model.h"
 #import "ios/chrome/browser/app_launcher/app_launcher_tab_helper_delegate.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
@@ -144,7 +144,7 @@ void AppLauncherTabHelper::RequestToLaunchApp(const GURL& url,
       if (!delegate_)
         return;
       delegate_->ShowRepeatedAppLaunchAlert(
-          this, base::BindOnce(^(BOOL user_allowed) {
+          this, base::BindOnce(^(bool user_allowed) {
             if (!weak_this.get())
               return;
             if (user_allowed && weak_this->delegate()) {
@@ -178,7 +178,7 @@ AppLauncherTabHelper::ShouldAllowRequest(
         PolicyBlocklistServiceFactory::GetForBrowserState(
             web_state()->GetBrowserState());
     if (blocklistService->GetURLBlocklistState(request_url) ==
-        policy::URLBlacklist::URLBlacklistState::URL_IN_BLACKLIST) {
+        policy::URLBlocklist::URLBlocklistState::URL_IN_BLOCKLIST) {
       return web::WebStatePolicyDecider::PolicyDecision::CancelAndDisplayError(
           policy_url_blocking_util::CreateBlockedUrlError());
     }

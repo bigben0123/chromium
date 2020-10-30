@@ -14,10 +14,12 @@
 #include "base/strings/stringprintf.h"
 #include "base/task/post_task.h"
 #include "components/keyed_service/content/browser_context_keyed_service_shutdown_notifier_factory.h"
+#include "components/ukm/content/source_url_recorder.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/global_request_id.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/common/url_utils.h"
 #include "extensions/browser/api/web_request/permission_helper.h"
 #include "extensions/browser/extension_navigation_ui_data.h"
@@ -30,7 +32,6 @@
 #include "net/http/http_util.h"
 #include "net/url_request/redirect_info.h"
 #include "net/url_request/redirect_util.h"
-#include "net/url_request/url_request.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
@@ -77,8 +78,8 @@ net::RedirectInfo CreateRedirectInfo(
       original_request.method, original_request.url,
       original_request.site_for_cookies,
       original_request.update_first_party_url_on_redirect
-          ? net::URLRequest::UPDATE_FIRST_PARTY_URL_ON_REDIRECT
-          : net::URLRequest::NEVER_CHANGE_FIRST_PARTY_URL,
+          ? net::RedirectInfo::FirstPartyURLPolicy::UPDATE_URL_ON_REDIRECT
+          : net::RedirectInfo::FirstPartyURLPolicy::NEVER_CHANGE_URL,
       original_request.referrer_policy, original_request.referrer.spec(),
       response_code, new_url, referrer_policy_header,
       false /* insecure_scheme_was_upgraded */, false /* copy_fragment */,
@@ -98,7 +99,7 @@ WebRequestProxyingURLLoaderFactory::InProgressRequest::InProgressRequest(
     int32_t network_service_request_id,
     int32_t routing_id,
     uint32_t options,
-    ukm::SourceId ukm_source_id,
+    ukm::SourceIdObj ukm_source_id,
     const network::ResourceRequest& request,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
     mojo::PendingReceiver<network::mojom::URLLoader> loader_receiver,
@@ -138,7 +139,7 @@ WebRequestProxyingURLLoaderFactory::InProgressRequest::InProgressRequest(
       request_(request),
       original_initiator_(request.request_initiator),
       request_id_(request_id),
-      ukm_source_id_(ukm::kInvalidSourceId),
+      ukm_source_id_(ukm::kInvalidSourceIdObj),
       proxied_loader_receiver_(this),
       for_cors_preflight_(true),
       has_any_extra_headers_listeners_(
@@ -194,7 +195,8 @@ void WebRequestProxyingURLLoaderFactory::InProgressRequest::
                                     : nullptr,
       routing_id_, request_for_info, factory_->IsForDownload(),
       !(options_ & network::mojom::kURLLoadOptionSynchronous),
-      factory_->IsForServiceWorkerScript(), factory_->navigation_id_));
+      factory_->IsForServiceWorkerScript(), factory_->navigation_id_,
+      ukm_source_id_));
 
   current_request_uses_header_client_ =
       factory_->url_loader_header_client_receiver_.is_bound() &&
@@ -238,6 +240,10 @@ void WebRequestProxyingURLLoaderFactory::InProgressRequest::RestartInternal() {
     if (should_collapse_initiator) {
       status.extended_error_code = static_cast<int>(
           blink::ResourceRequestBlockedReason::kCollapsedByClient);
+    } else {
+      status.extended_error_code =
+          static_cast<int>(blink::ResourceRequestBlockedReason::
+                               kBlockedByExtensionCrbug1128174Investigation);
     }
     OnRequestError(status, state_on_error);
     return;
@@ -529,36 +535,19 @@ void WebRequestProxyingURLLoaderFactory::InProgressRequest::
       "Non-Authoritative-Reason: WebRequest API\n\n",
       kInternalRedirectStatusCode, redirect_url_.spec().c_str());
 
-  if (factory_->browser_context_->ShouldEnableOutOfBlinkCors()) {
-    // Cross-origin requests need to modify the Origin header to 'null'. Since
-    // CorsURLLoader sets |request_initiator| to the Origin request header in
-    // NetworkService, we need to modify |request_initiator| here to craft the
-    // Origin header indirectly.
-    // Following checks implement the step 10 of "4.4. HTTP-redirect fetch",
-    // https://fetch.spec.whatwg.org/#http-redirect-fetch
-    if (request_.request_initiator &&
-        (!url::Origin::Create(redirect_url_)
-              .IsSameOriginWith(url::Origin::Create(request_.url)) &&
-         !request_.request_initiator->IsSameOriginWith(
-             url::Origin::Create(request_.url)))) {
-      // Reset the initiator to pretend tainted origin flag of the spec is set.
-      request_.request_initiator = url::Origin();
-    }
-  } else {
-    // If this redirect is used in a cross-origin request, add CORS headers to
-    // make sure that the redirect gets through the Blink CORS. Note that the
-    // destination URL is still subject to the usual CORS policy, i.e. the
-    // resource will only be available to web pages if the server serves the
-    // response with the required CORS response headers. Matches the behavior in
-    // url_request_redirect_job.cc.
-    std::string http_origin;
-    if (request_.headers.GetHeader("Origin", &http_origin)) {
-      headers += base::StringPrintf(
-          "\n"
-          "Access-Control-Allow-Origin: %s\n"
-          "Access-Control-Allow-Credentials: true",
-          http_origin.c_str());
-    }
+  // Cross-origin requests need to modify the Origin header to 'null'. Since
+  // CorsURLLoader sets |request_initiator| to the Origin request header in
+  // NetworkService, we need to modify |request_initiator| here to craft the
+  // Origin header indirectly.
+  // Following checks implement the step 10 of "4.4. HTTP-redirect fetch",
+  // https://fetch.spec.whatwg.org/#http-redirect-fetch
+  if (request_.request_initiator &&
+      (!url::Origin::Create(redirect_url_)
+            .IsSameOriginWith(url::Origin::Create(request_.url)) &&
+       !request_.request_initiator->IsSameOriginWith(
+           url::Origin::Create(request_.url)))) {
+    // Reset the initiator to pretend tainted origin flag of the spec is set.
+    request_.request_initiator = url::Origin();
   }
   head->headers = base::MakeRefCounted<net::HttpResponseHeaders>(
       net::HttpUtil::AssembleRawHeaders(headers));
@@ -601,8 +590,11 @@ void WebRequestProxyingURLLoaderFactory::InProgressRequest::
     if (result == net::ERR_BLOCKED_BY_CLIENT) {
       // The request was cancelled synchronously. Dispatch an error notification
       // and terminate the request.
-      OnRequestError(network::URLLoaderCompletionStatus(result),
-                     state_on_error);
+      network::URLLoaderCompletionStatus completion_status(result);
+      completion_status.extended_error_code =
+          static_cast<int>(blink::ResourceRequestBlockedReason::
+                               kBlockedByExtensionCrbug1128174Investigation);
+      OnRequestError(completion_status, state_on_error);
       return;
     }
 
@@ -994,7 +986,11 @@ void WebRequestProxyingURLLoaderFactory::InProgressRequest::
       } else {
         state = State::kRejectedByOnHeadersReceivedForFinalResponse;
       }
-      OnRequestError(network::URLLoaderCompletionStatus(result), state);
+      network::URLLoaderCompletionStatus completion_status(result);
+      completion_status.extended_error_code =
+          static_cast<int>(blink::ResourceRequestBlockedReason::
+                               kBlockedByExtensionCrbug1128174Investigation);
+      OnRequestError(completion_status, state);
       return;
     }
 
@@ -1024,6 +1020,7 @@ void WebRequestProxyingURLLoaderFactory::InProgressRequest::OnRequestError(
   ExtensionWebRequestEventRouter::GetInstance()->OnErrorOccurred(
       factory_->browser_context_, &info_.value(), true /* started */,
       status.error_code);
+  state_ = state;
 
   // Deletes |this|.
   factory_->RemoveRequest(network_service_request_id_, request_id_);
@@ -1097,13 +1094,13 @@ WebRequestProxyingURLLoaderFactory::WebRequestProxyingURLLoaderFactory(
     WebRequestAPI::RequestIDGenerator* request_id_generator,
     std::unique_ptr<ExtensionNavigationUIData> navigation_ui_data,
     base::Optional<int64_t> navigation_id,
+    ukm::SourceIdObj ukm_source_id,
     mojo::PendingReceiver<network::mojom::URLLoaderFactory> loader_receiver,
     mojo::PendingRemote<network::mojom::URLLoaderFactory> target_factory_remote,
     mojo::PendingReceiver<network::mojom::TrustedURLLoaderHeaderClient>
         header_client_receiver,
     WebRequestAPI::ProxySet* proxies,
-    content::ContentBrowserClient::URLLoaderFactoryType loader_factory_type,
-    ukm::SourceId ukm_source_id)
+    content::ContentBrowserClient::URLLoaderFactoryType loader_factory_type)
     : browser_context_(browser_context),
       render_process_id_(render_process_id),
       request_id_generator_(request_id_generator),
@@ -1141,21 +1138,20 @@ void WebRequestProxyingURLLoaderFactory::StartProxying(
     WebRequestAPI::RequestIDGenerator* request_id_generator,
     std::unique_ptr<ExtensionNavigationUIData> navigation_ui_data,
     base::Optional<int64_t> navigation_id,
+    ukm::SourceIdObj ukm_source_id,
     mojo::PendingReceiver<network::mojom::URLLoaderFactory> loader_receiver,
     mojo::PendingRemote<network::mojom::URLLoaderFactory> target_factory_remote,
     mojo::PendingReceiver<network::mojom::TrustedURLLoaderHeaderClient>
         header_client_receiver,
     WebRequestAPI::ProxySet* proxies,
-    content::ContentBrowserClient::URLLoaderFactoryType loader_factory_type,
-    ukm::SourceId ukm_source_id) {
+    content::ContentBrowserClient::URLLoaderFactoryType loader_factory_type) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   auto proxy = std::make_unique<WebRequestProxyingURLLoaderFactory>(
       browser_context, render_process_id, request_id_generator,
-      std::move(navigation_ui_data), std::move(navigation_id),
+      std::move(navigation_ui_data), std::move(navigation_id), ukm_source_id,
       std::move(loader_receiver), std::move(target_factory_remote),
-      std::move(header_client_receiver), proxies, loader_factory_type,
-      ukm_source_id);
+      std::move(header_client_receiver), proxies, loader_factory_type);
 
   proxies->AddProxy(std::move(proxy));
 }

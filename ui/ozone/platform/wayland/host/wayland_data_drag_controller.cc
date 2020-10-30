@@ -4,8 +4,6 @@
 
 #include "ui/ozone/platform/wayland/host/wayland_data_drag_controller.h"
 
-#include <wayland-client-protocol.h>
-
 #include <cstdint>
 
 #include "base/check.h"
@@ -216,8 +214,14 @@ void WaylandDataDragController::OnDragDrop() {
 
 void WaylandDataDragController::OnDataSourceFinish(bool completed) {
   DCHECK(data_source_);
-  if (origin_window_)
-    origin_window_->OnDragSessionClose(data_source_->dnd_action());
+  DCHECK(origin_window_);
+
+  origin_window_->OnDragSessionClose(data_source_->dnd_action());
+
+  // DnD handlers expect DragLeave to be sent for drag sessions that end up
+  // with no data transfer (wl_data_source::cancelled event).
+  if (!completed)
+    origin_window_->OnDragLeave();
 
   origin_window_ = nullptr;
   data_source_.reset();
@@ -295,9 +299,10 @@ void WaylandDataDragController::HandleUnprocessedMimeTypes() {
 }
 
 void WaylandDataDragController::OnMimeTypeDataTransferred(
-    const PlatformClipboard::Data& contents) {
+    PlatformClipboard::Data contents) {
   DCHECK_EQ(state_, State::kTransferring);
-  if (!contents.empty()) {
+  DCHECK(contents);
+  if (!contents->data().empty()) {
     std::string mime_type = unprocessed_mime_types_.front();
     wl::AddToOSExchangeData(contents, mime_type, received_data_.get());
   }

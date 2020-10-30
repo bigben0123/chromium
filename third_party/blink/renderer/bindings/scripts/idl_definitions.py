@@ -110,7 +110,7 @@ class IdlDefinitions(object):
         children = node.GetChildren()
         for child in children:
             child_class = child.GetClass()
-            if child_class == 'Interface':
+            if child_class == 'Interface' or child_class == 'Namespace':
                 interface = IdlInterface(child)
                 self.interfaces[interface.name] = interface
                 if not self.first_name:
@@ -417,8 +417,9 @@ class IdlInterface(object):
                     'Value iterators (iterable<V>) must be accompanied by an indexed '
                     'property getter and an integer-typed length attribute.')
 
-        if 'Unforgeable' in self.extended_attributes:
-            raise ValueError('[Unforgeable] cannot appear on interfaces.')
+        if 'LegacyUnforgeable' in self.extended_attributes:
+            raise ValueError(
+                '[LegacyUnforgeable] cannot appear on interfaces.')
 
         if constructor_operations or custom_constructor_operations:
             if self.constructors or self.custom_constructors:
@@ -504,9 +505,9 @@ class IdlAttribute(TypedObject):
                     raise ValueError(
                         'Unrecognized node class: %s' % child_class)
 
-        if 'Unforgeable' in self.extended_attributes and self.is_static:
+        if 'LegacyUnforgeable' in self.extended_attributes and self.is_static:
             raise ValueError(
-                '[Unforgeable] cannot appear on static attributes.')
+                '[LegacyUnforgeable] cannot appear on static attributes.')
 
     def accept(self, visitor):
         visitor.visit_attribute(self)
@@ -648,9 +649,9 @@ class IdlOperation(TypedObject):
             else:
                 raise ValueError('Unrecognized node class: %s' % child_class)
 
-        if 'Unforgeable' in self.extended_attributes and self.is_static:
+        if 'LegacyUnforgeable' in self.extended_attributes and self.is_static:
             raise ValueError(
-                '[Unforgeable] cannot appear on static operations.')
+                '[LegacyUnforgeable] cannot appear on static operations.')
 
     @classmethod
     def constructor_from_arguments_node(cls, name, arguments_node):

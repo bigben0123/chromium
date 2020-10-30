@@ -7,13 +7,22 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
+#include "base/optional.h"
+#include "base/unguessable_token.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "media/base/media_export.h"
 #include "media/media_buildflags.h"
 
 #if defined(OS_WIN)
 #include <wrl/client.h>
 struct IMFCdmProxy;
+#endif
+
+#if BUILDFLAG(IS_ASH)
+namespace chromeos {
+class ChromeOsCdmContext;
+}
 #endif
 
 namespace media {
@@ -39,9 +48,6 @@ class FuchsiaCdmContext;
 // of this interface. Subclasses must ensure thread safety.
 class MEDIA_EXPORT CdmContext {
  public:
-  // Indicates an invalid CDM ID. See GetCdmId() for details.
-  enum { kInvalidCdmId = 0 };
-
   // Events happening in a CDM that a media player should be aware of.
   enum class Event {
     // A key is newly usable, e.g. new key available, or previously expired key
@@ -85,10 +91,11 @@ class MEDIA_EXPORT CdmContext {
   virtual bool RequiresMediaFoundationRenderer();
 
   // Returns an ID that can be used to find a remote CDM, in which case this CDM
-  // serves as a proxy to the remote one. Returns kInvalidCdmId when remote CDM
+  // serves as a proxy to the remote one. Returns base::nullopt when remote CDM
   // is not supported (e.g. this CDM is a local CDM).
-  // TODO(crbug.com/804397): Use base::UnguessableToken for CDM ID.
-  virtual int GetCdmId() const;
+  virtual base::Optional<base::UnguessableToken> GetCdmId() const;
+
+  static std::string CdmIdToString(const base::UnguessableToken* cdm_id);
 
 #if defined(OS_WIN)
   using GetMediaFoundationCdmProxyCB =
@@ -113,6 +120,12 @@ class MEDIA_EXPORT CdmContext {
   // Returns FuchsiaCdmContext interface when the context is backed by Fuchsia
   // CDM. Otherwise returns nullptr.
   virtual FuchsiaCdmContext* GetFuchsiaCdmContext();
+#endif
+
+#if BUILDFLAG(IS_ASH)
+  // Returns a ChromeOsCdmContext interface when the context is backed by the
+  // ChromeOS CdmFactoryDaemon. Otherwise return nullptr.
+  virtual chromeos::ChromeOsCdmContext* GetChromeOsCdmContext();
 #endif
 
  protected:

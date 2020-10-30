@@ -11,8 +11,6 @@
 #include "chrome/browser/chromeos/account_manager/account_manager_util.h"
 #include "chrome/browser/chromeos/child_accounts/secondary_account_consent_logger.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chromeos/components/account_manager/account_manager.h"
-#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/constants/chromeos_pref_names.h"
 #include "components/prefs/pref_service.h"
 
@@ -61,7 +59,7 @@ void AccountManagerPolicyController::Start() {
 }
 
 void AccountManagerPolicyController::RemoveSecondaryAccounts(
-    const std::vector<AccountManager::Account>& accounts) {
+    const std::vector<::account_manager::Account>& accounts) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // The objective here is to remove all Secondary Accounts in Chrome OS
@@ -107,9 +105,6 @@ void AccountManagerPolicyController::OnChildAccountTypeChanged(
     bool type_changed) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  if (!chromeos::features::IsEduCoexistenceEnabled())
-    return;
-
   if (!type_changed) {
     return;
   }
@@ -141,7 +136,7 @@ void AccountManagerPolicyController::
 void AccountManagerPolicyController::
     InvalidateSecondaryAccountsOnEduConsentChange(
         const std::string& new_invalidation_version,
-        const std::vector<AccountManager::Account>& accounts) {
+        const std::vector<::account_manager::Account>& accounts) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   for (const auto& account : accounts) {

@@ -43,7 +43,7 @@
 #include "services/network/public/mojom/trust_tokens.mojom-blink.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/resource_request_blocked_reason.h"
-#include "third_party/blink/public/platform/web_url_request.h"
+#include "third_party/blink/public/platform/web_url_request_extra_data.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_priority.h"
 #include "third_party/blink/renderer/platform/network/http_header_map.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
@@ -224,6 +224,9 @@ class PLATFORM_EXPORT ResourceRequestHead {
   bool HasUserGesture() const { return has_user_gesture_; }
   void SetHasUserGesture(bool);
 
+  bool HasTextFragmentToken() const { return has_text_fragment_token_; }
+  void SetHasTextFragmentToken(bool);
+
   // True if request shuold be downloaded to blob.
   bool DownloadToBlob() const { return download_to_blob_; }
   void SetDownloadToBlob(bool download_to_blob) {
@@ -254,11 +257,12 @@ class PLATFORM_EXPORT ResourceRequestHead {
   }
 
   // Extra data associated with this request.
-  const scoped_refptr<WebURLRequest::ExtraData>& GetExtraData() const {
-    return extra_data_;
+  const scoped_refptr<WebURLRequestExtraData>& GetURLRequestExtraData() const {
+    return url_request_extra_data_;
   }
-  void SetExtraData(scoped_refptr<WebURLRequest::ExtraData> extra_data) {
-    extra_data_ = extra_data;
+  void SetURLRequestExtraData(
+      scoped_refptr<WebURLRequestExtraData> url_request_extra_data) {
+    url_request_extra_data_ = std::move(url_request_extra_data);
   }
 
   bool IsDownloadToNetworkCacheOnly() const { return download_to_cache_only_; }
@@ -267,10 +271,10 @@ class PLATFORM_EXPORT ResourceRequestHead {
     download_to_cache_only_ = download_to_cache_only;
   }
 
-  mojom::RequestContextType GetRequestContext() const {
+  mojom::blink::RequestContextType GetRequestContext() const {
     return request_context_;
   }
-  void SetRequestContext(mojom::RequestContextType context) {
+  void SetRequestContext(mojom::blink::RequestContextType context) {
     request_context_ = context;
   }
 
@@ -318,10 +322,8 @@ class PLATFORM_EXPORT ResourceRequestHead {
     fetch_integrity_ = integrity;
   }
 
-  WebURLRequest::PreviewsState GetPreviewsState() const {
-    return previews_state_;
-  }
-  void SetPreviewsState(WebURLRequest::PreviewsState previews_state) {
+  PreviewsState GetPreviewsState() const { return previews_state_; }
+  void SetPreviewsState(PreviewsState previews_state) {
     previews_state_ = previews_state;
   }
 
@@ -396,6 +398,17 @@ class PLATFORM_EXPORT ResourceRequestHead {
   void SetPurposeHeader(const String& value) { purpose_header_ = value; }
   const String& GetPurposeHeader() const { return purpose_header_; }
 
+  // A V8 stack id string describing where the request was initiated. DevTools
+  // can use this to display the initiator call stack when debugging a process
+  // that later intercepts the request, e.g., in a service worker fetch event
+  // handler.
+  const base::Optional<String>& GetDevToolsStackId() const {
+    return devtools_stack_id_;
+  }
+  void SetDevToolsStackId(const base::Optional<String>& devtools_stack_id) {
+    devtools_stack_id_ = devtools_stack_id;
+  }
+
   void SetUkmSourceId(ukm::SourceId ukm_source_id) {
     ukm_source_id_ = ukm_source_id;
   }
@@ -439,6 +452,10 @@ class PLATFORM_EXPORT ResourceRequestHead {
   void SetSignedExchangePrefetchCacheEnabled(bool enabled) {
     is_signed_exchange_prefetch_cache_enabled_ = enabled;
   }
+
+  bool IsFetchLikeAPI() const { return is_fetch_like_api_; }
+
+  void SetFetchLikeAPI(bool enabled) { is_fetch_like_api_ = enabled; }
 
   bool PrefetchMaybeForTopLeveNavigation() const {
     return prefetch_maybe_for_top_level_navigation_;
@@ -490,6 +507,7 @@ class PLATFORM_EXPORT ResourceRequestHead {
   bool report_upload_progress_ : 1;
   bool report_raw_headers_ : 1;
   bool has_user_gesture_ : 1;
+  bool has_text_fragment_token_ : 1;
   bool download_to_blob_ : 1;
   bool use_stream_on_response_ : 1;
   bool keepalive_ : 1;
@@ -502,9 +520,9 @@ class PLATFORM_EXPORT ResourceRequestHead {
   ResourceLoadPriority priority_;
   int intra_priority_value_;
   int requestor_id_;
-  WebURLRequest::PreviewsState previews_state_;
-  scoped_refptr<WebURLRequest::ExtraData> extra_data_;
-  mojom::RequestContextType request_context_;
+  PreviewsState previews_state_;
+  scoped_refptr<WebURLRequestExtraData> url_request_extra_data_;
+  mojom::blink::RequestContextType request_context_;
   network::mojom::RequestDestination destination_;
   network::mojom::RequestMode mode_;
   mojom::FetchImportanceMode fetch_importance_mode_;
@@ -537,6 +555,8 @@ class PLATFORM_EXPORT ResourceRequestHead {
   String client_data_header_;
   String purpose_header_;
 
+  base::Optional<String> devtools_stack_id_;
+
   ukm::SourceId ukm_source_id_ = ukm::kInvalidSourceId;
 
   base::UnguessableToken fetch_window_id_;
@@ -546,6 +566,8 @@ class PLATFORM_EXPORT ResourceRequestHead {
   bool is_from_origin_dirty_style_sheet_ = false;
 
   bool is_signed_exchange_prefetch_cache_enabled_ = false;
+
+  bool is_fetch_like_api_ = false;
 
   // Currently this is only used when a prefetch request has `as=document`
   // specified. If true, and the request is cross-origin, the browser will cache

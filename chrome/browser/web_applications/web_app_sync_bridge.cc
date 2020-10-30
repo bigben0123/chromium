@@ -12,9 +12,12 @@
 #include "base/callback.h"
 #include "base/containers/flat_set.h"
 #include "base/logging.h"
+#include "base/metrics/user_metrics.h"
 #include "base/optional.h"
 #include "base/util/type_safety/pass_key.h"
+#include "chrome/browser/web_applications/components/os_integration_manager.h"
 #include "chrome/browser/web_applications/components/web_app_helpers.h"
+#include "chrome/browser/web_applications/components/web_app_provider_base.h"
 #include "chrome/browser/web_applications/components/web_app_utils.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/browser/web_applications/web_app_database.h"
@@ -23,7 +26,6 @@
 #include "chrome/browser/web_applications/web_app_registry_update.h"
 #include "chrome/browser/web_applications/web_app_sync_install_delegate.h"
 #include "chrome/common/channel_info.h"
-#include "chrome/common/chrome_features.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/base/report_unrecoverable_error.h"
 #include "components/sync/model/metadata_batch.h"
@@ -46,33 +48,16 @@ bool AreAppsLocallyInstalledByDefault() {
 }
 
 std::unique_ptr<syncer::EntityData> CreateSyncEntityData(const WebApp& app) {
+  // The Sync System doesn't allow empty entity_data name.
+  DCHECK(!app.name().empty());
+
   auto entity_data = std::make_unique<syncer::EntityData>();
   entity_data->name = app.name();
+  // TODO(crbug.com/1103570): Remove this fallback later.
+  if (entity_data->name.empty())
+    entity_data->name = app.start_url().spec();
 
-  sync_pb::WebAppSpecifics* sync_data =
-      entity_data->specifics.mutable_web_app();
-  sync_data->set_launch_url(app.launch_url().spec());
-  sync_data->set_user_display_mode(
-      ToWebAppSpecificsUserDisplayMode(app.user_display_mode()));
-  sync_data->set_name(app.sync_fallback_data().name);
-  if (app.sync_fallback_data().theme_color.has_value())
-    sync_data->set_theme_color(app.sync_fallback_data().theme_color.value());
-  if (app.user_page_ordinal().IsValid()) {
-    sync_data->set_user_page_ordinal(app.user_page_ordinal().ToInternalValue());
-  }
-  if (app.user_launch_ordinal().IsValid()) {
-    sync_data->set_user_launch_ordinal(
-        app.user_launch_ordinal().ToInternalValue());
-  }
-  if (app.scope().is_valid())
-    sync_data->set_scope(app.scope().spec());
-  for (const WebApplicationIconInfo& icon : app.icon_infos()) {
-    sync_pb::WebAppIconInfo* icon_info_proto = sync_data->add_icon_infos();
-    icon_info_proto->set_url(icon.url.spec());
-    if (icon.square_size_px.has_value())
-      icon_info_proto->set_size_in_px(icon.square_size_px.value());
-  }
-
+  *(entity_data->specifics.mutable_web_app()) = WebAppToSyncProto(app);
   return entity_data;
 }
 
@@ -80,22 +65,22 @@ void ApplySyncDataToApp(const sync_pb::WebAppSpecifics& sync_data,
                         WebApp* app) {
   app->AddSource(Source::kSync);
 
-  // app_id is a hash of launch_url. Parse launch_url first:
-  GURL launch_url(sync_data.launch_url());
-  if (launch_url.is_empty() || !launch_url.is_valid()) {
-    DLOG(ERROR) << "ApplySyncDataToApp: launch_url parse error.";
+  // app_id is a hash of start_url. Parse start_url first:
+  GURL start_url(sync_data.start_url());
+  if (start_url.is_empty() || !start_url.is_valid()) {
+    DLOG(ERROR) << "ApplySyncDataToApp: start_url parse error.";
     return;
   }
-  if (app->app_id() != GenerateAppIdFromURL(launch_url)) {
-    DLOG(ERROR) << "ApplySyncDataToApp: app_id doesn't match launch_url.";
+  if (app->app_id() != GenerateAppIdFromURL(start_url)) {
+    DLOG(ERROR) << "ApplySyncDataToApp: app_id doesn't match start_url.";
     return;
   }
 
-  if (app->launch_url().is_empty()) {
-    app->SetLaunchUrl(std::move(launch_url));
-  } else if (app->launch_url() != launch_url) {
+  if (app->start_url().is_empty()) {
+    app->SetStartUrl(std::move(start_url));
+  } else if (app->start_url() != start_url) {
     DLOG(ERROR)
-        << "ApplySyncDataToApp: existing launch_url doesn't match launch_url.";
+        << "ApplySyncDataToApp: existing start_url doesn't match start_url.";
     return;
   }
 
@@ -193,11 +178,34 @@ void WebAppSyncBridge::Init(base::OnceClosure callback) {
 }
 
 void WebAppSyncBridge::SetAppUserDisplayMode(const AppId& app_id,
-                                             DisplayMode user_display_mode) {
+                                             DisplayMode user_display_mode,
+                                             bool is_user_action) {
+  if (is_user_action) {
+    switch (user_display_mode) {
+      case DisplayMode::kStandalone:
+        base::RecordAction(
+            base::UserMetricsAction("WebApp.SetWindowMode.Window"));
+        break;
+      case DisplayMode::kBrowser:
+        base::RecordAction(base::UserMetricsAction("WebApp.SetWindowMode.Tab"));
+        break;
+      default:
+        NOTREACHED();
+    }
+  }
+
   ScopedRegistryUpdate update(this);
   WebApp* web_app = update->UpdateApp(app_id);
   if (web_app)
     web_app->SetUserDisplayMode(user_display_mode);
+}
+
+void WebAppSyncBridge::SetAppRunOnOsLoginMode(const AppId& app_id,
+                                              RunOnOsLoginMode mode) {
+  ScopedRegistryUpdate update(this);
+  WebApp* web_app = update->UpdateApp(app_id);
+  if (web_app)
+    web_app->SetRunOnOsLoginMode(mode);
 }
 
 void WebAppSyncBridge::SetAppIsDisabled(const AppId& app_id, bool is_disabled) {
@@ -267,6 +275,12 @@ void WebAppSyncBridge::SetUserPageOrdinal(const AppId& app_id,
                                           syncer::StringOrdinal page_ordinal) {
   ScopedRegistryUpdate update(this);
   WebApp* web_app = update->UpdateApp(app_id);
+  // Due to the extensions sync system setting ordinals on sync, this can get
+  // called before the app is installed in the web apps system. Until apps are
+  // no longer double-installed on both systems, ignore this case.
+  // https://crbug.com/1101781
+  if (!registrar_->IsInstalled(app_id))
+    return;
   if (web_app)
     web_app->SetUserPageOrdinal(page_ordinal);
 }
@@ -275,6 +289,12 @@ void WebAppSyncBridge::SetUserLaunchOrdinal(
     const AppId& app_id,
     syncer::StringOrdinal launch_ordinal) {
   ScopedRegistryUpdate update(this);
+  // Due to the extensions sync system setting ordinals on sync, this can get
+  // called before the app is installed in the web apps system. Until apps are
+  // no longer double-installed on both systems, ignore this case.
+  // https://crbug.com/1101781
+  if (!registrar_->IsInstalled(app_id))
+    return;
   WebApp* web_app = update->UpdateApp(app_id);
   if (web_app)
     web_app->SetUserLaunchOrdinal(launch_ordinal);
@@ -283,11 +303,15 @@ void WebAppSyncBridge::SetUserLaunchOrdinal(
 void WebAppSyncBridge::CheckRegistryUpdateData(
     const RegistryUpdateData& update_data) const {
 #if DCHECK_IS_ON()
-  for (const std::unique_ptr<WebApp>& web_app : update_data.apps_to_create)
+  for (const std::unique_ptr<WebApp>& web_app : update_data.apps_to_create) {
     DCHECK(!registrar_->GetAppById(web_app->app_id()));
+    DCHECK(!web_app->name().empty());
+  }
 
-  for (const std::unique_ptr<WebApp>& web_app : update_data.apps_to_update)
+  for (const std::unique_ptr<WebApp>& web_app : update_data.apps_to_update) {
     DCHECK(registrar_->GetAppById(web_app->app_id()));
+    DCHECK(!web_app->name().empty());
+  }
 
   for (const AppId& app_id : update_data.apps_to_delete)
     DCHECK(registrar_->GetAppById(app_id));
@@ -413,7 +437,7 @@ void WebAppSyncBridge::MergeLocalAppsToSync(
   // Sort only once.
   base::flat_set<AppId> sync_server_apps(std::move(storage_keys));
 
-  for (const WebApp& app : registrar_->AllApps()) {
+  for (const WebApp& app : registrar_->GetAppsIncludingStubs()) {
     if (!app.IsSynced())
       continue;
 
@@ -472,6 +496,13 @@ void WebAppSyncBridge::ApplySyncDataChange(
     // full local data and all the icons.
     web_app->SetIsInSyncInstall(true);
 
+    // The sync system requires non-empty name, populate temp name from
+    // the fallback sync data name:
+    web_app->SetName(specifics.name());
+    // Or use syncer::EntityData::name as a last resort.
+    if (web_app->name().empty())
+      web_app->SetName(change.data().name);
+
     ApplySyncDataToApp(specifics, web_app.get());
 
     // For a new app, automatically choose if we want to install it locally.
@@ -501,8 +532,10 @@ void WebAppSyncBridge::ApplySyncChangesToRegistrar(
 
   // Notify observers that web apps will be uninstalled. |apps_to_delete| are
   // still registered at this stage.
-  for (const AppId& app_id : update_local_data->apps_to_delete)
+  for (const AppId& app_id : update_local_data->apps_to_delete) {
     registrar_->NotifyWebAppUninstalled(app_id);
+    os_integration_manager().UninstallAllOsHooks(app_id, base::DoNothing());
+  }
 
   std::vector<WebApp*> apps_to_install;
   for (const auto& web_app : update_local_data->apps_to_create)
@@ -586,7 +619,7 @@ void WebAppSyncBridge::GetData(StorageKeyList storage_keys,
 void WebAppSyncBridge::GetAllDataForDebugging(DataCallback callback) {
   auto data_batch = std::make_unique<syncer::MutableDataBatch>();
 
-  for (const WebApp& app : registrar_->AllApps()) {
+  for (const WebApp& app : registrar_->GetAppsIncludingStubs()) {
     if (app.IsSynced())
       data_batch->Put(app.app_id(), CreateSyncEntityData(app));
   }
@@ -598,11 +631,11 @@ std::string WebAppSyncBridge::GetClientTag(
     const syncer::EntityData& entity_data) {
   DCHECK(entity_data.specifics.has_web_app());
 
-  const GURL launch_url(entity_data.specifics.web_app().launch_url());
-  DCHECK(!launch_url.is_empty());
-  DCHECK(launch_url.is_valid());
+  const GURL start_url(entity_data.specifics.web_app().start_url());
+  DCHECK(!start_url.is_empty());
+  DCHECK(start_url.is_valid());
 
-  return GenerateAppIdFromURL(launch_url);
+  return GenerateAppIdFromURL(start_url);
 }
 
 std::string WebAppSyncBridge::GetStorageKey(
@@ -613,7 +646,7 @@ std::string WebAppSyncBridge::GetStorageKey(
 void WebAppSyncBridge::MaybeInstallAppsInSyncInstall() {
   std::vector<WebApp*> apps_in_sync_install;
 
-  for (WebApp& app : registrar_->AllAppsMutable()) {
+  for (WebApp& app : registrar_->GetAppsIncludingStubsMutable()) {
     if (app.is_in_sync_install())
       apps_in_sync_install.push_back(&app);
   }

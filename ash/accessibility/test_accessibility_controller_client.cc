@@ -26,7 +26,9 @@ void TestAccessibilityControllerClient::TriggerAccessibilityAlert(
 }
 
 void TestAccessibilityControllerClient::TriggerAccessibilityAlertWithMessage(
-    const std::string& message) {}
+    const std::string& message) {
+  last_alert_message_ = message;
+}
 
 void TestAccessibilityControllerClient::PlayEarcon(int32_t sound_key) {
   sound_key_ = sound_key;
@@ -67,6 +69,9 @@ void TestAccessibilityControllerClient::RequestSelectToSpeakStateChange() {
 
 void TestAccessibilityControllerClient::
     RequestAutoclickScrollableBoundsForPoint(gfx::Point& point_in_screen) {}
+
+void TestAccessibilityControllerClient::MagnifierBoundsChanged(
+    const gfx::Rect& bounds_in_screen) {}
 
 void TestAccessibilityControllerClient::OnSwitchAccessDisabled() {}
 

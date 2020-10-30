@@ -24,12 +24,10 @@
 #include "chrome/common/open_search_description_document_handler.mojom.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/media/media_feeds.h"
-#include "chrome/renderer/prerender/prerender_helper.h"
-#include "chrome/renderer/prerender/prerender_observer_list.h"
 #include "chrome/renderer/web_apps.h"
 #include "components/crash/core/common/crash_key.h"
 #include "components/offline_pages/buildflags/buildflags.h"
-#include "components/prerender/common/prerender_messages.h"
+#include "components/prerender/renderer/prerender_helper.h"
 #include "components/translate/content/renderer/translate_agent.h"
 #include "components/translate/core/common/translate_util.h"
 #include "components/web_cache/renderer/web_cache_impl.h"
@@ -63,8 +61,8 @@
 #include "chrome/renderer/searchbox/searchbox_extension.h"
 #endif  // !defined(OS_ANDROID)
 
-#if BUILDFLAG(FULL_SAFE_BROWSING)
-#include "chrome/renderer/safe_browsing/phishing_classifier_delegate.h"
+#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
+#include "components/safe_browsing/content/renderer/phishing_classifier/phishing_classifier_delegate.h"
 #endif
 
 #if BUILDFLAG(ENABLE_OFFLINE_PAGES)
@@ -125,14 +123,15 @@ ChromeRenderFrameObserver::ChromeRenderFrameObserver(
       translate_agent_(nullptr),
       web_cache_impl_(web_cache_impl) {
   render_frame->GetAssociatedInterfaceRegistry()->AddInterface(
-      base::Bind(&ChromeRenderFrameObserver::OnRenderFrameObserverRequest,
-                 base::Unretained(this)));
+      base::BindRepeating(
+          &ChromeRenderFrameObserver::OnRenderFrameObserverRequest,
+          base::Unretained(this)));
 
   // Don't do anything else for subframes.
   if (!render_frame->IsMainFrame())
     return;
 
-#if BUILDFLAG(FULL_SAFE_BROWSING)
+#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
   if (!command_line.HasSwitch(switches::kDisableClientSidePhishingDetection))
@@ -286,30 +285,6 @@ void ChromeRenderFrameObserver::OnDestruct() {
   delete this;
 }
 
-void ChromeRenderFrameObserver::SetIsPrerendering(
-    prerender::mojom::PrerenderMode mode,
-    const std::string& histogram_prefix) {
-  bool is_prerendering = mode != prerender::mojom::PrerenderMode::kNoPrerender;
-  if (is_prerendering) {
-    // If the PrerenderHelper for this frame already exists, don't create it. It
-    // can already be created for subframes during handling of
-    // RenderFrameCreated, if the parent frame was prerendering at time of
-    // subframe creation.
-    auto* prerender_helper = prerender::PrerenderHelper::Get(render_frame());
-    if (!prerender_helper) {
-      // The PrerenderHelper will destroy itself either after recording
-      // histograms or on destruction of the RenderView.
-      prerender_helper = new prerender::PrerenderHelper(render_frame(), mode,
-                                                        histogram_prefix);
-    }
-
-    prerender_helper->SetIsPrerendering(mode, histogram_prefix);
-  }
-
-  prerender::PrerenderObserverList::SetIsPrerenderingForFrame(render_frame(),
-                                                              is_prerendering);
-}
-
 void ChromeRenderFrameObserver::SetWindowFeatures(
     blink::mojom::WindowFeaturesPtr window_features) {
   render_frame()->GetRenderView()->GetWebView()->SetWindowFeatures(
@@ -459,7 +434,7 @@ void ChromeRenderFrameObserver::GetMediaFeedURL(
 }
 
 void ChromeRenderFrameObserver::SetClientSidePhishingDetection() {
-#if BUILDFLAG(FULL_SAFE_BROWSING)
+#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
   phishing_classifier_ = safe_browsing::PhishingClassifierDelegate::Create(
       render_frame(), nullptr);
 #endif
@@ -495,7 +470,7 @@ void ChromeRenderFrameObserver::CapturePageText(TextCaptureType capture_type) {
 
     // Don't capture contents unless there is either a translate agent or a
     // phishing classifier to consume them.
-#if BUILDFLAG(FULL_SAFE_BROWSING)
+#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
   if (!translate_agent_ && !phishing_classifier_)
     return;
 #else
@@ -525,7 +500,7 @@ void ChromeRenderFrameObserver::CapturePageText(TextCaptureType capture_type) {
 
   TRACE_EVENT0("renderer", "ChromeRenderFrameObserver::CapturePageText");
 
-#if BUILDFLAG(FULL_SAFE_BROWSING)
+#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
   // Will swap out the string.
   if (phishing_classifier_)
     phishing_classifier_->PageCaptured(&contents,

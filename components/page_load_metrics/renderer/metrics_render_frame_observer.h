@@ -62,7 +62,7 @@ class MetricsRenderFrameObserver
                         int request_id,
                         const network::mojom::URLResponseHead& response_head,
                         network::mojom::RequestDestination request_destination,
-                        content::PreviewsState previews_state) override;
+                        blink::PreviewsState previews_state) override;
   void DidReceiveTransferSizeUpdate(int request_id,
                                     int received_data_length) override;
   void DidCompleteResponse(
@@ -83,7 +83,7 @@ class MetricsRenderFrameObserver
 
   // Invoked when a frame is going away. This is our last chance to send IPCs
   // before being destroyed.
-  void FrameDetached() override;
+  void WillDetach() override;
 
   // Set the ad resource tracker that |this| observes.
   void SetAdResourceTracker(
@@ -93,13 +93,12 @@ class MetricsRenderFrameObserver
   void OnAdResourceTrackerGoingAway() override;
   void OnAdResourceObserved(int request_id) override;
 
-  void OnMainFrameDocumentIntersectionChanged(
-      const blink::WebRect& main_frame_document_intersection) override;
+  void OnMainFrameIntersectionChanged(
+      const blink::WebRect& main_frame_intersection) override;
+  void OnMobileFriendlinessChanged(const blink::MobileFriendliness&) override;
 
-  void OnThroughputDataAvailable(ukm::SourceId source_id,
-                                 int aggregated_percent,
-                                 int impl_percent,
-                                 base::Optional<int> main_percent) override;
+  bool SetUpSmoothnessReporting(
+      base::ReadOnlySharedMemoryRegion& shared_memory) override;
 
  protected:
   // The relative and monotonic page load timings.
@@ -156,6 +155,9 @@ class MetricsRenderFrameObserver
 
   // Set containing all request ids that were reported as completing before FCP.
   std::set<int> before_fcp_request_ids_;
+
+  // Handle to the shared memory for transporting smoothness related ukm data.
+  base::ReadOnlySharedMemoryRegion ukm_smoothness_data_;
 
   // Will be null when we're not actively sending metrics.
   std::unique_ptr<PageTimingMetricsSender> page_timing_metrics_sender_;

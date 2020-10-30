@@ -66,7 +66,7 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #include "base/mac/mac_util.h"
 #include "ui/base/test/scoped_fake_nswindow_fullscreen.h"
 #endif
@@ -185,7 +185,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, GetWindow) {
   // minimize/maximize programmatically?
 
   // Popup.
-  Browser* popup_browser = new Browser(
+  Browser* popup_browser = Browser::Create(
       Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile(), true));
   function = new WindowsGetFunction();
   function->set_extension(extension.get());
@@ -677,7 +677,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, DontCreateTabInClosingPopupWindow) {
   // Test creates new popup window, closes it right away and then tries to open
   // a new tab in it. Tab should not be opened in the popup window, but in a
   // tabbed browser window.
-  Browser* popup_browser = new Browser(
+  Browser* popup_browser = Browser::Create(
       Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile(), true));
   int window_id = ExtensionTabUtil::GetWindowId(popup_browser);
   chrome::CloseWindow(popup_browser);
@@ -786,7 +786,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, UpdateDevToolsWindow) {
 // MacOSX. Deactivate for now.
 // TODO(warx): Move ExtensionWindowLastFocusedTest to interactive
 // uitest as it triggers native widget activation.
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
 class ExtensionWindowLastFocusedTest : public ExtensionTabsTest {
  public:
   void SetUpOnMainThread() override;
@@ -855,11 +855,11 @@ Browser* ExtensionWindowLastFocusedTest::CreateBrowserWithEmptyTab(
     bool as_popup) {
   Browser* new_browser;
   if (as_popup)
-    new_browser = new Browser(
+    new_browser = Browser::Create(
         Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile(), true));
   else
     new_browser =
-        new Browser(Browser::CreateParams(browser()->profile(), true));
+        Browser::Create(Browser::CreateParams(browser()->profile(), true));
   AddBlankTabAndShow(new_browser);
   return new_browser;
 }
@@ -1030,16 +1030,16 @@ IN_PROC_BROWSER_TEST_F(ExtensionWindowLastFocusedTest,
   DevToolsWindowTesting::CloseDevToolsWindowSync(devtools);
   CloseAppWindow(app_window);
 }
-#endif  // !defined(OS_MACOSX)
+#endif  // !defined(OS_MAC)
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 // https://crbug.com/836327
 #define MAYBE_AcceptState DISABLED_AcceptState
 #else
 #define MAYBE_AcceptState AcceptState
 #endif
 IN_PROC_BROWSER_TEST_F(ExtensionWindowCreateTest, MAYBE_AcceptState) {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   if (base::mac::IsOS10_10())
     return;  // Fails when swarmed. http://crbug.com/660582
   ui::test::ScopedFakeNSWindowFullscreen fake_fullscreen;
@@ -1220,7 +1220,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, NoTabsAppWindow) {
 }
 
 // Crashes on Mac/Win only.  http://crbug.com/708996
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #define MAYBE_FilteredEvents DISABLED_FilteredEvents
 #else
 #define MAYBE_FilteredEvents FilteredEvents
@@ -1240,7 +1240,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, MAYBE_FilteredEvents) {
       " \"maxWidth\": 400, \"maxHeight\": 400}}");
 
   Browser* browser_window =
-      new Browser(Browser::CreateParams(browser()->profile(), true));
+      Browser::Create(Browser::CreateParams(browser()->profile(), true));
   AddBlankTabAndShow(browser_window);
 
   DevToolsWindow* devtools_window =
@@ -1255,11 +1255,29 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, MAYBE_FilteredEvents) {
   // TODO(llandwerlin): It seems creating an app window on MacOSX
   // won't create an activation event whereas it does on all other
   // platform. Disable focus event tests for now.
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   listener.Reply("");
 #else
   listener.Reply("focus");
 #endif
+
+  ASSERT_TRUE(catcher.GetNextResult());
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, OnBoundsChanged) {
+  extensions::ResultCatcher catcher;
+  ExtensionTestMessageListener listener("ready", true);
+  ASSERT_TRUE(
+      LoadExtension(test_data_dir_.AppendASCII("api_test/windows/bounds")));
+  ASSERT_TRUE(listener.WaitUntilSatisfied());
+
+  gfx::Rect rect = browser()->window()->GetBounds();
+  rect.Inset(10, 10);
+  browser()->window()->SetBounds(rect);
+
+  listener.Reply(base::StringPrintf(
+      R"({"top": %u, "left": %u, "width": %u, "height": %u})", rect.y(),
+      rect.x(), rect.width(), rect.height()));
 
   ASSERT_TRUE(catcher.GetNextResult());
 }
@@ -2089,12 +2107,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TemporaryAddressSpoof) {
   // the guest WebContents as there is no longer a BrowserPlugin involved.
   web_contents_for_click = inner_web_contents[0];
 
-  // The actual PDF page coordinates that this click goes to is (346, 333),
-  // after several space transformations, not (400, 400). This clicks on a link
-  // to "http://www.facebook.com:83".
+  // (400, 300) in `web_contents_for_click` translates to a different coordinate
+  // in the PDF Viewer. The exact coordinate depends on the PDF Viewer's UI
+  // layout. In the test PDF embedded in pdf_extension_test.html, the entire PDF
+  // content area is a giant link to http://www.facebook.com:83. As long as this
+  // click hits that link target, it triggers the navigation required for test.
   content::SimulateMouseClickAt(web_contents_for_click, 0,
                                 blink::WebMouseEvent::Button::kLeft,
-                                gfx::Point(400, 400));
+                                gfx::Point(400, 300));
 
   ASSERT_TRUE(navigation_manager.WaitForRequestStart());
 

@@ -29,7 +29,6 @@
 #include "third_party/blink/public/platform/web_icon_sizes_parser.h"
 #include "third_party/blink/public/platform/web_prescient_networking.h"
 #include "third_party/blink/public/platform/web_size.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_event_listener.h"
 #include "third_party/blink/renderer/core/core_initializer.h"
 #include "third_party/blink/renderer/core/dom/attribute.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -83,8 +82,8 @@ void HTMLLinkElement::ParseAttribute(
         // Show a warning that HTML Imports (<link rel=import>) were detected,
         // but HTML Imports have been disabled. Without this, the failure would
         // be silent.
-        if (auto* context = GetExecutionContext()) {
-          context->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+        if (LocalDOMWindow* window = GetDocument().ExecutingWindow()) {
+          window->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
               mojom::blink::ConsoleMessageSource::kRendering,
               mojom::blink::ConsoleMessageLevel::kWarning,
               "HTML Imports is deprecated and has now been removed as of "

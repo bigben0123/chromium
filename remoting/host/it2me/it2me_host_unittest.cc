@@ -31,9 +31,9 @@
 #include "remoting/signaling/xmpp_log_to_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 #include "base/linux_util.h"
-#endif  // defined(OS_LINUX)
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
 
 namespace remoting {
 
@@ -152,7 +152,8 @@ class It2MeHostTest : public testing::Test, public It2MeHost::Observer {
   void OnClientAuthenticated(const std::string& client_username) override;
   void OnStoreAccessCode(const std::string& access_code,
                          base::TimeDelta access_code_lifetime) override;
-  void OnNatPolicyChanged(bool nat_traversal_enabled) override;
+  void OnNatPoliciesChanged(bool nat_traversal_enabled,
+                            bool relay_connections_allowed) override;
   void OnStateChanged(It2MeHostState state, ErrorCode error_code) override;
 
   void SetPolicies(
@@ -170,6 +171,12 @@ class It2MeHostTest : public testing::Test, public It2MeHost::Observer {
       std::initializer_list<base::StringPiece> values);
 
   ChromotingHost* GetHost() { return it2me_host_->host_.get(); }
+
+  // Stores the last nat traversal policy value received.
+  bool last_nat_traversal_enabled_value_ = false;
+
+  // Stores the last relay enabled policy value received.
+  bool last_relay_connections_allowed_value_ = false;
 
   ValidationResult validation_result_ = ValidationResult::SUCCESS;
 
@@ -207,7 +214,7 @@ It2MeHostTest::It2MeHostTest() {}
 It2MeHostTest::~It2MeHostTest() = default;
 
 void It2MeHostTest::SetUp() {
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
   // Need to prime the host OS version value for linux to prevent IO on the
   // network thread. base::GetLinuxDistro() caches the result.
   base::GetLinuxDistro();
@@ -299,16 +306,23 @@ void It2MeHostTest::StartHost(bool enable_dialogs, bool enable_notifications) {
     // false should only be run on ChromeOS.
     it2me_host_->set_enable_notifications(enable_notifications);
   }
-  auto register_host_request =
-      std::make_unique<XmppRegisterSupportHostRequest>("fake_bot_jid");
-  auto log_to_server = std::make_unique<XmppLogToServer>(
-      ServerLogEntry::IT2ME, fake_signal_strategy.get(), "fake_bot_jid",
-      host_context_->network_task_runner());
-  it2me_host_->Connect(
-      host_context_->Copy(), policies_->CreateDeepCopy(),
-      std::move(dialog_factory), std::move(register_host_request),
-      std::move(log_to_server), weak_factory_.GetWeakPtr(),
-      std::move(fake_signal_strategy), kTestUserName, ice_config);
+  auto create_connection_context = base::BindOnce(
+      [](std::unique_ptr<SignalStrategy> signal_strategy,
+         ChromotingHostContext* host_context) {
+        auto context = std::make_unique<It2MeHost::DeferredConnectContext>();
+        context->register_request =
+            std::make_unique<XmppRegisterSupportHostRequest>("fake_bot_jid");
+        context->log_to_server = std::make_unique<XmppLogToServer>(
+            ServerLogEntry::IT2ME, signal_strategy.get(), "fake_bot_jid",
+            host_context->network_task_runner());
+        context->signal_strategy = std::move(signal_strategy);
+        return context;
+      },
+      std::move(fake_signal_strategy));
+  it2me_host_->Connect(host_context_->Copy(), policies_->CreateDeepCopy(),
+                       std::move(dialog_factory), weak_factory_.GetWeakPtr(),
+                       std::move(create_connection_context), kTestUserName,
+                       ice_config);
 
   base::RunLoop run_loop;
   state_change_callback_ =
@@ -335,8 +349,8 @@ void It2MeHostTest::RunValidationCallback(const std::string& remote_jid) {
       FROM_HERE,
       base::BindOnce(
           it2me_host_->GetValidationCallbackForTesting(), remote_jid,
-          base::Bind(&It2MeHostTest::OnValidationComplete,
-                     base::Unretained(this), run_loop.QuitClosure())));
+          base::BindOnce(&It2MeHostTest::OnValidationComplete,
+                         base::Unretained(this), run_loop.QuitClosure())));
 
   run_loop.Run();
 }
@@ -346,7 +360,11 @@ void It2MeHostTest::OnClientAuthenticated(const std::string& client_username) {}
 void It2MeHostTest::OnStoreAccessCode(const std::string& access_code,
                                       base::TimeDelta access_code_lifetime) {}
 
-void It2MeHostTest::OnNatPolicyChanged(bool nat_traversal_enabled) {}
+void It2MeHostTest::OnNatPoliciesChanged(bool nat_traversal_enabled,
+                                         bool relay_connections_allowed) {
+  last_nat_traversal_enabled_value_ = nat_traversal_enabled;
+  last_relay_connections_allowed_value_ = relay_connections_allowed;
+}
 
 void It2MeHostTest::OnStateChanged(It2MeHostState state, ErrorCode error_code) {
   last_host_state_ = state;
@@ -394,10 +412,101 @@ TEST_F(It2MeHostTest, IceConfig) {
 
   protocol::IceConfig ice_config;
   GetHost()->transport_context_for_tests()->GetIceConfig(
-      base::Bind(&ReceiveIceConfig, &ice_config));
+      base::BindOnce(&ReceiveIceConfig, &ice_config));
   EXPECT_EQ(ice_config.stun_servers[0].hostname(), kTestStunServer);
 
   ShutdownHost();
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest, NatTraversalPolicy_Enabled) {
+  SetPolicies(
+      {{policy::key::kRemoteAccessHostFirewallTraversal, base::Value(true)}});
+
+  StartHost();
+  ASSERT_EQ(It2MeHostState::kReceivedAccessCode, last_host_state_);
+
+  EXPECT_TRUE(last_nat_traversal_enabled_value_);
+
+  ShutdownHost();
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest, NatTraversalPolicy_Disabled) {
+  SetPolicies(
+      {{policy::key::kRemoteAccessHostFirewallTraversal, base::Value(false)}});
+
+  StartHost();
+  ASSERT_EQ(It2MeHostState::kReceivedAccessCode, last_host_state_);
+
+  EXPECT_FALSE(last_nat_traversal_enabled_value_);
+
+  ShutdownHost();
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+// TODO(crbug/1122155): flaky test.
+TEST_F(It2MeHostTest,
+       DISABLED_NatTraversalPolicy_DisabledTransitionCausesDisconnect) {
+  StartHost();
+  ASSERT_EQ(It2MeHostState::kReceivedAccessCode, last_host_state_);
+
+  EXPECT_TRUE(last_nat_traversal_enabled_value_);
+  EXPECT_TRUE(last_relay_connections_allowed_value_);
+
+  SetPolicies(
+      {{policy::key::kRemoteAccessHostFirewallTraversal, base::Value(false)},
+       {policy::key::kRemoteAccessHostAllowRelayedConnection,
+        base::Value(true)}});
+  RunUntilStateChanged(It2MeHostState::kDisconnected);
+
+  EXPECT_FALSE(last_nat_traversal_enabled_value_);
+  EXPECT_TRUE(last_relay_connections_allowed_value_);
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest, RelayPolicy_Enabled) {
+  SetPolicies({{policy::key::kRemoteAccessHostAllowRelayedConnection,
+                base::Value(true)}});
+
+  StartHost();
+  ASSERT_EQ(It2MeHostState::kReceivedAccessCode, last_host_state_);
+
+  EXPECT_TRUE(last_relay_connections_allowed_value_);
+
+  ShutdownHost();
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest, RelayPolicy_Disabled) {
+  SetPolicies({{policy::key::kRemoteAccessHostAllowRelayedConnection,
+                base::Value(false)}});
+
+  StartHost();
+  ASSERT_EQ(It2MeHostState::kReceivedAccessCode, last_host_state_);
+
+  EXPECT_FALSE(last_relay_connections_allowed_value_);
+
+  ShutdownHost();
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+// TODO(crbug.com/1126973): Flaky test.
+TEST_F(It2MeHostTest, DISABLED_RelayPolicy_DisabledTransitionCausesDisconnect) {
+  StartHost();
+  ASSERT_EQ(It2MeHostState::kReceivedAccessCode, last_host_state_);
+
+  EXPECT_TRUE(last_nat_traversal_enabled_value_);
+  EXPECT_TRUE(last_relay_connections_allowed_value_);
+
+  SetPolicies(
+      {{policy::key::kRemoteAccessHostFirewallTraversal, base::Value(true)},
+       {policy::key::kRemoteAccessHostAllowRelayedConnection,
+        base::Value(false)}});
+  RunUntilStateChanged(It2MeHostState::kDisconnected);
+
+  EXPECT_TRUE(last_nat_traversal_enabled_value_);
+  EXPECT_FALSE(last_relay_connections_allowed_value_);
   ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
 }
 

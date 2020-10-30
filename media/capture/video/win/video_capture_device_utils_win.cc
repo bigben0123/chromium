@@ -13,8 +13,20 @@
 namespace media {
 
 namespace {
+
 const int kDegreesToArcSeconds = 3600;
 const int kSecondsTo100MicroSeconds = 10000;
+
+// Determines if camera is mounted on a device with naturally portrait display.
+bool IsPortraitDevice(DWORD display_height,
+                      DWORD display_width,
+                      DWORD display_orientation) {
+  if (display_orientation == DMDO_DEFAULT || display_orientation == DMDO_180)
+    return display_height >= display_width;
+  else
+    return display_height < display_width;
+}
+
 }  // namespace
 
 // Windows platform stores pan and tilt (min, max, step and current) in
@@ -70,10 +82,6 @@ double PlatformExposureTimeToCaptureStep(long log_step,
 int GetCameraRotation(VideoFacingMode facing) {
   int rotation = 0;
 
-  if (!IsAutoRotationEnabled()) {
-    return rotation;
-  }
-
   // Before Win10, we can't distinguish if the selected camera is an internal or
   // external one. So we assume it's internal and do the frame rotation if the
   // auto rotation is enabled to cover most user cases.
@@ -90,28 +98,62 @@ int GetCameraRotation(VideoFacingMode facing) {
     return rotation;
   }
 
+  if (facing == VideoFacingMode::MEDIA_VIDEO_FACING_NONE) {
+    // We set camera facing using Win10 only DeviceInformation API. So pre-Win10
+    // cameras always have a facing of VideoFacingMode::MEDIA_VIDEO_FACING_NONE.
+    // Win10 cameras with VideoFacingMode::MEDIA_VIDEO_FACING_NONE should early
+    // exit as part of the IsInternalCamera(facing) check above.
+    DCHECK(base::win::GetVersion() < base::win::Version::WIN10);
+  }
+
   DEVMODE mode;
   ::ZeroMemory(&mode, sizeof(mode));
   mode.dmSize = sizeof(mode);
   mode.dmDriverExtra = 0;
   if (::EnumDisplaySettings(internal_display_device.DeviceName,
                             ENUM_CURRENT_SETTINGS, &mode)) {
-    int device_orientation = 0;
+    int camera_offset = 0;  // Measured in degrees, clockwise.
+    bool portrait_device = IsPortraitDevice(mode.dmPelsHeight, mode.dmPelsWidth,
+                                            mode.dmDisplayOrientation);
     switch (mode.dmDisplayOrientation) {
       case DMDO_DEFAULT:
-        device_orientation = 0;
+        if (portrait_device &&
+            facing == VideoFacingMode::MEDIA_VIDEO_FACING_ENVIRONMENT) {
+          camera_offset = 270;  // Adjust portrait device rear camera by 180.
+        } else if (portrait_device) {
+          camera_offset = 90;  // Portrait device front camera is offset by 90.
+        } else {
+          camera_offset = 0;
+        }
         break;
       case DMDO_90:
-        device_orientation = 90;
+        if (portrait_device)
+          camera_offset = 180;
+        else if (facing == VideoFacingMode::MEDIA_VIDEO_FACING_ENVIRONMENT)
+          camera_offset = 270;  // Adjust landscape device rear camera by 180.
+        else
+          camera_offset = 90;
         break;
       case DMDO_180:
-        device_orientation = 180;
+        if (portrait_device &&
+            facing == VideoFacingMode::MEDIA_VIDEO_FACING_ENVIRONMENT) {
+          camera_offset = 90;  // Adjust portrait device rear camera by 180.
+        } else if (portrait_device) {
+          camera_offset = 270;
+        } else {
+          camera_offset = 180;
+        }
         break;
       case DMDO_270:
-        device_orientation = 270;
+        if (portrait_device)
+          camera_offset = 0;
+        else if (facing == VideoFacingMode::MEDIA_VIDEO_FACING_ENVIRONMENT)
+          camera_offset = 90;  // Adjust landscape device rear camera by 180.
+        else
+          camera_offset = 270;
         break;
     }
-    rotation = (360 - device_orientation) % 360;
+    rotation = (360 - camera_offset) % 360;
   }
 
   return rotation;

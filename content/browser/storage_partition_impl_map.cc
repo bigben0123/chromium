@@ -157,7 +157,7 @@ void ObliterateOneDirectory(const base::FilePath& current_dir,
 
     switch (action) {
       case kDelete:
-        base::DeleteFileRecursively(to_delete);
+        base::DeletePathRecursively(to_delete);
         break;
 
       case kEnqueue:
@@ -207,7 +207,7 @@ void BlockingObliteratePath(
   // root and be done with it.  Otherwise, signal garbage collection and do
   // a best-effort delete of the on-disk structures.
   if (valid_paths_to_keep.empty()) {
-    base::DeleteFileRecursively(root);
+    base::DeletePathRecursively(root);
     return;
   }
   closure_runner->PostTask(FROM_HERE, std::move(on_gc_required));
@@ -341,13 +341,19 @@ StoragePartitionImpl* StoragePartitionImplMap::Get(
   base::FilePath relative_partition_path = GetStoragePartitionPath(
       partition_config.partition_domain(), partition_config.partition_name());
 
+  base::Optional<StoragePartitionConfig> fallback_config =
+      partition_config.GetFallbackForBlobUrls();
+  StoragePartitionImpl* fallback_for_blob_urls =
+      fallback_config.has_value() ? Get(*fallback_config, /*can_create=*/false)
+                                  : nullptr;
+
   std::unique_ptr<StoragePartitionImpl> partition_ptr(
       StoragePartitionImpl::Create(
           browser_context_, partition_config.in_memory(),
           relative_partition_path, partition_config.partition_domain()));
   StoragePartitionImpl* partition = partition_ptr.get();
   partitions_[partition_config] = std::move(partition_ptr);
-  partition->Initialize();
+  partition->Initialize(fallback_for_blob_urls);
 
   // Arm the serviceworker cookie change observation API.
   partition->GetCookieStoreContext()->ListenToCookieChanges(
@@ -446,24 +452,25 @@ void StoragePartitionImplMap::PostCreateInitialization(
     InitializeResourceContext(browser_context_);
   }
 
-  partition->GetAppCacheService()->Initialize(
-      in_memory ? base::FilePath()
-                : partition->GetPath().Append(kAppCacheDirname),
-      browser_context_, browser_context_->GetSpecialStoragePolicy());
+  if (StoragePartition::IsAppCacheEnabled()) {
+    partition->GetAppCacheService()->Initialize(
+        in_memory ? base::FilePath()
+                  : partition->GetPath().Append(kAppCacheDirname),
+        browser_context_, browser_context_->GetSpecialStoragePolicy());
+  } else if (!in_memory) {
+    // If AppCache is not enabled, clean up any on disk storage.  This is the
+    // path that will execute once AppCache has been fully removed from Chrome.
+    base::ThreadPool::PostTask(
+        FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
+        base::BindOnce(
+            [](const base::FilePath& dir) { base::DeletePathRecursively(dir); },
+            partition->GetPath().Append(kAppCacheDirname)));
+  }
 
   // Check first to avoid memory leak in unittests.
   if (BrowserThread::IsThreadInitialized(BrowserThread::IO)) {
     partition->GetCacheStorageContext()->SetBlobParametersForCache(
         ChromeBlobStorageContext::GetFor(browser_context_));
-
-    if (!ServiceWorkerContext::IsServiceWorkerOnUIEnabled()) {
-      GetIOThreadTaskRunner({})->PostTask(
-          FROM_HERE,
-          base::BindOnce(
-              &ServiceWorkerContextWrapper::InitializeResourceContext,
-              partition->GetServiceWorkerContext(),
-              browser_context_->GetResourceContext()));
-    }
 
     // Use PostTask() instead of RunOrPostTaskOnThread() because not posting a
     // task causes it to run before the CacheStorageManager has been

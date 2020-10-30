@@ -61,7 +61,8 @@ class It2MeNativeMessagingHost : public It2MeHost::Observer,
       override;
   void OnStoreAccessCode(const std::string& access_code,
                                  base::TimeDelta access_code_lifetime) override;
-  void OnNatPolicyChanged(bool nat_traversal_enabled) override;
+  void OnNatPoliciesChanged(bool nat_traversal_enabled,
+                            bool relay_connections_allowed) override;
   void OnStateChanged(It2MeHostState state,
                       protocol::ErrorCode error_code) override;
 
@@ -114,12 +115,6 @@ class It2MeNativeMessagingHost : public It2MeHost::Observer,
   // Returns nullptr on failure.
   std::unique_ptr<SignalStrategy> CreateDelegatedSignalStrategy(
       const base::DictionaryValue* message);
-
-  // Creates a FtlSignalStrategy from the values stored in |message| along
-  // with |user_name|.  Returns nullptr on failure.
-  std::unique_ptr<SignalStrategy> CreateFtlSignalStrategy(
-      const std::string& user_name,
-      const std::string& access_token);
 
   // Extracts OAuth access token from the message passed from the client.
   std::string ExtractAccessToken(const base::DictionaryValue* message);

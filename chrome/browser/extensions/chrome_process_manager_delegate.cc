@@ -23,7 +23,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/extensions/component_extensions_whitelist/whitelist.h"
+#include "chrome/browser/extensions/component_extensions_allowlist/allowlist.h"
 #include "chromeos/constants/chromeos_switches.h"
 #endif
 
@@ -90,9 +90,9 @@ bool ChromeProcessManagerDelegate::IsExtensionBackgroundPageAllowed(
             ->GetForceInstallList();
 
     // For the ChromeOS login profile, only allow apps installed by device
-    // policy or that are explicitly whitelisted.
+    // policy or that are explicitly allowlisted.
     return login_screen_apps_list->HasKey(extension.id()) ||
-           IsComponentExtensionWhitelistedForSignInProfile(extension.id());
+           IsComponentExtensionAllowlistedForSignInProfile(extension.id());
   }
 
   if (chromeos::ProfileHelper::IsLockScreenAppProfile(profile) &&
@@ -114,17 +114,8 @@ bool ChromeProcessManagerDelegate::DeferCreatingStartupBackgroundHosts(
   // Background hosts will be loaded later via OnProfileAdded.
   // http://crbug.com/222473
   // Unit tests may not have a profile manager.
-  if (g_browser_process->profile_manager() &&
-      !g_browser_process->profile_manager()->IsValidProfile(profile)) {
-    return true;
-  }
-
-  // There are no browser windows open and the browser process was
-  // started to show the app launcher. Background hosts will be loaded later
-  // via OnBrowserAdded(). http://crbug.com/178260
-  return chrome::GetBrowserCount(profile) == 0 &&
-         base::CommandLine::ForCurrentProcess()->HasSwitch(
-             ::switches::kShowAppList);
+  return (g_browser_process->profile_manager() &&
+          !g_browser_process->profile_manager()->IsValidProfile(profile));
 }
 
 void ChromeProcessManagerDelegate::OnBrowserAdded(Browser* browser) {

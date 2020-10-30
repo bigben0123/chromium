@@ -48,10 +48,6 @@
         fields_to_diff: ["font"],
         methods_to_diff: [
           {
-            method: "FontInternal().LoadingCustomFonts()",
-            field_dependencies: ["font"]
-          },
-          {
             method: "TextTransform()",
             field_dependencies: ["text-transform"]
           },
@@ -59,11 +55,6 @@
             method: "WhiteSpace()",
             field_dependencies: ["white-space"]
           },
-        ]
-    },
-    {
-        name: "DiffNeedsCollectInlinesAndFullLayoutAndPaintInvalidation",
-        methods_to_diff: [
           {
             method: "Direction()",
             field_dependencies: ["direction"]
@@ -229,7 +220,8 @@
         fields_to_diff: ["width", "min-width", "max-width", "height", "min-height",
                 "max-height", "VerticalAlignLength", "box-sizing", "align-content",
                 "align-items", "align-self", "justify-content", "justify-items",
-                "justify-self", "contain", "contain-intrinsic-size", "aspect-ratio"],
+                "justify-self", "contain", "contain-intrinsic-size", "aspect-ratio",
+                "overflow-clip-margin", "-internal-align-self-block"],
         methods_to_diff: [
           {
             method: "VerticalAlign()",
@@ -401,14 +393,11 @@
             predicate: "a.BorderVisualOverflowEqual(b)",
             field_dependencies: ["border-image"]
           },
-        ]
-    },
-    {
-        name: "UpdatePropertySpecificDifferencesBackdropFilter",
-        predicates_to_test: [
           {
-            predicate: "a.BackdropFilterDataEquivalent(b)",
-            field_dependencies: ["backdrop-filter"]
+            predicate: "a.TextDecorationVisualOverflowEqual(b)",
+            field_dependencies: ["text-decoration-thickness", "text-decoration-style",
+                                 "text-decoration-line", "text-underline-offset", "text-underline-position",
+                                 "AppliedTextDecorations"]
           },
         ]
     },
@@ -416,6 +405,7 @@
         name: "UpdatePropertySpecificDifferencesTextDecorationOrColor",
         fields_to_diff: ["color", "-internal-visited-color", "text-decoration-line",
                 "text-decoration-style", "text-decoration-color",
+                "text-decoration-thickness", "text-underline-offset",
                 "-internal-visited-text-decoration-color", "TextEmphasisFill",
                 "text-underline-position", "text-decoration-skip-ink", "AppliedTextDecorations"],
         methods_to_diff: [

@@ -6,6 +6,7 @@
 
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
+#include <cups/cups.h>
 
 #import <iomanip>
 #import <numeric>
@@ -16,6 +17,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "printing/print_settings_initializer_mac.h"
+#include "printing/printing_features.h"
 #include "printing/units.h"
 
 namespace printing {
@@ -186,7 +188,8 @@ PrintingContext::Result PrintingContextMac::UpdatePrinterSettings(
         !SetCopiesInPrintSettings(settings_->copies()) ||
         !SetCollateInPrintSettings(settings_->collate()) ||
         !SetDuplexModeInPrintSettings(settings_->duplex_mode()) ||
-        !SetOutputColor(settings_->color())) {
+        !SetOutputColor(static_cast<int>(settings_->color())) ||
+        !SetResolution(settings_->dpi_size())) {
       return OnError();
     }
   }
@@ -389,7 +392,13 @@ bool PrintingContextMac::SetOutputColor(int color_mode) {
       static_cast<PMPrintSettings>([print_info_.get() PMPrintSettings]);
   std::string color_setting_name;
   std::string color_value;
-  GetColorModelForMode(color_mode, &color_setting_name, &color_value);
+  mojom::ColorModel color_model = ColorModeToColorModel(color_mode);
+  if (base::FeatureList::IsEnabled(features::kCupsIppPrintingBackend)) {
+    color_setting_name = CUPS_PRINT_COLOR_MODE;
+    color_value = GetIppColorModelForModel(color_model);
+  } else {
+    GetColorModelForModel(color_model, &color_setting_name, &color_value);
+  }
   base::ScopedCFTypeRef<CFStringRef> color_setting(
       base::SysUTF8ToCFStringRef(color_setting_name));
   base::ScopedCFTypeRef<CFStringRef> output_color(
@@ -397,6 +406,26 @@ bool PrintingContextMac::SetOutputColor(int color_mode) {
 
   return PMPrintSettingsSetValue(print_settings, color_setting.get(),
                                  output_color.get(), false) == noErr;
+}
+
+bool PrintingContextMac::SetResolution(const gfx::Size& dpi_size) {
+  if (dpi_size.IsEmpty())
+    return true;
+
+  PMPrintSession print_session =
+      static_cast<PMPrintSession>([print_info_.get() PMPrintSession]);
+  PMPrinter current_printer;
+  if (PMSessionGetCurrentPrinter(print_session, &current_printer) != noErr)
+    return false;
+
+  PMResolution resolution;
+  resolution.hRes = dpi_size.width();
+  resolution.vRes = dpi_size.height();
+
+  PMPrintSettings print_settings =
+      static_cast<PMPrintSettings>([print_info_.get() PMPrintSettings]);
+  return PMPrinterSetOutputResolution(current_printer, print_settings,
+                                      &resolution) == noErr;
 }
 
 PageRanges PrintingContextMac::GetPageRangesFromPrintInfo() {

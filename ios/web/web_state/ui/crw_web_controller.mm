@@ -6,6 +6,7 @@
 
 #import <WebKit/WebKit.h>
 
+#include "base/bind.h"
 #import "base/ios/block_types.h"
 #include "base/ios/ios_util.h"
 #include "base/json/string_escape.h"
@@ -31,6 +32,7 @@
 #import "ios/web/navigation/crw_web_view_navigation_observer_delegate.h"
 #import "ios/web/navigation/crw_wk_navigation_handler.h"
 #import "ios/web/navigation/crw_wk_navigation_states.h"
+#import "ios/web/navigation/error_page_helper.h"
 #import "ios/web/navigation/navigation_context_impl.h"
 #import "ios/web/navigation/wk_back_forward_list_item_holder.h"
 #import "ios/web/navigation/wk_navigation_util.h"
@@ -84,6 +86,9 @@ NSString* const kIsMainFrame = @"isMainFrame";
 
 // URL scheme for messages sent from javascript for asynchronous processing.
 NSString* const kScriptMessageName = @"crwebinvoke";
+
+// URL scheme for session restore.
+NSString* const kSessionRestoreScriptMessageName = @"session_restore";
 
 }  // namespace
 
@@ -440,6 +445,15 @@ typedef void (^ViewportStateCompletion)(const web::PageViewportState*);
           [weakSelf didReceiveScriptMessage:message];
         }
                            name:kScriptMessageName
+                        webView:_webView];
+
+    // TODO(crbug.com/1127521) Consider consolidating session restore script
+    // logic into a different place.
+    [messageRouter
+        setScriptMessageHandler:^(WKScriptMessage* message) {
+          [weakSelf didReceiveSessionRestoreScriptMessage:message];
+        }
+                           name:kSessionRestoreScriptMessageName
                         webView:_webView];
 
     _webView.allowsBackForwardNavigationGestures =
@@ -809,6 +823,10 @@ typedef void (^ViewportStateCompletion)(const web::PageViewportState*);
     self.navigationHandler.navigationState = web::WKNavigationState::REQUESTED;
   }
 
+  if ([ErrorPageHelper isErrorPageFileURL:URL]) {
+    context->SetLoadingErrorPage(true);
+  }
+
   web::WKBackForwardListItemHolder* holder =
       web::WKBackForwardListItemHolder::FromNavigationItem(item);
   holder->set_navigation_type(WKNavigationTypeBackForward);
@@ -860,6 +878,20 @@ typedef void (^ViewportStateCompletion)(const web::PageViewportState*);
                   }];
 }
 
+- (void)createFullPagePDFWithCompletion:(void (^)(NSData*))completionBlock {
+  // Invoke the |completionBlock| with nil rather than a blank PDF for certain
+  // URLs.
+  const GURL& URL = self.webState->GetLastCommittedURL();
+  if (![self contentIsHTML] || !URL.is_valid() ||
+      web::GetWebClient()->IsAppSpecificURL(URL)) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      completionBlock(nil);
+    });
+    return;
+  }
+  web::CreateFullPagePdf(self.webView, base::BindOnce(completionBlock));
+}
+
 #pragma mark - CRWTouchTrackingDelegate (Public)
 
 - (void)touched:(BOOL)touched {
@@ -887,11 +919,9 @@ typedef void (^ViewportStateCompletion)(const web::PageViewportState*);
     _documentURL = newURL;
     _userInteractionState.SetUserInteractionRegisteredSinceLastUrlChange(false);
   }
-  if (context && !context->IsLoadingHtmlString() &&
-      (base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage) ||
-       !context->IsLoadingErrorPage()) &&
-      !IsWKInternalUrl(newURL) && !newURL.SchemeIs(url::kAboutScheme) &&
-      self.webView) {
+  if (context && !context->IsLoadingErrorPage() &&
+      !context->IsLoadingHtmlString() && !IsWKInternalUrl(newURL) &&
+      !newURL.SchemeIs(url::kAboutScheme) && self.webView) {
     // On iOS13, WebKit started changing the URL visible webView.URL when
     // opening a new tab and then writing to it, e.g.
     // window.open('javascript:document.write(1)').  This URL is never commited,
@@ -1088,6 +1118,22 @@ typedef void (^ViewportStateCompletion)(const web::PageViewportState*);
   // Broken out into separate method to catch errors.
   if (![self respondToWKScriptMessage:message]) {
     DLOG(WARNING) << "Message from JS not handled due to invalid format";
+  }
+}
+
+// TODO(crbug.com/1127521) Consider consolidating session restore script
+// logic into a different place.
+- (void)didReceiveSessionRestoreScriptMessage:(WKScriptMessage*)message {
+  if ([message.name isEqualToString:kSessionRestoreScriptMessageName] &&
+      [message.body[@"offset"] isKindOfClass:[NSNumber class]]) {
+    NSString* method =
+        [NSString stringWithFormat:@"_crFinishSessionRestoration('%@')",
+                                   message.body[@"offset"]];
+    // Don't use |_jsInjector| -executeJavaScript here, as it relies on
+    // |windowID| being injected before window.onload starts.
+    web::ExecuteJavaScript(self.webView, method, nil);
+  } else {
+    DLOG(WARNING) << "Invalid session restore JS message name.";
   }
 }
 

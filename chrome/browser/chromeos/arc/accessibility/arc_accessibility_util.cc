@@ -18,23 +18,13 @@ using AXNodeInfoData = mojom::AccessibilityNodeInfoData;
 using AXStringProperty = mojom::AccessibilityStringProperty;
 
 base::Optional<ax::mojom::Event> FromContentChangeTypesToAXEvent(
-    const std::vector<int32_t>& arc_content_change_types,
-    const AccessibilityInfoDataWrapper& source_node) {
-  if (!base::Contains(
+    const std::vector<int32_t>& arc_content_change_types) {
+  if (base::Contains(
           arc_content_change_types,
           static_cast<int32_t>(mojom::ContentChangeType::STATE_DESCRIPTION))) {
-    return base::nullopt;
-  }
-  const AXNodeInfoData* node_ptr = source_node.GetNode();
-  // Source node should be node, not window, when event type is not
-  // WINDOW_CHANGED.
-  DCHECK(node_ptr);
-
-  if (node_ptr->range_info) {
-    return ax::mojom::Event::kValueChanged;
-  } else {
     return ax::mojom::Event::kAriaAttributeChanged;
   }
+  return base::nullopt;
 }
 
 ax::mojom::Event ToAXEvent(
@@ -50,14 +40,13 @@ ax::mojom::Event ToAXEvent(
     case mojom::AccessibilityEventType::VIEW_LONG_CLICKED:
       return ax::mojom::Event::kClicked;
     case mojom::AccessibilityEventType::VIEW_TEXT_CHANGED:
-      return ax::mojom::Event::kTextChanged;
+      return ax::mojom::Event::kAriaAttributeChanged;
     case mojom::AccessibilityEventType::VIEW_TEXT_SELECTION_CHANGED:
       return ax::mojom::Event::kTextSelectionChanged;
     case mojom::AccessibilityEventType::WINDOW_STATE_CHANGED: {
       if (source_node && arc_content_change_types.has_value()) {
         const base::Optional<ax::mojom::Event> event_or_null =
-            FromContentChangeTypesToAXEvent(arc_content_change_types.value(),
-                                            *source_node);
+            FromContentChangeTypesToAXEvent(arc_content_change_types.value());
         if (event_or_null.has_value()) {
           return event_or_null.value();
         }
@@ -72,8 +61,7 @@ ax::mojom::Event ToAXEvent(
     case mojom::AccessibilityEventType::WINDOW_CONTENT_CHANGED:
       if (source_node && arc_content_change_types.has_value()) {
         const base::Optional<ax::mojom::Event> event_or_null =
-            FromContentChangeTypesToAXEvent(arc_content_change_types.value(),
-                                            *source_node);
+            FromContentChangeTypesToAXEvent(arc_content_change_types.value());
         if (event_or_null.has_value()) {
           return event_or_null.value();
         }
@@ -96,7 +84,7 @@ ax::mojom::Event ToAXEvent(
       // See the comment on AXTreeSourceArc::NotifyAccessibilityEvent.
       if (source_node && source_node->IsNode() &&
           source_node->GetNode()->range_info) {
-        return ax::mojom::Event::kValueChanged;
+        return ax::mojom::Event::kAriaAttributeChanged;
       } else {
         return ax::mojom::Event::kFocus;
       }
@@ -125,6 +113,8 @@ base::Optional<mojom::AccessibilityActionType> ConvertToAndroidAction(
     case ax::mojom::Action::kDoDefault:
       return arc::mojom::AccessibilityActionType::CLICK;
     case ax::mojom::Action::kFocus:
+      // Fallthrough
+    case ax::mojom::Action::kSetSequentialFocusNavigationStartingPoint:
       return arc::mojom::AccessibilityActionType::ACCESSIBILITY_FOCUS;
     case ax::mojom::Action::kScrollToMakeVisible:
       return arc::mojom::AccessibilityActionType::SHOW_ON_SCREEN;

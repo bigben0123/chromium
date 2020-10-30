@@ -70,8 +70,16 @@ const char kIncludePath[] = "base/memory/checked_ptr.h";
 //
 // See also:
 // - OutputSectionHelper
-// - FieldDeclFilterFile
+// - FilterFile
 const char kExcludeFieldsParamName[] = "exclude-fields";
+
+// Name of a cmdline parameter that can be used to specify a file listing
+// regular expressions describing paths that should be excluded from the
+// rewrite.
+//
+// See also:
+// - PathFilterFile
+const char kExcludePathsParamName[] = "exclude-paths";
 
 // OutputSectionHelper helps gather and emit a section of output.
 //
@@ -93,12 +101,15 @@ const char kExcludeFieldsParamName[] = "exclude-fields";
 // changes).
 //
 // See also:
-// - FieldDeclFilterFile
+// - FilterFile
 // - OutputHelper
 class OutputSectionHelper {
  public:
   explicit OutputSectionHelper(llvm::StringRef output_delimiter)
       : output_delimiter_(output_delimiter.str()) {}
+
+  OutputSectionHelper(const OutputSectionHelper&) = delete;
+  OutputSectionHelper& operator=(const OutputSectionHelper&) = delete;
 
   void Add(llvm::StringRef output_line, llvm::StringRef tag = "") {
     // Look up |tags| associated with |output_line|.  As a side effect of the
@@ -151,6 +162,9 @@ class OutputHelper : public clang::tooling::SourceFileCallbacks {
   OutputHelper()
       : edits_helper_("EDITS"), field_decl_filter_helper_("FIELD FILTERS") {}
   ~OutputHelper() = default;
+
+  OutputHelper(const OutputHelper&) = delete;
+  OutputHelper& operator=(const OutputHelper&) = delete;
 
   void AddReplacement(const clang::SourceManager& source_manager,
                       const clang::SourceRange& replacement_range,
@@ -264,14 +278,9 @@ AST_MATCHER(clang::FieldDecl, isInThirdPartyLocation) {
   if (file_path.contains("third_party/blink/"))
     return false;
 
-  // V8 needs to be considered "third party", even though its paths do not
-  // contain the "third_party" substring.  In particular, the rewriter should
-  // not append |.get()| to references to |v8::RegisterState::pc|, because
-  // //v8/include/v8.h will *not* get rewritten.
-  if (file_path.contains("v8/include/"))
-    return true;
-
   // Otherwise, just check if the paths contains the "third_party" substring.
+  // We don't want to rewrite content of such paths even if they are in the main
+  // Chromium git repository.
   return file_path.contains("third_party");
 }
 
@@ -282,23 +291,37 @@ AST_MATCHER(clang::FieldDecl, isInGeneratedLocation) {
   return file_path.startswith("gen/") || file_path.contains("/gen/");
 }
 
-// Represents a filter file specified via cmdline, that can be used to filter
-// out specific FieldDecls.
-//
-// See also:
-// - kExcludeFieldsParamName
-// - OutputSectionHelper
-class FieldDeclFilterFile {
+// Represents a filter file specified via cmdline.
+class FilterFile {
  public:
-  explicit FieldDeclFilterFile(const std::string& filepath) {
-    if (!filepath.empty())
-      ParseInputFile(filepath);
+  explicit FilterFile(const llvm::cl::opt<std::string>& cmdline_param) {
+    ParseInputFile(cmdline_param);
   }
 
-  bool Contains(const clang::FieldDecl& field_decl) const {
-    std::string qualified_name = field_decl.getQualifiedNameAsString();
-    auto it = fields_to_filter_.find(qualified_name);
-    return it != fields_to_filter_.end();
+  FilterFile(const FilterFile&) = delete;
+  FilterFile& operator=(const FilterFile&) = delete;
+
+  // Returns true if any of the filter file lines is exactly equal to |line|.
+  bool ContainsLine(llvm::StringRef line) const {
+    auto it = file_lines_.find(line);
+    return it != file_lines_.end();
+  }
+
+  // Returns true if any of the filter file lines is a substring of
+  // |string_to_match|.
+  bool ContainsSubstringOf(llvm::StringRef string_to_match) const {
+    if (!substring_regex_.hasValue()) {
+      std::vector<std::string> regex_escaped_file_lines;
+      regex_escaped_file_lines.reserve(file_lines_.size());
+      for (const llvm::StringRef& file_line : file_lines_.keys())
+        regex_escaped_file_lines.push_back(llvm::Regex::escape(file_line));
+      std::string substring_regex_pattern =
+          llvm::join(regex_escaped_file_lines.begin(),
+                     regex_escaped_file_lines.end(), "|");
+      substring_regex_.emplace(substring_regex_pattern);
+    }
+
+    return substring_regex_->match(string_to_match);
   }
 
  private:
@@ -310,13 +333,17 @@ class FieldDeclFilterFile {
   //       autofill::AddressField::address1_ # some comment
   // - Templates are represented without template arguments, like:
   //       WTF::HashTable::table_ # some comment
-  void ParseInputFile(const std::string& filepath) {
+  void ParseInputFile(const llvm::cl::opt<std::string>& cmdline_param) {
+    std::string filepath = cmdline_param;
+    if (filepath.empty())
+      return;
+
     llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> file_or_err =
         llvm::MemoryBuffer::getFile(filepath);
     if (std::error_code err = file_or_err.getError()) {
       llvm::errs() << "ERROR: Cannot open the file specified in --"
-                   << kExcludeFieldsParamName << " argument: " << filepath
-                   << ": " << err.message() << "\n";
+                   << cmdline_param.ArgStr << " argument: " << filepath << ": "
+                   << err.message() << "\n";
       assert(false);
       return;
     }
@@ -334,19 +361,32 @@ class FieldDeclFilterFile {
       if (line.empty())
         continue;
 
-      fields_to_filter_.insert(line);
+      file_lines_.insert(line);
     }
   }
 
-  // Stores fully-namespace-qualified names of fields matched by the filter.
-  llvm::StringSet<> fields_to_filter_;
+  // Stores all file lines (after stripping comments and blank lines).
+  llvm::StringSet<> file_lines_;
+
+  // Lazily-constructed regex that matches strings that contain any of the
+  // |file_lines_|.
+  mutable llvm::Optional<llvm::Regex> substring_regex_;
 };
 
 AST_MATCHER_P(clang::FieldDecl,
-              isListedInFilterFile,
-              FieldDeclFilterFile,
+              isFieldDeclListedInFilterFile,
+              const FilterFile*,
               Filter) {
-  return Filter.Contains(Node);
+  return Filter->ContainsLine(Node.getQualifiedNameAsString());
+}
+
+AST_MATCHER_P(clang::FieldDecl,
+              isInLocationListedInFilterFile,
+              const FilterFile*,
+              Filter) {
+  llvm::StringRef file_path =
+      GetFilePath(Finder->getASTContext().getSourceManager(), Node);
+  return Filter->ContainsSubstringOf(file_path);
 }
 
 AST_MATCHER(clang::Decl, isInExternCContext) {
@@ -403,10 +443,6 @@ AST_MATCHER(clang::FunctionDecl, isImplicitFunctionTemplateSpecialization) {
     case clang::TSK_ExplicitInstantiationDefinition:
       return false;
   }
-}
-
-AST_MATCHER(clang::Type, anyCharType) {
-  return Node.isAnyCharacterType();
 }
 
 AST_POLYMORPHIC_MATCHER(isInMacroLocation,
@@ -633,6 +669,37 @@ AST_MATCHER(clang::FieldDecl, overlapsOtherDeclsWithinRecordDecl) {
   return has_sibling_with_overlapping_location;
 }
 
+// Matches clang::Type if
+// 1) it represents a RecordDecl with a FieldDecl that matches the InnerMatcher
+//    (*all* such FieldDecls will be matched)
+// or
+// 2) it represents an array or a RecordDecl that nests the case #1
+//    (this recurses to any depth).
+AST_MATCHER_P(clang::QualType,
+              typeWithEmbeddedFieldDecl,
+              clang::ast_matchers::internal::Matcher<clang::FieldDecl>,
+              InnerMatcher) {
+  const clang::Type* type =
+      Node.getDesugaredType(Finder->getASTContext()).getTypePtrOrNull();
+  if (!type)
+    return false;
+
+  if (const clang::CXXRecordDecl* record_decl = type->getAsCXXRecordDecl()) {
+    auto matcher = recordDecl(forEach(fieldDecl(hasExplicitFieldDecl(anyOf(
+        InnerMatcher, hasType(typeWithEmbeddedFieldDecl(InnerMatcher)))))));
+    return matcher.matches(*record_decl, Finder, Builder);
+  }
+
+  if (type->isArrayType()) {
+    const clang::ArrayType* array_type =
+        Finder->getASTContext().getAsArrayType(Node);
+    auto matcher = typeWithEmbeddedFieldDecl(InnerMatcher);
+    return matcher.matches(array_type->getElementType(), Finder, Builder);
+  }
+
+  return false;
+}
+
 // Rewrites |SomeClass* field| (matched as "affectedFieldDecl") into
 // |CheckedPtr<SomeClass> field| and for each file rewritten in such way adds an
 // |#include "base/memory/checked_ptr.h"|.
@@ -640,6 +707,9 @@ class FieldDeclRewriter : public MatchFinder::MatchCallback {
  public:
   explicit FieldDeclRewriter(OutputHelper* output_helper)
       : output_helper_(output_helper) {}
+
+  FieldDeclRewriter(const FieldDeclRewriter&) = delete;
+  FieldDeclRewriter& operator=(const FieldDeclRewriter&) = delete;
 
   void run(const MatchFinder::MatchResult& result) override {
     const clang::ASTContext& ast_context = *result.Context;
@@ -720,6 +790,9 @@ class AffectedExprRewriter : public MatchFinder::MatchCallback {
   explicit AffectedExprRewriter(OutputHelper* output_helper)
       : output_helper_(output_helper) {}
 
+  AffectedExprRewriter(const AffectedExprRewriter&) = delete;
+  AffectedExprRewriter& operator=(const AffectedExprRewriter&) = delete;
+
   void run(const MatchFinder::MatchResult& result) override {
     const clang::SourceManager& source_manager = *result.SourceManager;
 
@@ -747,6 +820,9 @@ class FilteredExprWriter : public MatchFinder::MatchCallback {
   FilteredExprWriter(OutputHelper* output_helper, llvm::StringRef filter_tag)
       : output_helper_(output_helper), filter_tag_(filter_tag) {}
 
+  FilteredExprWriter(const FilteredExprWriter&) = delete;
+  FilteredExprWriter& operator=(const FilteredExprWriter&) = delete;
+
   void run(const MatchFinder::MatchResult& result) override {
     const clang::FieldDecl* field_decl =
         result.Nodes.getNodeAs<clang::FieldDecl>("affectedFieldDecl");
@@ -772,6 +848,9 @@ int main(int argc, const char* argv[]) {
   llvm::cl::opt<std::string> exclude_fields_param(
       kExcludeFieldsParamName, llvm::cl::value_desc("filepath"),
       llvm::cl::desc("file listing fields to be blocked (not rewritten)"));
+  llvm::cl::opt<std::string> exclude_paths_param(
+      kExcludePathsParamName, llvm::cl::value_desc("filepath"),
+      llvm::cl::desc("file listing paths to be blocked (not rewritten)"));
   clang::tooling::CommonOptionsParser options(argc, argv, category);
   clang::tooling::ClangTool tool(options.getCompilations(),
                                  options.getSourcePathList());
@@ -787,16 +866,11 @@ int main(int argc, const char* argv[]) {
   //     int (*func_ptr)();
   //     int (MyStruct::* member_func_ptr)(char);
   //     int (*ptr_to_array_of_ints)[123]
-  //     StructOrClassWithDeletedOperatorNew* stack_or_gc_ptr;
   //   };
   // matches |int*|, but not the other types.
-  auto record_with_deleted_allocation_operator_type_matcher =
-      recordType(hasDeclaration(cxxRecordDecl(
-          hasMethod(allOf(hasOverloadedOperatorName("new"), isDeleted())))));
   auto supported_pointer_types_matcher =
       pointerType(unless(pointee(hasUnqualifiedDesugaredType(
-          anyOf(record_with_deleted_allocation_operator_type_matcher,
-                functionType(), memberPointerType(), arrayType())))));
+          anyOf(functionType(), memberPointerType(), arrayType())))));
 
   // Implicit field declarations =========
   // Matches field declarations that do not explicitly appear in the source
@@ -822,16 +896,19 @@ int main(int argc, const char* argv[]) {
   // matches |int* y|.  Doesn't match:
   // - non-pointer types
   // - fields of lambda-supporting classes
-  // - fields listed in the --exclude-fields cmdline param
+  // - fields listed in the --exclude-fields cmdline param or located in paths
+  //   matched by --exclude-paths cmdline param
   // - "implicit" fields (i.e. field decls that are not explicitly present in
   //   the source code)
-  FieldDeclFilterFile fields_to_exclude(exclude_fields_param);
+  FilterFile fields_to_exclude(exclude_fields_param);
+  FilterFile paths_to_exclude(exclude_paths_param);
   auto field_decl_matcher =
       fieldDecl(
           allOf(hasType(supported_pointer_types_matcher),
-                unless(anyOf(isInThirdPartyLocation(), isInGeneratedLocation(),
-                             isExpansionInSystemHeader(), isInExternCContext(),
-                             isListedInFilterFile(fields_to_exclude),
+                unless(anyOf(isExpansionInSystemHeader(), isInExternCContext(),
+                             isInThirdPartyLocation(),
+                             isInLocationListedInFilterFile(&paths_to_exclude),
+                             isFieldDeclListedInFilterFile(&fields_to_exclude),
                              implicit_field_decl_matcher))))
           .bind("affectedFieldDecl");
   FieldDeclRewriter field_decl_rewriter(&output_helper);
@@ -849,15 +926,7 @@ int main(int argc, const char* argv[]) {
   auto affected_member_expr_matcher =
       memberExpr(member(fieldDecl(hasExplicitFieldDecl(field_decl_matcher))))
           .bind("affectedMemberExpr");
-  auto affected_implicit_expr_matcher = implicitCastExpr(has(expr(anyOf(
-      // Only single implicitCastExpr is present in case of:
-      // |auto* v = s.ptr_field;|
-      expr(affected_member_expr_matcher),
-      // 2nd nested implicitCastExpr is present in case of:
-      // |const auto* v = s.ptr_field;|
-      expr(implicitCastExpr(has(affected_member_expr_matcher)))))));
-  auto affected_expr_matcher =
-      expr(anyOf(affected_member_expr_matcher, affected_implicit_expr_matcher));
+  auto affected_expr_matcher = ignoringImplicit(affected_member_expr_matcher);
 
   // Places where |.get()| needs to be appended =========
   // Given
@@ -915,6 +984,23 @@ int main(int argc, const char* argv[]) {
                cxxConstructExpr(templated_function_arg_matcher)),
       &affected_expr_rewriter);
 
+  // Calls to constructors via an implicit cast =========
+  // Given
+  //   struct I { I(int*) {} };
+  //   void bar(I i) {}
+  //   struct S { int* y; };
+  //   void foo(const S& s) {
+  //     bar(s.y);  // implicit cast from |s.y| to I.
+  //   }
+  // binds the |s.y| expr if it matches the |affected_expr_matcher| above.
+  //
+  // See also testcases in tests/affected-expr-original.cc
+  auto implicit_ctor_expr_matcher = implicitCastExpr(has(cxxConstructExpr(allOf(
+      hasDeclaration(
+          cxxConstructorDecl(allOf(parameterCountIs(1), unless(isExplicit())))),
+      forEachArgumentWithParam(affected_expr_matcher, parmVarDecl())))));
+  match_finder.addMatcher(implicit_ctor_expr_matcher, &affected_expr_rewriter);
+
   // |auto| type declarations =========
   // Given
   //   struct S { int* y; };
@@ -960,10 +1046,9 @@ int main(int argc, const char* argv[]) {
   //
   // See also the testcases in tests/gen-in-out-arg-test.cc.
   auto affected_in_out_ref_arg_matcher = callExpr(forEachArgumentWithParam(
-      affected_expr_matcher.bind("expr"),
-      hasExplicitParmVarDecl(
-          hasType(qualType(allOf(referenceType(pointee(pointerType())),
-                                 unless(rValueReferenceType())))))));
+      affected_expr_matcher, hasExplicitParmVarDecl(hasType(qualType(
+                                 allOf(referenceType(pointee(pointerType())),
+                                       unless(rValueReferenceType())))))));
   FilteredExprWriter filtered_in_out_ref_arg_writer(&output_helper,
                                                     "in-out-param-ref");
   match_finder.addMatcher(affected_in_out_ref_arg_matcher,
@@ -978,6 +1063,18 @@ int main(int argc, const char* argv[]) {
   match_finder.addMatcher(overlapping_field_decl_matcher,
                           &overlapping_field_decl_writer);
 
+  // Matches fields initialized with a non-nullptr value in a constexpr
+  // constructor.  See also the testcase in tests/gen-constexpr-ctor-test.cc.
+  auto constexpr_ctor_initialized_field_matcher = cxxConstructorDecl(allOf(
+      isConstexpr(),
+      forEachConstructorInitializer(allOf(
+          forField(field_decl_matcher), withInitializer(unless(ignoringImplicit(
+                                            cxxNullPtrLiteralExpr())))))));
+  FilteredExprWriter constexpr_ctor_initialized_field_writer(
+      &output_helper, "constexpr-ctor-initializer");
+  match_finder.addMatcher(constexpr_ctor_initialized_field_matcher,
+                          &constexpr_ctor_initialized_field_writer);
+
   // See the doc comment for the isInMacroLocation matcher
   // and the testcases in tests/gen-macro-test.cc.
   auto macro_field_decl_matcher =
@@ -985,14 +1082,62 @@ int main(int argc, const char* argv[]) {
   FilteredExprWriter macro_field_decl_writer(&output_helper, "macro");
   match_finder.addMatcher(macro_field_decl_matcher, &macro_field_decl_writer);
 
-  // See the doc comment for the anyCharType matcher
-  // and the testcases in tests/gen-char-test.cc.
-  auto char_ptr_field_decl_matcher = fieldDecl(allOf(
-      field_decl_matcher, hasType(pointerType(pointee(
-                              hasUnqualifiedDesugaredType(anyCharType()))))));
-  FilteredExprWriter char_ptr_field_decl_writer(&output_helper, "char");
-  match_finder.addMatcher(char_ptr_field_decl_matcher,
-                          &char_ptr_field_decl_writer);
+  // See the testcases in tests/gen-global-destructor-test.cc.
+  auto global_destructor_matcher =
+      varDecl(allOf(hasGlobalStorage(),
+                    hasType(typeWithEmbeddedFieldDecl(field_decl_matcher))));
+  FilteredExprWriter global_destructor_writer(&output_helper, "global-scope");
+  match_finder.addMatcher(global_destructor_matcher, &global_destructor_writer);
+
+  // Matches rewritable fields in generated code - see the testcase in
+  // tests/gen-generated-code-test.cc
+  auto field_in_generated_code_matcher =
+      fieldDecl(allOf(field_decl_matcher, isInGeneratedLocation()));
+  FilteredExprWriter field_in_generated_code_writer(&output_helper,
+                                                    "generated-code");
+  match_finder.addMatcher(field_in_generated_code_matcher,
+                          &field_in_generated_code_writer);
+
+  // Matches CXXRecordDecls with a deleted operator new - e.g.
+  // StructWithNoOperatorNew below:
+  //     struct StructWithNoOperatorNew {
+  //       void* operator new(size_t) = delete;
+  //     };
+  auto record_with_deleted_allocation_operator_type_matcher = cxxRecordDecl(
+      hasMethod(allOf(hasOverloadedOperatorName("new"), isDeleted())));
+  // Matches rewritable fields inside structs with no operator new.  See the
+  // testcase in tests/gen-deleted-operator-new-test.cc
+  auto field_in_record_with_deleted_operator_new_matcher = fieldDecl(
+      allOf(field_decl_matcher,
+            hasParent(record_with_deleted_allocation_operator_type_matcher)));
+  FilteredExprWriter field_in_record_with_deleted_operator_new_writer(
+      &output_helper, "embedder-has-no-operator-new");
+  match_finder.addMatcher(field_in_record_with_deleted_operator_new_matcher,
+                          &field_in_record_with_deleted_operator_new_writer);
+  // Matches rewritable fields that contain a pointer, pointing to a pointee
+  // with no operator new.  See the testcase in
+  // tests/gen-deleted-operator-new-test.cc
+  auto field_pointing_to_record_with_deleted_operator_new_matcher =
+      fieldDecl(allOf(
+          field_decl_matcher,
+          hasType(pointerType(
+              pointee(hasUnqualifiedDesugaredType(recordType(hasDeclaration(
+                  record_with_deleted_allocation_operator_type_matcher))))))));
+  FilteredExprWriter field_pointing_to_record_with_deleted_operator_new_writer(
+      &output_helper, "pointee-has-no-operator-new");
+  match_finder.addMatcher(
+      field_pointing_to_record_with_deleted_operator_new_matcher,
+      &field_pointing_to_record_with_deleted_operator_new_writer);
+
+  // Matches fields in unions (both directly rewritable fields as well as union
+  // fields that embed a struct that contains a rewritable field).  See also the
+  // testcases in tests/gen-unions-test.cc.
+  auto union_field_decl_matcher = recordDecl(allOf(
+      isUnion(), forEach(fieldDecl(anyOf(field_decl_matcher,
+                                         hasType(typeWithEmbeddedFieldDecl(
+                                             field_decl_matcher)))))));
+  FilteredExprWriter union_field_decl_writer(&output_helper, "union");
+  match_finder.addMatcher(union_field_decl_matcher, &union_field_decl_writer);
 
   // Prepare and run the tool.
   std::unique_ptr<clang::tooling::FrontendActionFactory> factory =

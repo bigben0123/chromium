@@ -15,12 +15,12 @@
 #include "base/strings/string16.h"
 #include "base/supports_user_data.h"
 #include "content/common/content_export.h"
-#include "content/public/common/previews_state.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
 #include "ppapi/buildflags/buildflags.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
+#include "third_party/blink/public/common/loader/previews_state.h"
 #include "third_party/blink/public/common/navigation/triggering_event_info.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
 #include "third_party/blink/public/platform/task_type.h"
@@ -29,6 +29,12 @@
 #include "ui/accessibility/ax_tree_update.h"
 
 namespace blink {
+namespace scheduler {
+class WebAgentGroupScheduler;
+}  // namespace scheduler
+namespace web_pref {
+struct WebPreferences;
+}  // namespace web_pref
 class AssociatedInterfaceProvider;
 class AssociatedInterfaceRegistry;
 class BrowserInterfaceBrokerProxy;
@@ -68,7 +74,6 @@ class RenderFrameVisitor;
 class RenderView;
 struct UntrustworthyContextMenuParams;
 struct WebPluginInfo;
-struct WebPreferences;
 
 // A class that takes a snapshot of the accessibility tree. Accessibility
 // support in Blink is enabled for the lifetime of this object, which can
@@ -145,7 +150,7 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
   virtual blink::WebLocalFrame* GetWebFrame() = 0;
 
   // Gets WebKit related preferences associated with this frame.
-  virtual const WebPreferences& GetWebkitPreferences() = 0;
+  virtual const blink::web_pref::WebPreferences& GetBlinkPreferences() = 0;
 
   // Shows a context menu with the given information. The given client will
   // be called with the result.
@@ -264,7 +269,7 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
 
   // Returns the PreviewsState of this frame, a bitmask of potentially several
   // Previews optimizations.
-  virtual PreviewsState GetPreviewsState() = 0;
+  virtual blink::PreviewsState GetPreviewsState() = 0;
 
   // Whether or not this frame is currently pasting.
   virtual bool IsPasting() = 0;
@@ -322,6 +327,11 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
 
   // Returns the device scale factor of the display the render frame is in.
   virtual float GetDeviceScaleFactor() = 0;
+
+  // Return the dedicated scheduler for the AgentSchedulingGroup associated with
+  // this RenderFrame.
+  virtual blink::scheduler::WebAgentGroupScheduler&
+  GetAgentGroupScheduler() = 0;
 
  protected:
   ~RenderFrame() override {}

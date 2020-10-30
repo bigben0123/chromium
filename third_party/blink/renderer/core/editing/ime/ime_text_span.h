@@ -31,11 +31,8 @@
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "ui/base/ime/ime_text_span.h"
 #include "ui/base/ime/mojom/ime_types.mojom-blink-forward.h"
-
-namespace ui {
-struct ImeTextSpan;
-}  // namespace ui
 
 namespace blink {
 
@@ -83,6 +80,8 @@ class CORE_EXPORT ImeTextSpan {
   }
   bool InterimCharSelection() const { return interim_char_selection_; }
   const Vector<String>& Suggestions() const { return suggestions_; }
+
+  ui::ImeTextSpan ToUiImeTextSpan();
 
  private:
   Type type_;

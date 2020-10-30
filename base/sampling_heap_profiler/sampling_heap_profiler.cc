@@ -13,6 +13,7 @@
 #include "base/allocator/partition_allocator/partition_alloc.h"
 #include "base/bind.h"
 #include "base/debug/stack_trace.h"
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/no_destructor.h"
 #include "base/partition_alloc_buildflags.h"
@@ -21,11 +22,11 @@
 #include "base/trace_event/heap_profiler_allocation_context_tracker.h"  // no-presubmit-check
 #include "build/build_config.h"
 
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
 #include <pthread.h>
 #endif
 
-#if defined(OS_LINUX) || defined(OS_ANDROID)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
 #include <sys/prctl.h>
 #endif
 
@@ -54,18 +55,18 @@ const char* GetAndLeakThreadName() {
   // 64 on macOS, see PlatformThread::SetName in platform_thread_mac.mm.
   constexpr size_t kBufferLen = 64;
   char name[kBufferLen];
-#if defined(OS_LINUX) || defined(OS_ANDROID)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
   // If the thread name is not set, try to get it from prctl. Thread name might
   // not be set in cases where the thread started before heap profiling was
   // enabled.
   int err = prctl(PR_GET_NAME, name);
   if (!err)
     return strdup(name);
-#elif defined(OS_MACOSX)
+#elif defined(OS_APPLE)
   int err = pthread_getname_np(pthread_self(), name, kBufferLen);
   if (err == 0 && *name != '\0')
     return strdup(name);
-#endif  // defined(OS_LINUX) || defined(OS_ANDROID)
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
 
   // Use tid if we don't have a thread name.
   snprintf(name, sizeof(name), "Thread %lu",

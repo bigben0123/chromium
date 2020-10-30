@@ -34,7 +34,6 @@ class LocalFrame;
 class MediaStreamAudioSource;
 class MediaStreamVideoSource;
 class VideoCaptureSettings;
-class WebMediaStream;
 class WebMediaStreamDeviceObserver;
 class WebMediaStreamSource;
 class WebString;
@@ -87,6 +86,9 @@ class MODULES_EXPORT UserMediaProcessor
   void OnDeviceStopped(const blink::MediaStreamDevice& device);
   void OnDeviceChanged(const blink::MediaStreamDevice& old_device,
                        const blink::MediaStreamDevice& new_device);
+  void OnDeviceRequestStateChange(
+      const MediaStreamDevice& device,
+      const mojom::blink::MediaStreamStateChange new_state);
 
   void set_media_stream_dispatcher_host_for_testing(
       mojo::PendingRemote<blink::mojom::blink::MediaStreamDispatcherHost>
@@ -94,14 +96,14 @@ class MODULES_EXPORT UserMediaProcessor
     dispatcher_host_.Bind(std::move(dispatcher_host), task_runner_);
   }
 
-  void Trace(Visitor*) const;
+  virtual void Trace(Visitor*) const;
 
  protected:
   // These methods are virtual for test purposes. A test can override them to
   // test requesting local media streams. The function notifies WebKit that the
   // |request| have completed.
   virtual void GetUserMediaRequestSucceeded(
-      const blink::WebMediaStream& stream,
+      MediaStreamDescriptor* descriptor,
       UserMediaRequest* user_media_request);
   virtual void GetUserMediaRequestFailed(
       blink::mojom::blink::MediaStreamRequestResult result,
@@ -132,7 +134,7 @@ class MODULES_EXPORT UserMediaProcessor
   FRIEND_TEST_ALL_PREFIXES(UserMediaClientTest,
                            ZoomConstraintRequestPanTiltZoomPermission);
   class RequestInfo;
-  using LocalStreamSources = Vector<blink::WebMediaStreamSource>;
+  using LocalStreamSources = HeapVector<Member<MediaStreamSource>>;
 
   void OnStreamGenerated(int request_id,
                          blink::mojom::blink::MediaStreamRequestResult result,
@@ -157,7 +159,7 @@ class MODULES_EXPORT UserMediaProcessor
   bool IsCurrentRequestInfo(UserMediaRequest* user_media_request) const;
   void DelayedGetUserMediaRequestSucceeded(
       int request_id,
-      const blink::WebMediaStream& stream,
+      MediaStreamDescriptor* descriptor,
       UserMediaRequest* user_media_request);
   void DelayedGetUserMediaRequestFailed(
       int request_id,
@@ -170,10 +172,10 @@ class MODULES_EXPORT UserMediaProcessor
 
   // Creates a WebKit representation of a stream source based on
   // |device| from the MediaStreamDispatcherHost.
-  blink::WebMediaStreamSource InitializeVideoSourceObject(
+  MediaStreamSource* InitializeVideoSourceObject(
       const blink::MediaStreamDevice& device);
 
-  blink::WebMediaStreamSource InitializeAudioSourceObject(
+  MediaStreamSource* InitializeAudioSourceObject(
       const blink::MediaStreamDevice& device,
       bool* is_pending);
 
@@ -218,29 +220,27 @@ class MODULES_EXPORT UserMediaProcessor
 
   // Returns the source that use a device with |device.session_id|
   // and |device.device.id|. nullptr if such source doesn't exist.
-  const blink::WebMediaStreamSource* FindLocalSource(
-      const blink::MediaStreamDevice& device) const {
+  MediaStreamSource* FindLocalSource(const MediaStreamDevice& device) const {
     return FindLocalSource(local_sources_, device);
   }
-  const blink::WebMediaStreamSource* FindPendingLocalSource(
-      const blink::MediaStreamDevice& device) const {
+  MediaStreamSource* FindPendingLocalSource(
+      const MediaStreamDevice& device) const {
     return FindLocalSource(pending_local_sources_, device);
   }
-  const blink::WebMediaStreamSource* FindLocalSource(
+  MediaStreamSource* FindLocalSource(
       const LocalStreamSources& sources,
       const blink::MediaStreamDevice& device) const;
 
   // Looks up a local source and returns it if found. If not found, prepares
-  // a new WebMediaStreamSource with a nullptr extraData pointer.
-  blink::WebMediaStreamSource FindOrInitializeSourceObject(
-      const blink::MediaStreamDevice& device);
+  // a new MediaStreamSource with a nullptr extraData pointer.
+  MediaStreamSource* FindOrInitializeSourceObject(
+      const MediaStreamDevice& device);
 
   // Returns true if we do find and remove the |source|.
   // Otherwise returns false.
-  bool RemoveLocalSource(const blink::WebMediaStreamSource& source);
+  bool RemoveLocalSource(MediaStreamSource* source);
 
-  void StopLocalSource(const blink::WebMediaStreamSource& source,
-                       bool notify_dispatcher);
+  void StopLocalSource(MediaStreamSource* source, bool notify_dispatcher);
 
   blink::mojom::blink::MediaStreamDispatcherHost*
   GetMediaStreamDispatcherHost();

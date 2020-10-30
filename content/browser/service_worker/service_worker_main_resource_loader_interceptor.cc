@@ -9,15 +9,17 @@
 
 #include "base/bind.h"
 #include "base/optional.h"
+#include "base/stl_util.h"
 #include "base/task/post_task.h"
-#include "content/browser/frame_host/frame_tree_node.h"
-#include "content/browser/frame_host/navigation_request_info.h"
+#include "content/browser/renderer_host/frame_tree_node.h"
+#include "content/browser/renderer_host/navigation_request_info.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/browser/service_worker/service_worker_controllee_request_handler.h"
 #include "content/browser/service_worker/service_worker_main_resource_handle.h"
 #include "content/browser/service_worker/service_worker_main_resource_handle_core.h"
 #include "content/public/browser/browser_task_traits.h"
+#include "content/public/common/content_client.h"
 #include "content/public/common/origin_util.h"
 #include "content/public/common/url_constants.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
@@ -80,13 +82,12 @@ void InvokeRequestHandlerOnCoreThread(
 void MaybeCreateLoaderOnCoreThread(
     base::WeakPtr<ServiceWorkerMainResourceLoaderInterceptor> interceptor_on_ui,
     ServiceWorkerMainResourceHandleCore* handle_core,
-    blink::mojom::ResourceType resource_type,
+    network::mojom::RequestDestination request_destination,
     bool skip_service_worker,
     bool are_ancestors_secure,
     int frame_tree_node_id,
     int process_id,
-    DedicatedWorkerId dedicated_worker_id,
-    SharedWorkerId shared_worker_id,
+    const DedicatedOrSharedWorkerToken* worker_token,
     mojo::PendingAssociatedReceiver<blink::mojom::ServiceWorkerContainerHost>
         host_receiver,
     mojo::PendingAssociatedRemote<blink::mojom::ServiceWorkerContainer>
@@ -100,11 +101,7 @@ void MaybeCreateLoaderOnCoreThread(
 
   ServiceWorkerContextCore* context_core =
       handle_core->context_wrapper()->context();
-  ResourceContext* resource_context =
-      ServiceWorkerContext::IsServiceWorkerOnUIEnabled()
-          ? nullptr
-          : handle_core->context_wrapper()->resource_context();
-  if (!context_core || (!resource_context && !browser_context)) {
+  if (!context_core || !browser_context) {
     LoaderCallbackWrapperOnCoreThread(handle_core, std::move(interceptor_on_ui),
                                       std::move(loader_callback),
                                       /*handler=*/{});
@@ -120,19 +117,20 @@ void MaybeCreateLoaderOnCoreThread(
     DCHECK(client_remote);
     base::WeakPtr<ServiceWorkerContainerHost> container_host;
 
-    if (resource_type == blink::mojom::ResourceType::kMainFrame ||
-        resource_type == blink::mojom::ResourceType::kSubFrame) {
+    if (request_destination == network::mojom::RequestDestination::kDocument ||
+        request_destination == network::mojom::RequestDestination::kIframe) {
       container_host = context_core->CreateContainerHostForWindow(
           std::move(host_receiver), are_ancestors_secure,
           std::move(client_remote), frame_tree_node_id);
     } else {
-      DCHECK(resource_type == blink::mojom::ResourceType::kWorker ||
-             resource_type == blink::mojom::ResourceType::kSharedWorker);
+      DCHECK(request_destination ==
+                 network::mojom::RequestDestination::kWorker ||
+             request_destination ==
+                 network::mojom::RequestDestination::kSharedWorker);
+      DCHECK(worker_token);
 
       ServiceWorkerClientInfo client_info =
-          resource_type == blink::mojom::ResourceType::kWorker
-              ? ServiceWorkerClientInfo(dedicated_worker_id)
-              : ServiceWorkerClientInfo(shared_worker_id);
+          ServiceWorkerClientInfo(*worker_token);
 
       container_host = context_core->CreateContainerHostForWorker(
           std::move(host_receiver), process_id, std::move(client_remote),
@@ -145,7 +143,7 @@ void MaybeCreateLoaderOnCoreThread(
     DCHECK(!handle_core->interceptor());
     handle_core->set_interceptor(
         std::make_unique<ServiceWorkerControlleeRequestHandler>(
-            context_core->AsWeakPtr(), container_host, resource_type,
+            context_core->AsWeakPtr(), container_host, request_destination,
             skip_service_worker,
             handle_core->service_worker_accessed_callback()));
   }
@@ -168,14 +166,24 @@ void MaybeCreateLoaderOnCoreThread(
   // It's safe to bind the raw |handle_core| to the callback because it owns the
   // interceptor, which invokes the callback.
   handle_core->interceptor()->MaybeCreateLoader(
-      tentative_resource_request, browser_context, resource_context,
+      tentative_resource_request, browser_context,
       base::BindOnce(&LoaderCallbackWrapperOnCoreThread, handle_core,
                      interceptor_on_ui, std::move(loader_callback)),
       base::BindOnce(&FallbackCallbackWrapperOnCoreThread, interceptor_on_ui,
                      std::move(fallback_callback)));
 }
 
-bool SchemeMaySupportRedirectingToHTTPS(const GURL& url) {
+bool SchemeMaySupportRedirectingToHTTPS(BrowserContext* browser_context,
+                                        const GURL& url) {
+  // If there is a registered protocol handler for this scheme, the embedder is
+  // expected to redirect `url` to a registered URL in a URLLoaderThrottle, and
+  // the interceptor will operate on the registered URL. Note that the HTML
+  // specification requires that the registered URL is HTTPS.
+  // https://html.spec.whatwg.org/multipage/system-state.html#normalize-protocol-handler-parameters
+  if (GetContentClient()->browser()->HasCustomSchemeHandler(browser_context,
+                                                            url.scheme()))
+    return true;
+
 #if defined(OS_CHROMEOS)
   return url.SchemeIs(kExternalFileScheme);
 #else   // OS_CHROMEOS
@@ -203,34 +211,33 @@ ServiceWorkerMainResourceLoaderInterceptor::CreateForNavigation(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (!ShouldCreateForNavigation(
-          url, request_info.begin_params->request_destination)) {
+          url, request_info.begin_params->request_destination,
+          navigation_handle->context_wrapper()->browser_context())) {
     return nullptr;
   }
 
   return base::WrapUnique(new ServiceWorkerMainResourceLoaderInterceptor(
       std::move(navigation_handle),
-      request_info.is_main_frame ? blink::mojom::ResourceType::kMainFrame
-                                 : blink::mojom::ResourceType::kSubFrame,
+      request_info.is_main_frame ? network::mojom::RequestDestination::kDocument
+                                 : network::mojom::RequestDestination::kIframe,
       request_info.begin_params->skip_service_worker,
       request_info.are_ancestors_secure, request_info.frame_tree_node_id,
-      ChildProcessHost::kInvalidUniqueID, DedicatedWorkerId(),
-      SharedWorkerId()));
+      ChildProcessHost::kInvalidUniqueID, /* worker_token = */ nullptr));
 }
 
 std::unique_ptr<NavigationLoaderInterceptor>
 ServiceWorkerMainResourceLoaderInterceptor::CreateForWorker(
     const network::ResourceRequest& resource_request,
     int process_id,
-    DedicatedWorkerId dedicated_worker_id,
-    SharedWorkerId shared_worker_id,
+    const DedicatedOrSharedWorkerToken& worker_token,
     base::WeakPtr<ServiceWorkerMainResourceHandle> navigation_handle) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  auto resource_type =
-      static_cast<blink::mojom::ResourceType>(resource_request.resource_type);
-  DCHECK(resource_type == blink::mojom::ResourceType::kWorker ||
-         resource_type == blink::mojom::ResourceType::kSharedWorker)
-      << resource_request.resource_type;
+  DCHECK(resource_request.destination ==
+             network::mojom::RequestDestination::kWorker ||
+         resource_request.destination ==
+             network::mojom::RequestDestination::kSharedWorker)
+      << resource_request.destination;
 
   // Create the handler even for insecure HTTP since it's used in the
   // case of redirect to HTTPS.
@@ -238,10 +245,9 @@ ServiceWorkerMainResourceLoaderInterceptor::CreateForWorker(
     return nullptr;
 
   return base::WrapUnique(new ServiceWorkerMainResourceLoaderInterceptor(
-      std::move(navigation_handle), resource_type,
+      std::move(navigation_handle), resource_request.destination,
       resource_request.skip_service_worker, /*are_ancestors_secure=*/false,
-      FrameTreeNode::kFrameTreeNodeInvalidId, process_id, dedicated_worker_id,
-      shared_worker_id));
+      FrameTreeNode::kFrameTreeNodeInvalidId, process_id, &worker_token));
 }
 
 ServiceWorkerMainResourceLoaderInterceptor::
@@ -293,14 +299,14 @@ void ServiceWorkerMainResourceLoaderInterceptor::MaybeCreateLoader(
   // LoaderCallbackWrapper() on the UI thread.
   ServiceWorkerContextWrapper::RunOrPostTaskOnCoreThread(
       FROM_HERE,
-      base::BindOnce(&MaybeCreateLoaderOnCoreThread, GetWeakPtr(),
-                     handle_->core(), resource_type_, skip_service_worker_,
-                     are_ancestors_secure_, frame_tree_node_id_, process_id_,
-                     dedicated_worker_id_, shared_worker_id_,
-                     std::move(host_receiver), std::move(client_remote),
-                     tentative_resource_request, browser_context,
-                     std::move(loader_callback), std::move(fallback_callback),
-                     initialize_container_host_only));
+      base::BindOnce(
+          &MaybeCreateLoaderOnCoreThread, GetWeakPtr(), handle_->core(),
+          request_destination_, skip_service_worker_, are_ancestors_secure_,
+          frame_tree_node_id_, process_id_,
+          base::OptionalOrNullptr(worker_token_), std::move(host_receiver),
+          std::move(client_remote), tentative_resource_request, browser_context,
+          std::move(loader_callback), std::move(fallback_callback),
+          initialize_container_host_only));
 
   if (original_callback)
     std::move(original_callback).Run({});
@@ -361,21 +367,19 @@ ServiceWorkerMainResourceLoaderInterceptor::GetWeakPtr() {
 ServiceWorkerMainResourceLoaderInterceptor::
     ServiceWorkerMainResourceLoaderInterceptor(
         base::WeakPtr<ServiceWorkerMainResourceHandle> handle,
-        blink::mojom::ResourceType resource_type,
+        network::mojom::RequestDestination request_destination,
         bool skip_service_worker,
         bool are_ancestors_secure,
         int frame_tree_node_id,
         int process_id,
-        DedicatedWorkerId dedicated_worker_id,
-        SharedWorkerId shared_worker_id)
+        const DedicatedOrSharedWorkerToken* worker_token)
     : handle_(std::move(handle)),
-      resource_type_(resource_type),
+      request_destination_(request_destination),
       skip_service_worker_(skip_service_worker),
       are_ancestors_secure_(are_ancestors_secure),
       frame_tree_node_id_(frame_tree_node_id),
       process_id_(process_id),
-      dedicated_worker_id_(dedicated_worker_id),
-      shared_worker_id_(shared_worker_id) {
+      worker_token_(base::OptionalFromPtr(worker_token)) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(handle_);
 }
@@ -383,7 +387,8 @@ ServiceWorkerMainResourceLoaderInterceptor::
 // static
 bool ServiceWorkerMainResourceLoaderInterceptor::ShouldCreateForNavigation(
     const GURL& url,
-    network::mojom::RequestDestination request_destination) {
+    network::mojom::RequestDestination request_destination,
+    BrowserContext* browser_context) {
   // <embed> and <object> navigations must bypass the service worker, per the
   // discussion in https://w3c.github.io/ServiceWorker/#implementer-concerns.
   if (request_destination == network::mojom::RequestDestination::kEmbed ||
@@ -391,10 +396,10 @@ bool ServiceWorkerMainResourceLoaderInterceptor::ShouldCreateForNavigation(
     return false;
   }
 
-  // Create the handler even for insecure HTTP since it's used in the
+  // Create the interceptor even for insecure HTTP since it's used in the
   // case of redirect to HTTPS.
   return url.SchemeIsHTTPOrHTTPS() || OriginCanAccessServiceWorkers(url) ||
-         SchemeMaySupportRedirectingToHTTPS(url);
+         SchemeMaySupportRedirectingToHTTPS(browser_context, url);
 }
 
 void ServiceWorkerMainResourceLoaderInterceptor::RequestHandlerWrapper(

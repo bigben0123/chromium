@@ -22,6 +22,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "media/base/media_log.h"
 #include "media/base/media_switches.h"
 #include "media/base/media_util.h"
@@ -278,13 +279,13 @@ int32_t RTCVideoDecoderAdapter::Decode(const webrtc::EncodedImage& input_image,
   // to software decoding. See https://crbug.com/webrtc/9304.
   if (video_codec_type_ == webrtc::kVideoCodecVP9 &&
       input_image.SpatialIndex().value_or(0) > 0) {
-#if defined(ARCH_CPU_X86_FAMILY) && defined(OS_CHROMEOS)
+#if defined(ARCH_CPU_X86_FAMILY) && BUILDFLAG(IS_ASH)
     if (!base::FeatureList::IsEnabled(media::kVp9kSVCHWDecoding)) {
       return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
     }
 #else
     return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
-#endif  // defined(ARCH_CPU_X86_FAMILY) && defined(OS_CHROMEOS)
+#endif  // defined(ARCH_CPU_X86_FAMILY) && BUILDFLAG(IS_ASH)
   }
 
   if (missing_frames || !input_image._completeFrame) {
@@ -471,13 +472,13 @@ void RTCVideoDecoderAdapter::DecodeOnMediaThread() {
   }
 }
 
-void RTCVideoDecoderAdapter::OnDecodeDone(media::DecodeStatus status) {
-  DVLOG(3) << __func__ << "(" << status << ")";
+void RTCVideoDecoderAdapter::OnDecodeDone(media::Status status) {
+  DVLOG(3) << __func__ << "(" << status.code() << ")";
   DCHECK(media_task_runner_->BelongsToCurrentThread());
 
   outstanding_decode_requests_--;
 
-  if (status == media::DecodeStatus::DECODE_ERROR) {
+  if (!status.is_ok() && status.code() != media::StatusCode::kAborted) {
     DVLOG(2) << "Entering permanent error state";
     UMA_HISTOGRAM_ENUMERATION("Media.RTCVideoDecoderError",
                               media::VideoDecodeAccelerator::PLATFORM_FAILURE,
@@ -502,8 +503,7 @@ void RTCVideoDecoderAdapter::OnOutput(scoped_refptr<media::VideoFrame> frame) {
       webrtc::VideoFrame::Builder()
           .set_video_frame_buffer(
               new rtc::RefCountedObject<blink::WebRtcVideoFrameAdapter>(
-                  std::move(frame),
-                  WebRtcVideoFrameAdapter::LogStatus::kNoLogging))
+                  std::move(frame)))
           .set_timestamp_rtp(static_cast<uint32_t>(timestamp.InMicroseconds()))
           .set_timestamp_us(0)
           .set_rotation(webrtc::kVideoRotation_0)
@@ -583,8 +583,8 @@ void RTCVideoDecoderAdapter::FlushOnMediaThread(FlushDoneCB flush_success_cb,
       media::DecoderBuffer::CreateEOSBuffer(),
       WTF::BindRepeating(
           [](FlushDoneCB flush_success, FlushDoneCB flush_fail,
-             media::DecodeStatus status) {
-            if (status == media::DecodeStatus::OK)
+             media::Status status) {
+            if (status.is_ok())
               std::move(flush_success).Run();
             else
               std::move(flush_fail).Run();

@@ -36,7 +36,7 @@ class OptimizationGuideBridge;
 class OptimizationGuideService;
 class TopHostProvider;
 class PredictionManager;
-class PredictionManagerBrowserTest;
+class PredictionManagerBrowserTestBase;
 }  // namespace optimization_guide
 
 class GURL;
@@ -54,9 +54,12 @@ class OptimizationGuideKeyedService
   void RegisterOptimizationTargets(
       const std::vector<optimization_guide::proto::OptimizationTarget>&
           optimization_targets) override;
-  optimization_guide::OptimizationGuideDecision ShouldTargetNavigation(
+  void ShouldTargetNavigationAsync(
       content::NavigationHandle* navigation_handle,
-      optimization_guide::proto::OptimizationTarget optimization_target)
+      optimization_guide::proto::OptimizationTarget optimization_target,
+      const base::flat_map<optimization_guide::proto::ClientModelFeature,
+                           float>& client_model_feature_values,
+      optimization_guide::OptimizationGuideTargetDecisionCallback callback)
       override;
   void RegisterOptimizationTypes(
       const std::vector<optimization_guide::proto::OptimizationType>&
@@ -92,7 +95,7 @@ class OptimizationGuideKeyedService
   friend class OptimizationGuideKeyedServiceBrowserTest;
   friend class OptimizationGuideWebContentsObserver;
   friend class ProfileManager;
-  friend class optimization_guide::PredictionManagerBrowserTest;
+  friend class optimization_guide::PredictionManagerBrowserTestBase;
   friend class optimization_guide::android::OptimizationGuideBridge;
 
   // Initializes the service. |optimization_guide_service| is the

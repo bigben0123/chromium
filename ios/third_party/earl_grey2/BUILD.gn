@@ -79,6 +79,7 @@ source_set("common_lib") {
     "src/CommonLib/Assertion/GREYFatalAsserts.h",
     "src/CommonLib/Assertion/GREYThrowDefines.h",
     "src/CommonLib/Config/GREYAppState.h",
+    "src/CommonLib/Config/GREYAppState.m",
     "src/CommonLib/Config/GREYConfigKey.h",
     "src/CommonLib/Config/GREYConfigKey.m",
     "src/CommonLib/Config/GREYConfiguration+Private.h",
@@ -98,8 +99,6 @@ source_set("common_lib") {
     "src/CommonLib/Error/GREYErrorFormatter.m",
     "src/CommonLib/Error/GREYObjectFormatter.h",
     "src/CommonLib/Error/GREYObjectFormatter.m",
-    "src/CommonLib/Error/GREYScrollActionError.h",
-    "src/CommonLib/Error/GREYScrollActionError.m",
     "src/CommonLib/Error/NSError+GREYCommon.h",
     "src/CommonLib/Error/NSError+GREYCommon.m",
     "src/CommonLib/Event/GREYTouchInfo.h",
@@ -115,6 +114,7 @@ source_set("common_lib") {
     "src/CommonLib/GREYDiagnosable.h",
     "src/CommonLib/GREYDiagnosable.m",
     "src/CommonLib/GREYLogger.h",
+    "src/CommonLib/GREYLogger.m",
     "src/CommonLib/GREYObjcRuntime.h",
     "src/CommonLib/GREYObjcRuntime.m",
     "src/CommonLib/GREYStopwatch.h",
@@ -142,7 +142,7 @@ source_set("common_lib") {
 
   public_configs = [ ":config" ]
 
-  libs = [ "UIKit.framework" ]
+  frameworks = [ "UIKit.framework" ]
 
   configs -= [
     "//build/config/gcc:symbol_visibility_hidden",
@@ -211,7 +211,7 @@ source_set("ui_lib") {
 
   public_configs = [ ":config" ]
 
-  libs = [
+  frameworks = [
     "QuartzCore.framework",
     "UIKit.framework",
   ]
@@ -234,6 +234,7 @@ source_set("app_framework_shared_headers") {
     "src/AppFramework/Action/GREYAction.h",
     "src/AppFramework/Action/GREYActions.h",
     "src/AppFramework/Action/GREYActionsShorthand.h",
+    "src/AppFramework/Additions/UITextSelectionView+GREYApp.h",
     "src/AppFramework/Config/GREYAppConfiguration.h",
     "src/AppFramework/Core/GREYElementInteraction.h",
     "src/AppFramework/Core/GREYInteraction.h",
@@ -313,6 +314,8 @@ ios_framework_bundle("app_framework") {
     "src/AppFramework/Additions/UIScrollView+GREYApp.m",
     "src/AppFramework/Additions/UISwitch+GREYApp.h",
     "src/AppFramework/Additions/UISwitch+GREYApp.m",
+    "src/AppFramework/Additions/UITextSelectionView+GREYApp.h",
+    "src/AppFramework/Additions/UITextSelectionView+GREYApp.m",
     "src/AppFramework/Additions/UIView+GREYApp.h",
     "src/AppFramework/Additions/UIView+GREYApp.m",
     "src/AppFramework/Additions/UIViewController+GREYApp.h",
@@ -396,7 +399,7 @@ ios_framework_bundle("app_framework") {
 
   public_headers = [ "src/AppFramework/EarlGreyApp/EarlGreyApp.h" ]
 
-  libs = [
+  frameworks = [
     "CoreData.framework",
     "CoreGraphics.framework",
     "Foundation.framework",
@@ -435,6 +438,11 @@ source_set("test_lib") {
     "src/TestLib/AlertHandling/XCTestCase+GREYSystemAlertHandler.h",
     "src/TestLib/AlertHandling/XCTestCase+GREYSystemAlertHandler.m",
     "src/TestLib/AppleInternals/GREYXCTestAppleInternals.h",
+    "src/TestLib/Assertion/GREYAssert+Private.h",
+    "src/TestLib/Assertion/GREYAssert.h",
+    "src/TestLib/Assertion/GREYAssert.m",
+    "src/TestLib/Assertion/GREYAssertDefaultConfiguration.h",
+    "src/TestLib/Assertion/GREYAssertDefaultConfiguration.m",
     "src/TestLib/Assertion/GREYAssertionDefines.h",
     "src/TestLib/Assertion/GREYWaitFunctions.h",
     "src/TestLib/Assertion/GREYWaitFunctions.m",
@@ -458,8 +466,6 @@ source_set("test_lib") {
     "src/TestLib/EarlGreyImpl/XCUIApplication+GREYTest.m",
     "src/TestLib/Exception/GREYDefaultFailureHandler.h",
     "src/TestLib/Exception/GREYDefaultFailureHandler.m",
-    "src/TestLib/Exception/GREYFailureFormatter.h",
-    "src/TestLib/Exception/GREYFailureFormatter.m",
     "src/TestLib/Exception/GREYFailureHandlerHelpers.h",
     "src/TestLib/Exception/GREYFailureHandlerHelpers.m",
     "src/TestLib/Exception/GREYFailureScreenshotSaver.h",
@@ -486,7 +492,7 @@ source_set("test_lib") {
     ":test_lib_shared_headers",
   ]
 
-  libs = [
+  frameworks = [
     "CoreData.framework",
     "CoreGraphics.framework",
     "Foundation.framework",

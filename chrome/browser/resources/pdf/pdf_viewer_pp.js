@@ -4,6 +4,7 @@
 
 import './elements/viewer-error-screen.js';
 import './elements/viewer-page-indicator.js';
+import './elements/viewer-zoom-toolbar.js';
 import './elements/shared-vars.js';
 import './pdf_viewer_shared_style.js';
 
@@ -14,7 +15,7 @@ import {html} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.
 
 import {BrowserApi} from './browser_api.js';
 import {FittingType} from './constants.js';
-import {MessageData, PrintPreviewParams} from './controller.js';
+import {MessageData, PluginController, PrintPreviewParams} from './controller.js';
 import {DeserializeKeyEvent, LoadState, SerializeKeyEvent} from './pdf_scripting_api.js';
 import {PDFViewerBaseElement} from './pdf_viewer_base.js';
 import {DestinationMessageData, DocumentDimensionsMessageData, MessageObject, shouldIgnoreKeyEvents} from './pdf_viewer_utils.js';
@@ -56,11 +57,6 @@ class PDFViewerPPElement extends PDFViewerBaseElement {
   }
 
   /** @override */
-  getZoomToolbar() {
-    return /** @type {!ViewerZoomToolbarElement} */ (this.$$('#zoom-toolbar'));
-  }
-
-  /** @override */
   getErrorScreen() {
     return /** @type {!ViewerErrorScreenElement} */ (this.$$('#error-screen'));
   }
@@ -70,12 +66,23 @@ class PDFViewerPPElement extends PDFViewerBaseElement {
     return PRINT_PREVIEW_BACKGROUND_COLOR;
   }
 
+  /**
+   * @return {!ViewerZoomToolbarElement}
+   * @private
+   */
+  getZoomToolbar_() {
+    return /** @type {!ViewerZoomToolbarElement} */ (this.$$('#zoom-toolbar'));
+  }
+
   /** @param {!BrowserApi} browserApi */
   init(browserApi) {
     super.init(browserApi);
 
+    /** @private {?PluginController} */
+    this.pluginController_ = PluginController.getInstance();
+
     this.toolbarManager_ =
-        new ToolbarManager(window, null, this.getZoomToolbar());
+        new ToolbarManager(window, null, this.getZoomToolbar_());
 
     // Setup the keyboard event listener.
     document.addEventListener(
@@ -108,7 +115,7 @@ class PDFViewerPPElement extends PDFViewerBaseElement {
         break;  // Ensure escape falls through to the print-preview handler.
       case 'a':
         if (e.ctrlKey || e.metaKey) {
-          this.pluginController.selectAll();
+          this.pluginController_.selectAll();
           // Since we do selection ourselves.
           e.preventDefault();
         }
@@ -120,7 +127,7 @@ class PDFViewerPPElement extends PDFViewerBaseElement {
         return;
       case '\\':
         if (e.ctrlKey) {
-          this.getZoomToolbar().fitToggleFromHotKey();
+          this.getZoomToolbar_().fitToggleFromHotKey();
         }
         return;
       case ']':
@@ -144,7 +151,7 @@ class PDFViewerPPElement extends PDFViewerBaseElement {
 
   /** @private */
   sendBackgroundColorForPrintPreview_() {
-    this.pluginController.backgroundColorChanged(
+    this.pluginController_.backgroundColorChanged(
         this.dark_ ? PRINT_PREVIEW_DARK_BACKGROUND_COLOR :
                      PRINT_PREVIEW_BACKGROUND_COLOR);
   }
@@ -165,7 +172,7 @@ class PDFViewerPPElement extends PDFViewerBaseElement {
     // than the spec. In LTR layout, the zoom toolbar is on the left
     // left side, but the scrollbar is still on the right, so this is not
     // necessary.
-    const zoomToolbar = this.getZoomToolbar();
+    const zoomToolbar = this.getZoomToolbar_();
     if (isRTL()) {
       zoomToolbar.style.right =
           -verticalScrollbarWidth + (scrollbarWidth / 2) + 'px';
@@ -188,7 +195,7 @@ class PDFViewerPPElement extends PDFViewerBaseElement {
       pageIndicator.style.visibility = 'hidden';
     }
 
-    this.pluginController.viewportChanged();
+    this.pluginController_.viewportChanged();
   }
 
   /** @override */
@@ -205,11 +212,11 @@ class PDFViewerPPElement extends PDFViewerBaseElement {
 
     switch (message.data.type.toString()) {
       case 'getSelectedText':
-        this.pluginController.getSelectedText().then(
+        this.pluginController_.getSelectedText().then(
             this.sendScriptingMessage.bind(this));
         break;
       case 'selectAll':
-        this.pluginController.selectAll();
+        this.pluginController_.selectAll();
         break;
     }
   }
@@ -226,7 +233,7 @@ class PDFViewerPPElement extends PDFViewerBaseElement {
       case 'loadPreviewPage':
         messageData =
             /** @type {{ url:  string, index: number }} */ (messageData);
-        this.pluginController.loadPreviewPage(
+        this.pluginController_.loadPreviewPage(
             messageData.url, messageData.index);
         return true;
       case 'resetPrintPreviewMode':
@@ -235,7 +242,8 @@ class PDFViewerPPElement extends PDFViewerBaseElement {
         if (!this.inPrintPreviewMode_) {
           this.inPrintPreviewMode_ = true;
           this.isUserInitiatedEvent = false;
-          this.getZoomToolbar().forceFit(FittingType.FIT_TO_PAGE);
+          this.forceFit(FittingType.FIT_TO_PAGE);
+          this.updateViewportFit(FittingType.FIT_TO_PAGE);
           this.isUserInitiatedEvent = true;
         }
 
@@ -244,7 +252,7 @@ class PDFViewerPPElement extends PDFViewerBaseElement {
         this.lastViewportPosition = this.viewport.position;
         this.$$('#page-indicator').pageLabels = messageData.pageNumbers;
 
-        this.pluginController.resetPrintPreviewMode(messageData);
+        this.pluginController_.resetPrintPreviewMode(messageData);
         return true;
       case 'sendKeyEvent':
         this.handleKeyEvent_(/** @type {!KeyboardEvent} */ (DeserializeKeyEvent(
@@ -338,9 +346,13 @@ class PDFViewerPPElement extends PDFViewerBaseElement {
   }
 
   /** @override */
+  forceFit(view) {
+    this.getZoomToolbar_().forceFit(view);
+  }
+
+  /** @override */
   handleStrings(strings) {
     super.handleStrings(strings);
-
     if (!strings) {
       return;
     }

@@ -19,9 +19,8 @@
 #include "base/stl_util.h"
 #include "content/common/zygote/zygote_commands_linux.h"
 #include "content/public/common/content_switches.h"
-#include "services/service_manager/embedder/result_codes.h"
-#include "services/service_manager/embedder/switches.h"
-#include "services/service_manager/sandbox/switches.h"
+#include "content/public/common/result_codes.h"
+#include "sandbox/policy/switches.h"
 #include "third_party/icu/source/i18n/unicode/timezone.h"
 
 namespace content {
@@ -226,11 +225,10 @@ void ZygoteCommunication::Init(
   CHECK(base::PathService::Get(base::FILE_EXE, &chrome_path));
 
   base::CommandLine cmd_line(chrome_path);
-  cmd_line.AppendSwitchASCII(service_manager::switches::kProcessType,
-                             service_manager::switches::kZygoteProcess);
+  cmd_line.AppendSwitchASCII(switches::kProcessType, switches::kZygoteProcess);
 
   if (type_ == ZygoteType::kUnsandboxed)
-    cmd_line.AppendSwitch(service_manager::switches::kNoZygoteSandbox);
+    cmd_line.AppendSwitch(sandbox::policy::switches::kNoZygoteSandbox);
 
   const base::CommandLine& browser_command_line =
       *base::CommandLine::ForCurrentProcess();
@@ -241,10 +239,10 @@ void ZygoteCommunication::Init(
   // Append any switches from the service manager that need to be forwarded on
   // to the zygote/renderers.
   static const char* const kForwardSwitches[] = {
-      service_manager::switches::kAllowSandboxDebugging,
-      service_manager::switches::kDisableInProcessStackTraces,
-      service_manager::switches::kDisableSeccompFilterSandbox,
-      service_manager::switches::kNoSandbox,
+      sandbox::policy::switches::kAllowSandboxDebugging,
+      switches::kDisableInProcessStackTraces,
+      sandbox::policy::switches::kDisableSeccompFilterSandbox,
+      sandbox::policy::switches::kNoSandbox,
   };
   cmd_line.CopySwitchesFrom(browser_command_line, kForwardSwitches,
                             base::size(kForwardSwitches));
@@ -281,7 +279,7 @@ base::TerminationStatus ZygoteCommunication::GetTerminationStatus(
 
   // Set this now to handle the error cases.
   if (exit_code)
-    *exit_code = service_manager::RESULT_CODE_NORMAL_EXIT;
+    *exit_code = RESULT_CODE_NORMAL_EXIT;
   int status = base::TERMINATION_STATUS_NORMAL_TERMINATION;
 
   if (len == -1) {

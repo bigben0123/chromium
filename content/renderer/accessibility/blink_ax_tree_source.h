@@ -11,7 +11,7 @@
 #include <string>
 
 #include "base/optional.h"
-#include "content/common/ax_content_node_data.h"
+#include "content/common/content_export.h"
 #include "third_party/blink/public/web/web_ax_object.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "ui/accessibility/ax_mode.h"
@@ -38,9 +38,9 @@ class ScopedFreezeBlinkAXTreeSource {
   DISALLOW_COPY_AND_ASSIGN(ScopedFreezeBlinkAXTreeSource);
 };
 
-class BlinkAXTreeSource : public ui::AXTreeSource<blink::WebAXObject,
-                                                  AXContentNodeData,
-                                                  ui::AXTreeData> {
+class CONTENT_EXPORT BlinkAXTreeSource
+    : public ui::
+          AXTreeSource<blink::WebAXObject, ui::AXNodeData, ui::AXTreeData> {
  public:
   BlinkAXTreeSource(RenderFrameImpl* render_frame, ui::AXMode mode);
   ~BlinkAXTreeSource() override;
@@ -91,6 +91,16 @@ class BlinkAXTreeSource : public ui::AXTreeSource<blink::WebAXObject,
   bool ShouldLoadInlineTextBoxes(const blink::WebAXObject& obj) const;
   void SetLoadInlineTextBoxesForId(int32_t id);
 
+  void PopulateAXRelativeBounds(blink::WebAXObject obj,
+                                ui::AXRelativeBounds* bounds,
+                                bool* clips_children = nullptr) const;
+
+  // Cached bounding boxes.
+  bool HasCachedBoundingBox(int32_t id) const;
+  const ui::AXRelativeBounds& GetCachedBoundingBox(int32_t id) const;
+  void SetCachedBoundingBox(int32_t id, const ui::AXRelativeBounds& bounds);
+  size_t GetCachedBoundingBoxCount() const;
+
   // AXTreeSource implementation.
   bool GetTreeData(ui::AXTreeData* tree_data) const override;
   blink::WebAXObject GetRoot() const override;
@@ -101,13 +111,14 @@ class BlinkAXTreeSource : public ui::AXTreeSource<blink::WebAXObject,
       std::vector<blink::WebAXObject>* out_children) const override;
   blink::WebAXObject GetParent(blink::WebAXObject node) const override;
   void SerializeNode(blink::WebAXObject node,
-                     AXContentNodeData* out_data) const override;
+                     ui::AXNodeData* out_data) const override;
   bool IsIgnored(blink::WebAXObject node) const override;
   bool IsValid(blink::WebAXObject node) const override;
   bool IsEqual(blink::WebAXObject node1,
                blink::WebAXObject node2) const override;
   blink::WebAXObject GetNull() const override;
   std::string GetDebugString(blink::WebAXObject node) const override;
+  void SerializerClearedNode(int32_t node_id) override;
 
   blink::WebDocument GetMainDocument() const;
 
@@ -126,43 +137,33 @@ class BlinkAXTreeSource : public ui::AXTreeSource<blink::WebAXObject,
   }
 
   void SerializeBoundingBoxAttributes(blink::WebAXObject src,
-                                      AXContentNodeData* dst) const;
-  void SerializePDFAttributes(blink::WebAXObject src,
-                              AXContentNodeData* dst) const;
+                                      ui::AXNodeData* dst) const;
   void SerializeSparseAttributes(blink::WebAXObject src,
-                                 AXContentNodeData* dst) const;
+                                 ui::AXNodeData* dst) const;
   void SerializeNameAndDescriptionAttributes(blink::WebAXObject src,
-                                             AXContentNodeData* dst) const;
-  void SerializeValueAttributes(blink::WebAXObject src,
-                                AXContentNodeData* dst) const;
-  void SerializeStateAttributes(blink::WebAXObject src,
-                                AXContentNodeData* dst) const;
+                                             ui::AXNodeData* dst) const;
   void SerializeStyleAttributes(blink::WebAXObject src,
-                                AXContentNodeData* dst) const;
+                                ui::AXNodeData* dst) const;
   void SerializeInlineTextBoxAttributes(blink::WebAXObject src,
-                                        AXContentNodeData* dst) const;
+                                        ui::AXNodeData* dst) const;
   void SerializeMarkerAttributes(blink::WebAXObject src,
-                                 AXContentNodeData* dst) const;
+                                 ui::AXNodeData* dst) const;
   void SerializeLiveRegionAttributes(blink::WebAXObject src,
-                                     AXContentNodeData* dst) const;
+                                     ui::AXNodeData* dst) const;
   void SerializeListAttributes(blink::WebAXObject src,
-                               AXContentNodeData* dst) const;
-  void SerializeTableAttributes(blink::WebAXObject src,
-                                AXContentNodeData* dst) const;
+                               ui::AXNodeData* dst) const;
   void SerializeScrollAttributes(blink::WebAXObject src,
-                                 AXContentNodeData* dst) const;
+                                 ui::AXNodeData* dst) const;
   void SerializeChooserPopupAttributes(blink::WebAXObject src,
-                                       AXContentNodeData* dst) const;
+                                       ui::AXNodeData* dst) const;
   void SerializeOtherScreenReaderAttributes(blink::WebAXObject src,
-                                            AXContentNodeData* dst) const;
-  void SerializeEditableTextAttributes(blink::WebAXObject src,
-                                       AXContentNodeData* dst) const;
+                                            ui::AXNodeData* dst) const;
   void SerializeElementAttributes(blink::WebAXObject src,
                                   blink::WebElement element,
-                                  AXContentNodeData* dst) const;
+                                  ui::AXNodeData* dst) const;
   void SerializeHTMLAttributes(blink::WebAXObject src,
                                blink::WebElement element,
-                               AXContentNodeData* dst) const;
+                               ui::AXNodeData* dst) const;
 
   blink::WebAXObject ComputeRoot() const;
 
@@ -172,13 +173,12 @@ class BlinkAXTreeSource : public ui::AXTreeSource<blink::WebAXObject,
   // Length of War and Peace (http://www.gutenberg.org/files/2600/2600-0.txt).
   static const uint32_t kMaxStaticTextLength = 3227574;
   void TruncateAndAddStringAttribute(
-      AXContentNodeData* dst,
+      ui::AXNodeData* dst,
       ax::mojom::StringAttribute attribute,
       const std::string& value,
       uint32_t max_len = kMaxStringAttributeLength) const;
 
-  void AddImageAnnotations(blink::WebAXObject& src,
-                           AXContentNodeData* dst) const;
+  void AddImageAnnotations(blink::WebAXObject& src, ui::AXNodeData* dst) const;
 
   RenderFrameImpl* render_frame_;
 
@@ -207,6 +207,9 @@ class BlinkAXTreeSource : public ui::AXTreeSource<blink::WebAXObject,
   // Used to ensure that the tutor message that explains to screen reader users
   // how to turn on automatic image labels is provided only once.
   mutable base::Optional<int32_t> first_unlabeled_image_id_ = base::nullopt;
+
+  // Current bounding box of every object, so we can detect when it moves.
+  mutable std::unordered_map<int, ui::AXRelativeBounds> cached_bounding_boxes_;
 
   // These are updated when calling |Freeze|.
   bool frozen_ = false;

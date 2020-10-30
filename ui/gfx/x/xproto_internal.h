@@ -9,14 +9,7 @@
 #error "This file should only be included by //ui/gfx/x:xprotos"
 #endif
 
-#include <X11/Xlib-xcb.h>
-#include <stdint.h>
-#include <string.h>
-#include <xcb/xcb.h>
-#include <xcb/xcbext.h>
-
 #include <bitset>
-#include <limits>
 #include <type_traits>
 
 #include "base/component_export.h"
@@ -43,6 +36,9 @@ struct EnumBase<T, typename std::enable_if_t<std::is_enum<T>::value>> {
 
 template <typename T>
 using EnumBaseType = typename EnumBase<T>::type;
+
+template <typename T>
+void ReadError(T* error, ReadBuffer* buf);
 
 // Calls free() on the underlying data when the count drops to 0.
 class COMPONENT_EXPORT(X11) MallocedRefCountedMemory
@@ -144,10 +140,12 @@ base::Optional<unsigned int> SendRequestImpl(x11::Connection* connection,
 template <typename Reply>
 Future<Reply> SendRequest(x11::Connection* connection,
                           WriteBuffer* buf,
-                          bool reply_has_fds) {
+                          bool reply_has_fds,
+                          const char* request_name) {
   auto sequence = SendRequestImpl(connection, buf, std::is_void<Reply>::value,
                                   reply_has_fds);
-  return {sequence ? connection : nullptr, sequence};
+  return {sequence ? connection : nullptr, sequence,
+          sequence ? request_name : nullptr};
 }
 
 // Helper function for xcbproto popcount.  Given an integral type, returns the

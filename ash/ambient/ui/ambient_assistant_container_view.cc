@@ -8,6 +8,7 @@
 #include <string>
 
 #include "ash/ambient/ui/ambient_assistant_dialog_plate.h"
+#include "ash/ambient/ui/ambient_view_ids.h"
 #include "ash/ambient/ui/assistant_response_container_view.h"
 #include "ash/assistant/assistant_controller_impl.h"
 #include "ash/assistant/model/assistant_ui_model.h"
@@ -45,6 +46,7 @@ base::string16 GetGreetingMessage(const UserSession* user_session) {
 AmbientAssistantContainerView::AmbientAssistantContainerView()
     : delegate_(Shell::Get()->assistant_controller()->view_delegate()) {
   DCHECK(delegate_);
+  SetID(AmbientViewID::kAmbientAssistantContainerView);
   InitLayout();
 
   assistant_controller_observer_.Add(AssistantController::Get());

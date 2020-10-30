@@ -63,9 +63,14 @@ void LogFileError(FileError error) {
                             error);
 }
 
-void LogDriveFSMounted(bool mounted) {
+void LogDriveFSMounted(const bool mounted) {
   UMA_HISTOGRAM_BOOLEAN("Apps.AppList.DriveQuickAccessProvider.DriveFSMounted",
                         mounted);
+}
+
+void LogCacheWarmed(const bool warmed) {
+  UMA_HISTOGRAM_BOOLEAN("Apps.AppList.DriveQuickAccessProvider.CacheWarmed",
+                        warmed);
 }
 
 // Given an absolute path representing a file in the user's Drive, returns a
@@ -113,12 +118,20 @@ DriveQuickAccessProvider::DriveQuickAccessProvider(
       {base::TaskPriority::BEST_EFFORT, base::MayBlock(),
        base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
 
-  // Observe the drive integration service to warm the results cache once
-  // drivefs is mounted. This is necessary only if the suggested files
+  // Warm the results cache if or when drivefs is mounted by fetching from the
+  // Drive QuickAccess API. This is necessary only if the suggested files
   // experiment is enabled, so that results are ready for display in the
   // suggested chips on the first launcher open after login.
-  if (suggested_files_enabled_ && drive_service_)
-    drive_service_->AddObserver(this);
+  if (suggested_files_enabled_ && drive_service_) {
+    if (drive_service_->IsMounted()) {
+      // Drivefs is mounted, so we can fetch results immediately.
+      OnFileSystemMounted();
+    } else {
+      // Wait for DriveFS to be mounted, then fetch results. This happens in
+      // OnFileSystemMounted.
+      drive_service_->AddObserver(this);
+    }
+  }
 }
 
 DriveQuickAccessProvider::~DriveQuickAccessProvider() {
@@ -127,10 +140,11 @@ DriveQuickAccessProvider::~DriveQuickAccessProvider() {
 }
 
 void DriveQuickAccessProvider::OnFileSystemMounted() {
-  // Warm up the result cache by fetching results from the Drive QuickAccess API
-  // as soon as DriveFS is mounted. This ensures the first use of the launcher
-  // displays Drive results. This is called on login, and when resuming from
-  // sleep.
+  LogCacheWarmed(have_warmed_up_cache_);
+  if (have_warmed_up_cache_)
+    return;
+  have_warmed_up_cache_ = true;
+
   GetQuickAccessItems(
       base::BindOnce(&DriveQuickAccessProvider::StartSearchController,
                      weak_ptr_factory_.GetWeakPtr()));

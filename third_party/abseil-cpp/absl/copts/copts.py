@@ -41,10 +41,6 @@ LLVM_DISABLE_WARNINGS_FLAGS = [
     "-Wno-packed",
     "-Wno-padded",
     ###
-    # Google style does not use unsigned integers, though STL containers
-    # have unsigned types.
-    "-Wno-sign-compare",
-    ###
     "-Wno-float-conversion",
     "-Wno-float-equal",
     "-Wno-format-nonliteral",
@@ -128,6 +124,7 @@ COPT_VARS = {
         "-Wmissing-declarations",
         "-Woverlength-strings",
         "-Wpointer-arith",
+        "-Wundef",
         "-Wunused-local-typedefs",
         "-Wunused-result",
         "-Wvarargs",
@@ -137,9 +134,8 @@ COPT_VARS = {
         # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=36750
         # Remove when gcc-4.x is no longer supported.
         "-Wno-missing-field-initializers",
-        # Google style does not use unsigned integers, though STL containers
-        # have unsigned types.
-        "-Wno-sign-compare",
+        # Don't define min and max macros (Build on Windows using gcc)
+        "-DNOMINMAX",
     ],
     "ABSL_GCC_TEST_FLAGS": [
         "-Wno-conversion-null",
@@ -151,7 +147,10 @@ COPT_VARS = {
         "-Wno-unused-private-field",
     ],
     "ABSL_LLVM_FLAGS":
-        LLVM_BIG_WARNING_FLAGS + LLVM_DISABLE_WARNINGS_FLAGS,
+        LLVM_BIG_WARNING_FLAGS + LLVM_DISABLE_WARNINGS_FLAGS + [
+            # Don't define min and max macros (Build on Windows using clang)
+            "-DNOMINMAX",
+        ],
     "ABSL_LLVM_TEST_FLAGS":
         LLVM_TEST_DISABLE_WARNINGS_FLAGS,
     "ABSL_CLANG_CL_FLAGS":

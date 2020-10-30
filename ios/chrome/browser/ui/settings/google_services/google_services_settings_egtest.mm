@@ -5,8 +5,8 @@
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
 #include "components/safe_browsing/core/features.h"
+#import "ios/chrome/browser/ui/authentication/signin_earl_grey.h"
 #import "ios/chrome/browser/ui/authentication/signin_earl_grey_ui.h"
-#import "ios/chrome/browser/ui/authentication/signin_earlgrey_utils.h"
 #import "ios/chrome/browser/ui/settings/google_services/google_services_settings_app_interface.h"
 #import "ios/chrome/browser/ui/settings/google_services/google_services_settings_constants.h"
 #import "ios/chrome/browser/ui/settings/google_services/manage_sync_settings_constants.h"
@@ -25,18 +25,18 @@
 #error "This file requires ARC support."
 #endif
 
-#if defined(CHROME_EARL_GREY_2)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wc++98-compat-extra-semi"
 GREY_STUB_CLASS_IN_APP_MAIN_QUEUE(GoogleServicesSettingsAppInterface);
 #pragma clang diagnostic pop
-#endif  // defined(CHROME_EARL_GREY_2)
 
 using l10n_util::GetNSString;
 using chrome_test_util::AddAccountButton;
 using chrome_test_util::ButtonWithAccessibilityLabelId;
 using chrome_test_util::GoogleServicesSettingsButton;
 using chrome_test_util::SettingsDoneButton;
+using chrome_test_util::SettingsMenuBackButton;
+using chrome_test_util::SyncSettingsConfirmButton;
 
 // Integration tests using the Google services settings screen.
 @interface GoogleServicesSettingsTestCase : ChromeTestCase
@@ -91,12 +91,12 @@ using chrome_test_util::SettingsDoneButton;
 // Regression test for crbug.com/1033901
 - (void)testRemovePrimaryAccount {
   // Signin.
-  FakeChromeIdentity* fakeIdentity = [SigninEarlGreyUtils fakeIdentity1];
+  FakeChromeIdentity* fakeIdentity = [SigninEarlGrey fakeIdentity1];
   [SigninEarlGreyUI signinWithFakeIdentity:fakeIdentity];
   // Open "Google Services" settings.
   [self openGoogleServicesSettings];
   // Remove the primary account.
-  [SigninEarlGreyUtils forgetFakeIdentity:fakeIdentity];
+  [SigninEarlGrey forgetFakeIdentity:fakeIdentity];
   // Assert the UI has been reloaded by testing for the signin cell being
   // visible.
   id<GREYMatcher> signinCellMatcher =
@@ -122,8 +122,8 @@ using chrome_test_util::SettingsDoneButton;
     [GoogleServicesSettingsAppInterface
         unblockAllNavigationRequestsForCurrentWebState];
   }];
-  FakeChromeIdentity* fakeIdentity = [SigninEarlGreyUtils fakeIdentity1];
-  [SigninEarlGreyUtils addFakeIdentity:fakeIdentity];
+  FakeChromeIdentity* fakeIdentity = [SigninEarlGrey fakeIdentity1];
+  [SigninEarlGrey addFakeIdentity:fakeIdentity];
   // Open "Google Services" settings.
   [self openGoogleServicesSettings];
   // Open sign-in.
@@ -152,7 +152,7 @@ using chrome_test_util::SettingsDoneButton;
                          scrollViewMatcher:manageSyncScrollViewMatcher]
       performAction:grey_tap()];
   // Needs to wait until the sign-in dialog is fully dismissed to continue.
-  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
+  [ChromeEarlGreyUI waitForAppToIdle];
   [self openGoogleServicesSettings];
   // Verify the sync is not confirmed yet.
   [self assertCellWithTitleID:IDS_IOS_SYNC_SETUP_NOT_CONFIRMED_TITLE
@@ -163,7 +163,7 @@ using chrome_test_util::SettingsDoneButton;
 // See: crbug.com/1076843
 - (void)testOpenSSOAddAccount {
   // Signin.
-  FakeChromeIdentity* fakeIdentity = [SigninEarlGreyUtils fakeIdentity1];
+  FakeChromeIdentity* fakeIdentity = [SigninEarlGrey fakeIdentity1];
   [SigninEarlGreyUI signinWithFakeIdentity:fakeIdentity];
   // Open "Google Services" settings.
   [self openGoogleServicesSettings];
@@ -180,7 +180,7 @@ using chrome_test_util::SettingsDoneButton;
                  ButtonWithAccessibilityLabelId(
                      IDS_IOS_ACCOUNT_CONSISTENCY_SETUP_SKIP_BUTTON)]
       performAction:grey_tap()];
-  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
+  [ChromeEarlGreyUI waitForAppToIdle];
 }
 
 // Tests that the Safe Browsing toggle reflects the current value of the
@@ -234,7 +234,7 @@ using chrome_test_util::SettingsDoneButton;
        forUserPref:password_manager::prefs::kPasswordLeakDetectionEnabled];
 
   // Sign in.
-  FakeChromeIdentity* fakeIdentity = [SigninEarlGreyUtils fakeIdentity1];
+  FakeChromeIdentity* fakeIdentity = [SigninEarlGrey fakeIdentity1];
   [SigninEarlGreyUI signinWithFakeIdentity:fakeIdentity];
   // Open "Google Services" settings.
   [self openGoogleServicesSettings];
@@ -294,7 +294,7 @@ using chrome_test_util::SettingsDoneButton;
        forUserPref:password_manager::prefs::kPasswordLeakDetectionEnabled];
 
   // Sign in.
-  FakeChromeIdentity* fakeIdentity = [SigninEarlGreyUtils fakeIdentity1];
+  FakeChromeIdentity* fakeIdentity = [SigninEarlGrey fakeIdentity1];
   [SigninEarlGreyUI signinWithFakeIdentity:fakeIdentity];
   // Open "Google Services" settings.
   [self openGoogleServicesSettings];
@@ -349,6 +349,47 @@ using chrome_test_util::SettingsDoneButton;
       [ChromeEarlGrey userBooleanPref:password_manager::prefs::
                                           kPasswordLeakDetectionEnabled],
       @"Failed to toggle-on password leak checks");
+}
+
+// Tests the following steps:
+//  + Opens sign-in from Google services
+//  + Taps on the settings link to open the advanced sign-in settings
+//  + Opens "Manage Sync" twice
+// The "Manage Sync" should not be disabled when closing "Manage Sync" view.
+- (void)testOpenManageSyncSettings {
+  FakeChromeIdentity* fakeIdentity = [SigninEarlGrey fakeIdentity1];
+  [SigninEarlGrey addFakeIdentity:fakeIdentity];
+
+  [ChromeEarlGreyUI openSettingsMenu];
+  [ChromeEarlGreyUI
+      tapSettingsMenuButton:chrome_test_util::PrimarySignInButton()];
+  [SigninEarlGreyUI tapSettingsLink];
+  // Open "Manage Sync" settings.
+  id<GREYMatcher> manageSyncMatcher =
+      [self cellMatcherWithTitleID:IDS_IOS_MANAGE_SYNC_SETTINGS_TITLE
+                      detailTextID:0];
+  [[EarlGrey selectElementWithMatcher:manageSyncMatcher]
+      performAction:grey_tap()];
+
+  id<GREYMatcher> backButtonMatcher =
+      grey_allOf(SettingsMenuBackButton(),
+                 grey_descendant(grey_kindOfClass([UIImageView class])), nil);
+  // Back to the Google services settings view.
+  [[EarlGrey selectElementWithMatcher:backButtonMatcher]
+      performAction:grey_tap()];
+  // Open "Manage Sync" settings, again.
+  [[EarlGrey selectElementWithMatcher:manageSyncMatcher]
+      performAction:grey_tap()];
+  // Back to the Google services settings view.
+  [[EarlGrey selectElementWithMatcher:backButtonMatcher]
+      performAction:grey_tap()];
+
+  // Close the advance settings.
+  [[EarlGrey selectElementWithMatcher:SyncSettingsConfirmButton()]
+      performAction:grey_tap()];
+
+  // Test the user is signed in.
+  [SigninEarlGrey verifySignedInWithFakeIdentity:fakeIdentity];
 }
 
 #pragma mark - Helpers

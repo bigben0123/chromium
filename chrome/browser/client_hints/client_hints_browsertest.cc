@@ -23,7 +23,7 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/content_settings/browser/tab_specific_content_settings.h"
+#include "components/content_settings/browser/page_specific_content_settings.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/pref_names.h"
@@ -37,7 +37,6 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/web_preferences.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
@@ -52,6 +51,7 @@
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/network_switches.h"
 #include "third_party/blink/public/common/client_hints/client_hints.h"
+#include "third_party/blink/public/common/web_preferences/web_preferences.h"
 
 namespace {
 
@@ -258,7 +258,8 @@ class ClientHintsBrowserTest : public policy::PolicyTest,
 
   virtual std::unique_ptr<base::FeatureList> EnabledFeatures() {
     std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
-    feature_list->InitializeFromCommandLine("UserAgentClientHint", "");
+    feature_list->InitializeFromCommandLine(
+        "UserAgentClientHint,LangClientHintHeader", "");
     return feature_list;
   }
 
@@ -280,8 +281,6 @@ class ClientHintsBrowserTest : public policy::PolicyTest,
   void SetUpCommandLine(base::CommandLine* cmd) override {
     cmd->AppendSwitchASCII(network::switches::kForceEffectiveConnectionType,
                            net::kEffectiveConnectionType2G);
-    cmd->AppendSwitchASCII(switches::kEnableBlinkFeatures,
-                           "LangClientHintHeader");
   }
 
   void SetClientHintExpectationsOnMainFrame(bool expect_client_hints) {
@@ -301,15 +300,10 @@ class ClientHintsBrowserTest : public policy::PolicyTest,
   // Verify that the user is not notified that cookies or JavaScript were
   // blocked on the webpage due to the checks done by client hints.
   void VerifyContentSettingsNotNotified() const {
-    content::WebContents* web_contents =
-        browser()->tab_strip_model()->GetActiveWebContents();
-    EXPECT_FALSE(content_settings::TabSpecificContentSettings::FromWebContents(
-                     web_contents)
-                     ->IsContentBlocked(ContentSettingsType::COOKIES));
-
-    EXPECT_FALSE(content_settings::TabSpecificContentSettings::FromWebContents(
-                     web_contents)
-                     ->IsContentBlocked(ContentSettingsType::JAVASCRIPT));
+    auto* pscs = content_settings::PageSpecificContentSettings::GetForFrame(
+        browser()->tab_strip_model()->GetActiveWebContents()->GetMainFrame());
+    EXPECT_FALSE(pscs->IsContentBlocked(ContentSettingsType::COOKIES));
+    EXPECT_FALSE(pscs->IsContentBlocked(ContentSettingsType::JAVASCRIPT));
   }
 
   void SetExpectedEffectiveConnectionType(
@@ -318,13 +312,12 @@ class ClientHintsBrowserTest : public policy::PolicyTest,
   }
 
   void SetJsEnabledForActiveView(bool enabled) {
-    content::RenderViewHost* view = browser()
-                                        ->tab_strip_model()
-                                        ->GetActiveWebContents()
-                                        ->GetRenderViewHost();
-    content::WebPreferences prefs = view->GetWebkitPreferences();
+    content::WebContents* web_contents =
+        browser()->tab_strip_model()->GetActiveWebContents();
+    blink::web_pref::WebPreferences prefs =
+        web_contents->GetOrCreateWebPreferences();
     prefs.javascript_enabled = enabled;
-    view->UpdateWebkitPreferences(prefs);
+    web_contents->SetWebPreferences(prefs);
   }
 
   void TestProfilesIndependent(Browser* browser_a, Browser* browser_b);
@@ -814,7 +807,8 @@ class ClientHintsAllowThirdPartyBrowserTest : public ClientHintsBrowserTest {
   std::unique_ptr<base::FeatureList> EnabledFeatures() override {
     std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
     feature_list->InitializeFromCommandLine(
-        "AllowClientHintsToThirdParty,UserAgentClientHint", "");
+        "AllowClientHintsToThirdParty,UserAgentClientHint,LangClientHintHeader",
+        "");
     return feature_list;
   }
 };
@@ -2059,7 +2053,7 @@ class ClientHintsEnterprisePolicyTest : public ClientHintsBrowserTest {
     policy::PolicyTest::SetUpInProcessBrowserTestFixture();
     policy::PolicyMap policies;
     SetPolicy(&policies, policy::key::kUserAgentClientHintsEnabled,
-              std::make_unique<base::Value>(false));
+              base::Value(false));
     provider_.UpdateChromePolicy(policies);
   }
 };
@@ -2104,7 +2098,8 @@ class ClientHintsWebHoldbackBrowserTest : public ClientHintsBrowserTest {
             ->AssociateFieldTrialParams(kTrialName, kGroupName, params));
 
     std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
-    feature_list->InitializeFromCommandLine("UserAgentClientHint", "");
+    feature_list->InitializeFromCommandLine(
+        "UserAgentClientHint,LangClientHintHeader", "");
     feature_list->RegisterFieldTrialOverride(
         features::kNetworkQualityEstimatorWebHoldback.name,
         base::FeatureList::OVERRIDE_ENABLE_FEATURE, trial.get());

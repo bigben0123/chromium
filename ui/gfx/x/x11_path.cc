@@ -8,7 +8,6 @@
 
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkRegion.h"
-#include "ui/gfx/x/x11.h"
 
 namespace gfx {
 
@@ -17,11 +16,6 @@ std::unique_ptr<std::vector<x11::Rectangle>> CreateRegionFromSkRegion(
   auto result = std::make_unique<std::vector<x11::Rectangle>>();
 
   for (SkRegion::Iterator i(region); !i.done(); i.next()) {
-    XRectangle rect;
-    rect.x = i.rect().x();
-    rect.y = i.rect().y();
-    rect.width = i.rect().width();
-    rect.height = i.rect().height();
     result->push_back({
         .x = i.rect().x(),
         .y = i.rect().y(),

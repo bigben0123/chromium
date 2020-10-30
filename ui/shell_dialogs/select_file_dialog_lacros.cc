@@ -8,31 +8,70 @@
 
 #include "base/bind.h"
 #include "base/notreached.h"
-#include "chromeos/lacros/browser/lacros_chrome_service_impl.h"
-#include "chromeos/lacros/mojom/select_file.mojom.h"
+#include "chromeos/crosapi/mojom/select_file.mojom.h"
+#include "chromeos/lacros/lacros_chrome_service_impl.h"
+#include "ui/aura/window.h"
+#include "ui/aura/window_tree_host_platform.h"
+#include "ui/platform_window/platform_window.h"
 #include "ui/shell_dialogs/select_file_policy.h"
+#include "ui/shell_dialogs/selected_file_info.h"
 
 namespace ui {
 namespace {
 
-lacros::mojom::SelectFileDialogType GetMojoType(SelectFileDialog::Type type) {
+crosapi::mojom::SelectFileDialogType GetMojoType(SelectFileDialog::Type type) {
   switch (type) {
     case SelectFileDialog::Type::SELECT_FOLDER:
-      return lacros::mojom::SelectFileDialogType::kFolder;
+      return crosapi::mojom::SelectFileDialogType::kFolder;
     case SelectFileDialog::Type::SELECT_UPLOAD_FOLDER:
-      return lacros::mojom::SelectFileDialogType::kUploadFolder;
+      return crosapi::mojom::SelectFileDialogType::kUploadFolder;
     case SelectFileDialog::Type::SELECT_EXISTING_FOLDER:
-      return lacros::mojom::SelectFileDialogType::kExistingFolder;
+      return crosapi::mojom::SelectFileDialogType::kExistingFolder;
     case SelectFileDialog::Type::SELECT_OPEN_FILE:
-      return lacros::mojom::SelectFileDialogType::kOpenFile;
+      return crosapi::mojom::SelectFileDialogType::kOpenFile;
     case SelectFileDialog::Type::SELECT_OPEN_MULTI_FILE:
-      return lacros::mojom::SelectFileDialogType::kOpenMultiFile;
+      return crosapi::mojom::SelectFileDialogType::kOpenMultiFile;
     case SelectFileDialog::Type::SELECT_SAVEAS_FILE:
-      return lacros::mojom::SelectFileDialogType::kSaveAsFile;
+      return crosapi::mojom::SelectFileDialogType::kSaveAsFile;
     case SelectFileDialog::Type::SELECT_NONE:
       NOTREACHED();
-      return lacros::mojom::SelectFileDialogType::kOpenFile;
+      return crosapi::mojom::SelectFileDialogType::kOpenFile;
   }
+}
+
+crosapi::mojom::AllowedPaths GetMojoAllowedPaths(
+    SelectFileDialog::FileTypeInfo::AllowedPaths allowed_paths) {
+  switch (allowed_paths) {
+    case SelectFileDialog::FileTypeInfo::ANY_PATH:
+      return crosapi::mojom::AllowedPaths::kAnyPath;
+    case SelectFileDialog::FileTypeInfo::NATIVE_PATH:
+      return crosapi::mojom::AllowedPaths::kNativePath;
+    case SelectFileDialog::FileTypeInfo::ANY_PATH_OR_URL:
+      return crosapi::mojom::AllowedPaths::kAnyPathOrUrl;
+  }
+}
+
+SelectedFileInfo ConvertSelectedFileInfo(
+    crosapi::mojom::SelectedFileInfoPtr mojo_file) {
+  SelectedFileInfo file;
+  file.file_path = std::move(mojo_file->file_path);
+  file.local_path = std::move(mojo_file->local_path);
+  file.display_name = std::move(mojo_file->display_name);
+  file.url = std::move(mojo_file->url);
+  return file;
+}
+
+// Returns the ID of the Wayland shell surface that contains |window|.
+std::string GetShellWindowUniqueId(aura::Window* window) {
+  DCHECK(window);
+  // On desktop aura there is one WindowTreeHost per top-level window.
+  aura::WindowTreeHost* window_tree_host = window->GetRootWindow()->GetHost();
+  DCHECK(window_tree_host);
+  // Lacros is based on Ozone/Wayland, which uses PlatformWindow and
+  // aura::WindowTreeHostPlatform.
+  aura::WindowTreeHostPlatform* window_tree_host_platform =
+      static_cast<aura::WindowTreeHostPlatform*>(window_tree_host);
+  return window_tree_host_platform->platform_window()->GetWindowUniqueId();
 }
 
 }  // namespace
@@ -72,49 +111,52 @@ void SelectFileDialogLacros::SelectFileImpl(
     void* params) {
   params_ = params;
 
-  auto* lacros_chrome_service = chromeos::LacrosChromeServiceImpl::Get();
-  // TODO(https://crbug.com/1090587): Move LacrosChromeServiceImpl construction
-  // earlier and remove these checks. This function is racy with lacros-chrome
-  // startup. In practice, however, the remote is bound long before the user
-  // can trigger a select dialog.
-  if (!lacros_chrome_service ||
-      !lacros_chrome_service->select_file_remote().is_bound()) {
-    LOG(ERROR) << "Not connected to ash-chrome.";
-    return;
-  }
-
-  lacros::mojom::SelectFileOptionsPtr options =
-      lacros::mojom::SelectFileOptions::New();
+  crosapi::mojom::SelectFileOptionsPtr options =
+      crosapi::mojom::SelectFileOptions::New();
   options->type = GetMojoType(type);
   options->title = title;
   options->default_path = default_path;
+  if (file_types) {
+    options->file_types = crosapi::mojom::SelectFileTypeInfo::New();
+    options->file_types->extensions = file_types->extensions;
+    options->file_types->extension_description_overrides =
+        file_types->extension_description_overrides;
+    // NOTE: Index is 1-based, 0 means "no selection".
+    options->file_types->default_file_type_index = file_type_index;
+    options->file_types->include_all_files = file_types->include_all_files;
+    options->file_types->allowed_paths =
+        GetMojoAllowedPaths(file_types->allowed_paths);
+  }
+  // Modeless file dialogs have no owning window.
+  if (owning_window)
+    options->owning_shell_window_id = GetShellWindowUniqueId(owning_window);
 
   // Send request to ash-chrome.
-  lacros_chrome_service->select_file_remote()->Select(
+  chromeos::LacrosChromeServiceImpl::Get()->select_file_remote()->Select(
       std::move(options),
       base::BindOnce(&SelectFileDialogLacros::OnSelected, this));
 }
 
 void SelectFileDialogLacros::OnSelected(
-    lacros::mojom::SelectFileResult result,
-    std::vector<lacros::mojom::SelectedFileInfoPtr> files) {
+    crosapi::mojom::SelectFileResult result,
+    std::vector<crosapi::mojom::SelectedFileInfoPtr> mojo_files,
+    int file_type_index) {
   if (!listener_)
     return;
-  if (files.empty()) {
+  if (mojo_files.empty()) {
     listener_->FileSelectionCanceled(params_);
     return;
   }
-  if (files.size() == 1) {
-    // TODO(jamescook): Support correct file filter |index|.
-    // TODO(jamescook): Use FileSelectedWithExtraInfo instead.
-    listener_->FileSelected(files[0]->file_path, /*index=*/0, params_);
+  if (mojo_files.size() == 1) {
+    SelectedFileInfo file = ConvertSelectedFileInfo(std::move(mojo_files[0]));
+    listener_->FileSelectedWithExtraInfo(file, file_type_index, params_);
     return;
   }
-  std::vector<base::FilePath> paths;
-  for (auto& file : files)
-    paths.push_back(std::move(file->file_path));
-  // TODO(jamescook): Use MultiFilesSelectedWithExtraInfo instead.
-  listener_->MultiFilesSelected(paths, params_);
+  std::vector<SelectedFileInfo> files;
+  for (auto& mojo_file : mojo_files) {
+    files.push_back(ConvertSelectedFileInfo(std::move(mojo_file)));
+  }
+  listener_->MultiFilesSelectedWithExtraInfo(files, params_);
 }
 
 }  // namespace ui

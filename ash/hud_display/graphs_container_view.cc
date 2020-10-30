@@ -6,10 +6,15 @@
 
 #include <numeric>
 
+#include "ash/hud_display/cpu_graph_page_view.h"
+#include "ash/hud_display/fps_graph_page_view.h"
 #include "ash/hud_display/hud_constants.h"
+#include "ash/hud_display/memory_graph_page_view.h"
 #include "base/bind.h"
 #include "base/task/post_task.h"
-#include "ui/gfx/canvas.h"
+#include "base/task/thread_pool.h"
+#include "ui/views/layout/fill_layout.h"
+#include "ui/views/metadata/metadata_impl_macros.h"
 
 namespace ash {
 namespace hud_display {
@@ -19,130 +24,104 @@ namespace {
 constexpr base::TimeDelta kGraphsDataRefreshInterval =
     base::TimeDelta::FromMilliseconds(500);
 
+void GetDataSnapshotOnThreadPool(DataSource* data_source,
+                                 DataSource::Snapshot* out_snapshot) {
+  // This is run on the ThreadPool.
+  *out_snapshot = data_source->GetSnapshotAndReset();
+}
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // GraphsContainerView, public:
 
-BEGIN_METADATA(GraphsContainerView)
-METADATA_PARENT_CLASS(View)
-END_METADATA()
+BEGIN_METADATA(GraphsContainerView, views::View)
+END_METADATA
 
 GraphsContainerView::GraphsContainerView()
-    : graph_chrome_rss_private_(Graph::Baseline::BASELINE_BOTTOM,
-                                Graph::Fill::SOLID,
-                                SkColorSetA(SK_ColorRED, kHUDAlpha)),
-      graph_mem_free_(Graph::Baseline::BASELINE_BOTTOM,
-                      Graph::Fill::NONE,
-                      SkColorSetA(SK_ColorDKGRAY, kHUDAlpha)),
-      graph_mem_used_unknown_(Graph::Baseline::BASELINE_BOTTOM,
-                              Graph::Fill::SOLID,
-                              SkColorSetA(SK_ColorLTGRAY, kHUDAlpha)),
-      graph_renderers_rss_private_(Graph::Baseline::BASELINE_BOTTOM,
-                                   Graph::Fill::SOLID,
-                                   SkColorSetA(SK_ColorCYAN, kHUDAlpha)),
-      graph_arc_rss_private_(Graph::Baseline::BASELINE_BOTTOM,
-                             Graph::Fill::SOLID,
-                             SkColorSetA(SK_ColorMAGENTA, kHUDAlpha)),
-      graph_gpu_rss_private_(Graph::Baseline::BASELINE_BOTTOM,
-                             Graph::Fill::SOLID,
-                             SkColorSetA(SK_ColorRED, kHUDAlpha)),
-      graph_gpu_kernel_(Graph::Baseline::BASELINE_BOTTOM,
-                        Graph::Fill::SOLID,
-                        SkColorSetA(SK_ColorYELLOW, kHUDAlpha)),
-      graph_chrome_rss_shared_(Graph::Baseline::BASELINE_BOTTOM,
-                               Graph::Fill::NONE,
-                               SkColorSetA(SK_ColorBLUE, kHUDAlpha)) {
+    : start_time_(base::TimeTicks::Now()),
+      file_task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
+          {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})),
+      data_source_(new DataSource,
+                   base::OnTaskRunnerDeleter(file_task_runner_)) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(ui_sequence_checker_);
 
-  refresh_timer_.Start(FROM_HERE, kGraphsDataRefreshInterval, this,
-                       &GraphsContainerView::UpdateData);
+  // Make all graph pages take the whole view and make sure that only one
+  // is shown at a time.
+  SetLayoutManager(std::make_unique<views::FillLayout>());
+
+  // Adds another graphs page.
+  AddChildView(
+      std::make_unique<MemoryGraphPageView>(kGraphsDataRefreshInterval))
+      ->SetID(static_cast<int>(DisplayMode::MEMORY_DISPLAY));
+  AddChildView(std::make_unique<CpuGraphPageView>(kGraphsDataRefreshInterval))
+      ->SetID(static_cast<int>(DisplayMode::CPU_DISPLAY));
+  AddChildView(std::make_unique<FPSGraphPageView>(kGraphsDataRefreshInterval))
+      ->SetID(static_cast<int>(DisplayMode::FPS_DISPLAY));
+
+  RequestDataUpdate();
 }
 
 GraphsContainerView::~GraphsContainerView() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(ui_sequence_checker_);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-void GraphsContainerView::OnPaint(gfx::Canvas* canvas) {
-  // TODO: Should probably update last graph point more often than shift graph.
-
-  // Layout graphs.
-  const gfx::Rect rect = GetContentsBounds();
-  graph_chrome_rss_private_.Layout(rect, nullptr /* base*/);
-  graph_mem_free_.Layout(rect, &graph_chrome_rss_private_);
-  graph_mem_used_unknown_.Layout(rect, &graph_mem_free_);
-  graph_renderers_rss_private_.Layout(rect, &graph_mem_used_unknown_);
-  graph_arc_rss_private_.Layout(rect, &graph_renderers_rss_private_);
-  graph_gpu_rss_private_.Layout(rect, &graph_arc_rss_private_);
-  graph_gpu_kernel_.Layout(rect, &graph_gpu_rss_private_);
-  // Not stacked.
-  graph_chrome_rss_shared_.Layout(rect, nullptr /* base*/);
-
-  // Paint damaged area now that all parameters have been determined.
-  graph_chrome_rss_private_.Draw(canvas);
-  graph_mem_free_.Draw(canvas);
-  graph_mem_used_unknown_.Draw(canvas);
-  graph_renderers_rss_private_.Draw(canvas);
-  graph_arc_rss_private_.Draw(canvas);
-  graph_gpu_rss_private_.Draw(canvas);
-  graph_gpu_kernel_.Draw(canvas);
-
-  graph_chrome_rss_shared_.Draw(canvas);
+void GraphsContainerView::RequestDataUpdate() {
+  std::unique_ptr<DataSource::Snapshot> snapshot_container =
+      std::make_unique<DataSource::Snapshot>();
+  DataSource::Snapshot* snapshot = snapshot_container.get();
+  file_task_runner_->PostTaskAndReply(
+      FROM_HERE,
+      base::BindOnce(&GetDataSnapshotOnThreadPool,
+                     base::Unretained(data_source_.get()), snapshot),
+      base::BindOnce(&GraphsContainerView::UpdateData,
+                     weak_factory_.GetWeakPtr(),
+                     std::move(snapshot_container)));
 }
 
-void GraphsContainerView::UpdateData() {
-  // TODO: Should probably update last graph point more often than shift graph.
-  const DataSource::Snapshot snapshot = data_source_.GetSnapshotAndReset();
+void GraphsContainerView::UpdateData(
+    std::unique_ptr<DataSource::Snapshot> snapshot) {
+  // Adjust for any missing data.
+  const off_t expected_updates =
+      (base::TimeTicks::Now() - start_time_) / kGraphsDataRefreshInterval;
+  const unsigned intervals =
+      expected_updates > static_cast<off_t>(data_update_count_)
+          ? expected_updates - data_update_count_
+          : 1;
+  data_update_count_ += intervals;
 
-  const double total = snapshot.total_ram;
-  // Nothing to do if data is not available yet.
-  if (total < 1)
+  for (auto* child : children()) {
+    // Insert missing points.
+    for (unsigned j = 0; j < intervals; ++j)
+      static_cast<GraphPageViewBase*>(child)->UpdateData(*snapshot);
+  }
+
+  SchedulePaint();
+
+  const base::TimeTicks next_start_time =
+      start_time_ + kGraphsDataRefreshInterval * data_update_count_;
+  const base::TimeTicks now = base::TimeTicks::Now();
+  if (next_start_time <= now) {
+    RequestDataUpdate();
+  } else {
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE,
+        base::BindOnce(&GraphsContainerView::RequestDataUpdate,
+                       weak_factory_.GetWeakPtr()),
+        next_start_time - now);
+  }
+}
+
+void GraphsContainerView::SetMode(DisplayMode mode) {
+  auto* selected = GetViewByID(static_cast<int>(mode));
+  if (!selected) {
+    DCHECK(selected);
     return;
+  }
+  for (auto* child : children())
+    child->SetVisible(false);
 
-  const float chrome_rss_private =
-      (snapshot.browser_rss - snapshot.browser_rss_shared) / total;
-  const float mem_free = snapshot.free_ram / total;
-  // mem_used_unknown is calculated below.
-  const float renderers_rss_private =
-      (snapshot.renderers_rss - snapshot.renderers_rss_shared) / total;
-  const float arc_rss_private =
-      (snapshot.arc_rss - snapshot.arc_rss_shared) / total;
-  const float gpu_rss_private =
-      (snapshot.gpu_rss - snapshot.gpu_rss_shared) / total;
-  const float gpu_kernel = snapshot.gpu_kernel / total;
-
-  // not stacked.
-  const float chrome_rss_shared = snapshot.browser_rss_shared / total;
-
-  std::vector<float> used_buckets;
-  used_buckets.push_back(chrome_rss_private);
-  used_buckets.push_back(mem_free);
-  used_buckets.push_back(renderers_rss_private);
-  used_buckets.push_back(arc_rss_private);
-  used_buckets.push_back(gpu_rss_private);
-  used_buckets.push_back(gpu_kernel);
-
-  float mem_used_unknown =
-      1 - std::accumulate(used_buckets.begin(), used_buckets.end(), 0.0f);
-
-  if (mem_used_unknown < 0)
-    LOG(WARNING) << "mem_used_unknown=" << mem_used_unknown << " < 0 !";
-
-  // Update graph data.
-  graph_chrome_rss_private_.AddValue(chrome_rss_private);
-  graph_mem_free_.AddValue(mem_free);
-  graph_mem_used_unknown_.AddValue(std::max(mem_used_unknown, 0.0f));
-  graph_renderers_rss_private_.AddValue(renderers_rss_private);
-  graph_arc_rss_private_.AddValue(arc_rss_private);
-  graph_gpu_rss_private_.AddValue(gpu_rss_private);
-  graph_gpu_kernel_.AddValue(gpu_kernel);
-  // Not stacked.
-  graph_chrome_rss_shared_.AddValue(chrome_rss_shared);
-
-  if (GetVisible())
-    SchedulePaint();
+  selected->SetVisible(true);
 }
 
 }  // namespace hud_display

@@ -1,6 +1,6 @@
 <style include="cr-shared-style print-management-shared print-management-fonts">
   html {
-    background-color: var(--cros-default-bg-color);
+    background-color: var(--cros-bg-color);
   }
 
   .column-headers {
@@ -31,11 +31,17 @@
   }
 
   #deleteIcon {
+    --iron-icon-height: 20px;
+    --iron-icon-width: 20px;
     margin-inline-end: 4px;
   }
 
-  #fileNameColumn {
-    width: 368px;
+  #enterpriseIcon {
+    --iron-icon-fill-color: var(--google-grey-refresh-700);
+    --iron-icon-stroke-color: var(--google-grey-refresh-700);
+    --iron-icon-height: 13px;
+    --iron-icon-width: 13px;
+    margin-inline-start: 8px;
   }
 
   #headerContainer {
@@ -81,7 +87,7 @@
   }
 </style>
 
-<div class="main-container cr-centered-card-container">
+<div class="main-container margin-border">
   <div id="headerContainer">
     <h1 id="printJobTitle">[[i18n('printJobTitle')]]</h1>
     <div id="clearAllContainer">
@@ -106,19 +112,20 @@
 
   <div class="column-headers flex-center"
       aria-labeledby="fileNameColumn printerNameColumn dateColumn statusColumn">
-    <div id="fileNameColumn" class="overflow-ellipsis" aria-hidden="true">
+    <div id="fileNameColumn" class="file-name-header-column overflow-ellipsis"
+        aria-hidden="true">
       [[i18n('fileNameColumn')]]
     </div>
     <div id="printerNameColumn"
-        class="medium-text overflow-ellipsis padded-left"
+        class="printer-name-column overflow-ellipsis padded-left"
         aria-hidden="true">
       [[i18n('printerNameColumn')]]
     </div>
-    <div id="dateColumn" class="short-text overflow-ellipsis padded-left"
+    <div id="dateColumn" class="date-column overflow-ellipsis padded-left"
         aria-hidden="true">
       [[i18n('dateColumn')]]
     </div>
-    <div id="statusColumn" class="medium-text overflow-ellipsis padded-left"
+    <div id="statusColumn" class="status-column overflow-ellipsis padded-left"
         aria-hidden="true">
       [[i18n('statusColumn')]]
     </div>
@@ -141,13 +148,18 @@
 
   <template is="dom-if" if="[[printJobs_.length]]" restamp>
     <div id="historyHeaderContainer" class="column-headers flex-center">
-      <div aria-label$="[[i18n('historyToolTip')]]">
+      <div aria-label$="[[printJobHistoryExpirationPeriod_]]">
         [[i18n('historyHeader')]]
       </div>
-      <iron-icon id="infoIcon" icon="cr:info-outline" aria-hidden="true">
+      <iron-icon id="infoIcon" icon="cr:info-outline" aria-hidden="true"
+          hidden="[[isPolicyControlled_]]">
       </iron-icon>
-      <paper-tooltip for="infoIcon" fit-to-visible-bounds aria-hidden="true">
-        [[i18n('historyToolTip')]]
+      <iron-icon id="enterpriseIcon" icon="print-management:enterprise-icon"
+          aria-hidden="true" hidden="[[!isPolicyControlled_]]">
+      </iron-icon>
+      <paper-tooltip for="[[activeHistoryInfoIcon_]]" fit-to-visible-bounds
+          aria-hidden="true">
+        [[printJobHistoryExpirationPeriod_]]
       </paper-tooltip>
     </div>
 
@@ -160,3 +172,4 @@
       </template>
     </iron-list>
   </template>
+</div>

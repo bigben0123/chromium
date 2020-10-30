@@ -17,18 +17,23 @@ enum class ButtonId {
   kAddToDictionary,
   kSmartInputsSettingLink,
   kSuggestion,
+  kLearnMore,
 };
 
 enum class AssistiveWindowType {
   kNone,
   kUndoWindow,
   kEmojiSuggestion,
+  kPersonalInfoSuggestion,
 };
 
 struct AssistiveWindowButton {
   ButtonId id = ButtonId::kNone;
   AssistiveWindowType window_type = AssistiveWindowType::kNone;
+  // TODO(crbug/1101852): Rename index to suggestion_index for further clarity.
+  // Currently index is only considered when ButtonId is kSuggestion.
   size_t index = -1;
+  std::string announce_string;
 };
 
 class UI_CHROMEOS_EXPORT AssistiveDelegate {

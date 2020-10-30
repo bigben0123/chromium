@@ -229,6 +229,7 @@ class WebStateImpl : public WebState,
   void SetHasOpener(bool has_opener) override;
   bool CanTakeSnapshot() const override;
   void TakeSnapshot(const gfx::RectF& rect, SnapshotCallback callback) override;
+  void CreateFullPagePdf(base::OnceCallback<void(NSData*)> callback) override;
   void AddObserver(WebStateObserver* observer) override;
   void RemoveObserver(WebStateObserver* observer) override;
   void CloseWebState() override;
@@ -276,7 +277,7 @@ class WebStateImpl : public WebState,
   // and is unable to respond using cached credentials.
   void OnAuthRequired(NSURLProtectionSpace* protection_space,
                       NSURLCredential* proposed_credential,
-                      const WebStateDelegate::AuthCallback& callback);
+                      WebStateDelegate::AuthCallback callback);
 
   // Cancels all dialogs associated with this web_state.
   void CancelDialogs();
@@ -379,7 +380,8 @@ class WebStateImpl : public WebState,
   base::string16 empty_string16_;
 
   // Callbacks associated to command prefixes.
-  std::map<std::string, base::CallbackList<ScriptCommandCallbackSignature>>
+  std::map<std::string,
+           base::RepeatingCallbackList<ScriptCommandCallbackSignature>>
       script_command_callbacks_;
 
   // Whether this WebState has an opener.  See

@@ -58,12 +58,10 @@ std::vector<base::string16> GenerateMessage(
     int id = 0;
     if (disable_remotely_for_malware ||
         (blocklist_state == BlocklistState::BLOCKLISTED_MALWARE)) {
-      id = forbidden.size() == 1
-               ? IDS_EXTENSION_ALERT_ITEM_BLACKLISTED_MALWARE
-               : IDS_EXTENSION_ALERT_ITEM_BLACKLISTED_MALWARE_PLURAL;
+      id = IDS_EXTENSION_ALERT_ITEM_BLOCKLISTED_MALWARE;
     } else {
-      id = extension->is_app() ? IDS_APP_ALERT_ITEM_BLACKLISTED_OTHER
-                               : IDS_EXTENSION_ALERT_ITEM_BLACKLISTED_OTHER;
+      id = extension->is_app() ? IDS_APP_ALERT_ITEM_BLOCKLISTED_OTHER
+                               : IDS_EXTENSION_ALERT_ITEM_BLOCKLISTED_OTHER;
     }
     message.push_back(
         l10n_util::GetStringFUTF16(id, base::UTF8ToUTF16(extension->name())));
@@ -95,11 +93,11 @@ class ExtensionGlobalError : public GlobalErrorWithStandardBubble {
   void ExecuteMenuItem(Browser* browser) override { NOTREACHED(); }
 
   base::string16 GetBubbleViewTitle() override {
-    return GenerateTitle(delegate_->GetBlacklistedExtensions());
+    return GenerateTitle(delegate_->GetBlocklistedExtensions());
   }
 
   std::vector<base::string16> GetBubbleViewMessages() override {
-    return GenerateMessage(delegate_->GetBlacklistedExtensions(),
+    return GenerateMessage(delegate_->GetBlocklistedExtensions(),
                            delegate_->GetContext());
   }
 

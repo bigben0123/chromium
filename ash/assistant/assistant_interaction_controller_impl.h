@@ -26,6 +26,8 @@
 #include "chromeos/services/assistant/public/cpp/assistant_service.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 
+class PrefRegistrySimple;
+
 namespace ash {
 
 class AssistantControllerImpl;
@@ -55,14 +57,20 @@ class AssistantInteractionControllerImpl
       AssistantControllerImpl* assistant_controller);
   ~AssistantInteractionControllerImpl() override;
 
+  static void RegisterProfilePrefs(PrefRegistrySimple* registry);
+
   // Provides a pointer to the |assistant| owned by AssistantService.
   void SetAssistant(chromeos::assistant::Assistant* assistant);
 
   // AssistantInteractionController:
   const AssistantInteractionModel* GetModel() const override;
+  base::TimeDelta GetTimeDeltaSinceLastInteraction() const override;
+  bool HasHadInteraction() const override;
   void StartTextInteraction(const std::string& text,
                             bool allow_tts,
                             AssistantQuerySource query_source) override;
+  void StartBloomInteraction() override;
+  void ShowBloomResult(const std::string& html) override;
 
   // AssistantControllerObserver:
   void OnAssistantControllerConstructed() override;
@@ -130,8 +138,6 @@ class AssistantInteractionControllerImpl
   void OnPendingResponseProcessed(bool is_completed);
 
   void OnUiVisible(AssistantEntryPoint entry_point);
-  bool ShouldAttemptWarmerWelcome(AssistantEntryPoint entry_point) const;
-  void AttemptWarmerWelcome();
 
   void StartScreenContextInteraction(bool include_assistant_structure,
                                      const gfx::Rect& region,
@@ -145,16 +151,11 @@ class AssistantInteractionControllerImpl
   bool IsVisible() const;
 
   AssistantControllerImpl* const assistant_controller_;  // Owned by Shell.
+  AssistantInteractionModel model_;
+  bool has_had_interaction_ = false;
 
   // Owned by AssistantService.
   chromeos::assistant::Assistant* assistant_ = nullptr;
-
-  AssistantInteractionModel model_;
-
-  // The number of times the Assistant UI has been shown (since the device
-  // booted).
-  // Might overflow so do not use for super critical things.
-  int number_of_times_shown_ = 0;
 
   ScopedObserver<AssistantController, AssistantControllerObserver>
       assistant_controller_observer_{this};

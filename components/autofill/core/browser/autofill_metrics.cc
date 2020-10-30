@@ -18,12 +18,15 @@
 #include "components/autofill/core/browser/autofill_data_util.h"
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/autofill_type.h"
+#include "components/autofill/core/browser/data_model/autofill_offer_data.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
 #include "components/autofill/core/browser/form_structure.h"
+#include "components/autofill/core/browser/form_types.h"
 #include "components/autofill/core/common/autofill_clock.h"
 #include "components/autofill/core/common/autofill_prefs.h"
 #include "components/autofill/core/common/autofill_tick_clock.h"
 #include "components/autofill/core/common/form_data.h"
+#include "components/language_usage_metrics/language_usage_metrics.h"
 #include "services/metrics/public/cpp/metrics_utils.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 
@@ -48,6 +51,11 @@ enum FieldTypeGroupForMetrics {
   GROUP_ADDRESS_STATE,
   GROUP_ADDRESS_ZIP,
   GROUP_ADDRESS_COUNTRY,
+  GROUP_ADDRESS_HOME_STREET_NAME,
+  GROUP_ADDRESS_HOME_DEPENDENT_STREET_NAME,
+  GROUP_ADDRESS_HOME_HOUSE_NUMBER,
+  GROUP_ADDRESS_HOME_PREMISE_NAME,
+  GROUP_ADDRESS_HOME_SUBPREMISE,
   GROUP_PHONE,
   GROUP_FAX,  // Deprecated.
   GROUP_EMAIL,
@@ -156,6 +164,21 @@ int GetFieldTypeGroupPredictionQualityMetric(
           break;
         case ADDRESS_HOME_COUNTRY:
           group = GROUP_ADDRESS_COUNTRY;
+          break;
+        case ADDRESS_HOME_STREET_NAME:
+          group = GROUP_ADDRESS_HOME_STREET_NAME;
+          break;
+        case ADDRESS_HOME_DEPENDENT_STREET_NAME:
+          group = GROUP_ADDRESS_HOME_DEPENDENT_STREET_NAME;
+          break;
+        case ADDRESS_HOME_HOUSE_NUMBER:
+          group = GROUP_ADDRESS_HOME_HOUSE_NUMBER;
+          break;
+        case ADDRESS_HOME_PREMISE_NAME:
+          group = GROUP_ADDRESS_HOME_PREMISE_NAME;
+          break;
+        case ADDRESS_HOME_SUBPREMISE:
+          group = GROUP_ADDRESS_HOME_SUBPREMISE;
           break;
         default:
           NOTREACHED() << field_type << " has no group assigned (ambiguous)";
@@ -1428,6 +1451,18 @@ void AutofillMetrics::LogEditedAutofilledFieldAtSubmission(
                            GetFieldTypeUserEditStatusMetric(
                                field.Type().GetStorableType(), editing_metric));
 
+  // Record the UMA statistics spliced by the autocomplete attribute value.
+  FormType form_type =
+      FormTypes::FieldTypeGroupToFormType(field.Type().group());
+  if (form_type == ADDRESS_FORM || form_type == CREDIT_CARD_FORM) {
+    bool autocomplete_off = field.autocomplete_attribute == "off";
+    const std::string autocomplete_histogram = base::StrCat(
+        {"Autofill.Autocomplete.", autocomplete_off ? "Off" : "NotOff",
+         ".EditedAutofilledFieldAtSubmission.",
+         form_type == ADDRESS_FORM ? "Address" : "CreditCard"});
+    base::UmaHistogramEnumeration(autocomplete_histogram, editing_metric);
+  }
+
   // If the field was edited, record the event to UKM.
   if (editing_metric ==
       AutofilledFieldUserEditingStatusMetric::AUTOFILLED_FIELD_WAS_EDITED) {
@@ -1689,7 +1724,7 @@ void AutofillMetrics::LogStoredCreditCardMetrics(
             days_since_last_use);
         num_local_cards += 1;
         num_disused_local_cards += disused_delta;
-        if (card->HasValidNickname())
+        if (card->HasNonEmptyValidNickname())
           num_local_cards_with_nickname += 1;
         break;
       case CreditCard::MASKED_SERVER_CARD:
@@ -1701,7 +1736,7 @@ void AutofillMetrics::LogStoredCreditCardMetrics(
             days_since_last_use);
         num_masked_cards += 1;
         num_disused_masked_cards += disused_delta;
-        if (card->HasValidNickname())
+        if (card->HasNonEmptyValidNickname())
           num_masked_cards_with_nickname += 1;
         break;
       case CreditCard::FULL_SERVER_CARD:
@@ -1764,6 +1799,26 @@ void AutofillMetrics::LogStoredCreditCardMetrics(
         "Autofill.StoredCreditCardDisusedCount.Server.Unmasked",
         num_disused_unmasked_cards);
   }
+}
+
+// static
+void AutofillMetrics::LogStoredOfferMetrics(
+    const std::vector<std::unique_ptr<AutofillOfferData>>& offers) {
+  base::UmaHistogramCounts1000("Autofill.Offer.StoredOfferCount",
+                               offers.size());
+
+  for (const std::unique_ptr<AutofillOfferData>& offer : offers) {
+    base::UmaHistogramCounts1000(
+        "Autofill.Offer.StoredOfferRelatedMerchantCount",
+        offer->merchant_domain.size());
+    base::UmaHistogramCounts1000("Autofill.Offer.StoredOfferRelatedCardCount",
+                                 offer->eligible_instrument_id.size());
+  }
+}
+
+// static
+void AutofillMetrics::LogSyncedOfferDataBeingValid(bool valid) {
+  base::UmaHistogramBoolean("Autofill.Offer.SyncedOfferDataBeingValid", valid);
 }
 
 // static
@@ -2413,6 +2468,34 @@ void AutofillMetrics::
 void AutofillMetrics::LogAddressFormImportStatustMetric(
     AutofillMetrics::AddressProfileImportStatusMetric metric) {
   base::UmaHistogramEnumeration("Autofill.AddressProfileImportStatus", metric);
+}
+
+// static
+void AutofillMetrics::LogFieldParsingPageTranslationStatusMetric(bool metric) {
+  base::UmaHistogramBoolean("Autofill.ParsedFieldTypesWasPageTranslated",
+                            metric);
+}
+
+// static
+void AutofillMetrics::LogFieldParsingTranslatedFormLanguageMetric(
+    base::StringPiece locale) {
+  base::UmaHistogramSparse(
+      "Autofill.ParsedFieldTypesUsingTranslatedPageLanguage",
+      language_usage_metrics::LanguageUsageMetrics::ToLanguageCode(locale));
+}
+
+// static
+void AutofillMetrics::LogWebOTPPhoneCollectionMetricStateUkm(
+    ukm::UkmRecorder* recorder,
+    ukm::SourceId source_id,
+    uint32_t phone_collection_metric_state) {
+  // UKM recording is not supported for WebViews.
+  if (!recorder || source_id == ukm::kInvalidSourceId)
+    return;
+
+  ukm::builders::WebOTPImpact builder(source_id);
+  builder.SetPhoneCollection(phone_collection_metric_state);
+  builder.Record(recorder);
 }
 
 }  // namespace autofill

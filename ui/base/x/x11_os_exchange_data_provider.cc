@@ -13,6 +13,7 @@
 #include "net/base/filename_util.h"
 #include "ui/base/clipboard/clipboard_constants.h"
 #include "ui/base/clipboard/clipboard_format_type.h"
+#include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
 #include "ui/base/dragdrop/file_info/file_info.h"
 #include "ui/base/x/selection_utils.h"
 #include "ui/base/x/x11_util.h"
@@ -71,13 +72,11 @@ SelectionFormatMap XOSExchangeDataProvider::GetFormatMap() const {
   return selection_owner_.selection_format_map();
 }
 
-#if defined(USE_OZONE)
 std::unique_ptr<OSExchangeDataProvider> XOSExchangeDataProvider::Clone() const {
   std::unique_ptr<XOSExchangeDataProvider> ret(new XOSExchangeDataProvider());
   ret->set_format_map(format_map());
   return std::move(ret);
 }
-#endif
 
 void XOSExchangeDataProvider::MarkOriginatedFromRenderer() {
   std::string empty;
@@ -99,9 +98,9 @@ void XOSExchangeDataProvider::SetString(const base::string16& text_data) {
       base::RefCountedString::TakeString(&utf8));
 
   format_map_.Insert(gfx::GetAtom(kMimeTypeText), mem);
-  format_map_.Insert(gfx::GetAtom(kText), mem);
-  format_map_.Insert(gfx::GetAtom(kString), mem);
-  format_map_.Insert(gfx::GetAtom(kUtf8String), mem);
+  format_map_.Insert(gfx::GetAtom(kMimeTypeLinuxText), mem);
+  format_map_.Insert(gfx::GetAtom(kMimeTypeLinuxString), mem);
+  format_map_.Insert(gfx::GetAtom(kMimeTypeLinuxUtf8String), mem);
 }
 
 void XOSExchangeDataProvider::SetURL(const GURL& url,
@@ -369,6 +368,37 @@ bool XOSExchangeDataProvider::HasCustomFormat(
   return !requested_types.empty();
 }
 
+void XOSExchangeDataProvider::SetFileContents(
+    const base::FilePath& filename,
+    const std::string& file_contents) {
+  DCHECK(!filename.empty());
+  DCHECK(!base::Contains(format_map(), gfx::GetAtom(kMimeTypeMozillaURL)));
+  set_file_contents_name(filename);
+  // Direct save handling is a complicated juggling affair between this class,
+  // SelectionFormat, and XDragDropClient. The general idea behind
+  // the protocol is this:
+  // - The source window sets its XdndDirectSave0 window property to the
+  //   proposed filename.
+  // - When a target window receives the drop, it updates the XdndDirectSave0
+  //   property on the source window to the filename it would like the contents
+  //   to be saved to and then requests the XdndDirectSave0 type from the
+  //   source.
+  // - The source is supposed to copy the file here and return success (S),
+  //   failure (F), or error (E).
+  // - In this case, failure means the destination should try to populate the
+  //   file itself by copying the data from application/octet-stream. To make
+  //   things simpler for Chrome, we always 'fail' and let the destination do
+  //   the work.
+  std::string failure("F");
+  InsertData(gfx::GetAtom("XdndDirectSave0"),
+             scoped_refptr<base::RefCountedMemory>(
+                 base::RefCountedString::TakeString(&failure)));
+  std::string file_contents_copy = file_contents;
+  InsertData(gfx::GetAtom("application/octet-stream"),
+             scoped_refptr<base::RefCountedMemory>(
+                 base::RefCountedString::TakeString(&file_contents_copy)));
+}
+
 void XOSExchangeDataProvider::SetHtml(const base::string16& html,
                                       const GURL& base_url) {
   std::vector<unsigned char> bytes;
@@ -444,6 +474,13 @@ void XOSExchangeDataProvider::InsertData(
     x11::Atom format,
     const scoped_refptr<base::RefCountedMemory>& data) {
   format_map_.Insert(format, data);
+}
+
+void XOSExchangeDataProvider::SetSource(
+    std::unique_ptr<DataTransferEndpoint> data_source) {}
+
+DataTransferEndpoint* XOSExchangeDataProvider::GetSource() const {
+  return nullptr;
 }
 
 }  // namespace ui

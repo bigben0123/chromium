@@ -27,6 +27,7 @@ enum class InstallResultCode;
 class AppRegistrar;
 class AppRegistryController;
 class WebAppUiManager;
+class OsIntegrationManager;
 
 // An abstract finalizer for the installation process, represents the last step.
 // Takes WebApplicationInfo as input, writes data to disk (e.g icons, shortcuts)
@@ -89,23 +90,21 @@ class InstallFinalizer {
   virtual bool WasExternalAppUninstalledByUser(const AppId& app_id) const = 0;
 
   // |virtual| for testing.
-  virtual bool CanAddAppToQuickLaunchBar() const;
-  virtual void AddAppToQuickLaunchBar(const AppId& app_id);
-
-  // |virtual| for testing.
   virtual bool CanReparentTab(const AppId& app_id, bool shortcut_created) const;
   virtual void ReparentTab(const AppId& app_id,
                            bool shortcut_created,
                            content::WebContents* web_contents);
 
   virtual void RemoveLegacyInstallFinalizerForTesting() {}
+  virtual InstallFinalizer* legacy_finalizer_for_testing();
 
   virtual void Start() {}
   virtual void Shutdown() {}
 
   void SetSubsystems(AppRegistrar* registrar,
                      WebAppUiManager* ui_manager,
-                     AppRegistryController* registry_controller);
+                     AppRegistryController* registry_controller,
+                     OsIntegrationManager* os_integration_manager);
 
   virtual ~InstallFinalizer() = default;
 
@@ -115,6 +114,9 @@ class InstallFinalizer {
 
   WebAppUiManager& ui_manager() const { return *ui_manager_; }
   AppRegistryController& registry_controller() { return *registry_controller_; }
+  OsIntegrationManager& os_integration_manager() {
+    return *os_integration_manager_;
+  }
 
  private:
   // If these pointers are nullptr then this is legacy install finalizer
@@ -122,6 +124,7 @@ class InstallFinalizer {
   AppRegistrar* registrar_ = nullptr;
   AppRegistryController* registry_controller_ = nullptr;
   WebAppUiManager* ui_manager_ = nullptr;
+  OsIntegrationManager* os_integration_manager_ = nullptr;
 };
 
 }  // namespace web_app

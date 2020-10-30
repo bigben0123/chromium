@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/webui/settings/chromeos/bluetooth_section.h"
 
 #include "base/bind.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
 #include "chrome/browser/ui/webui/chromeos/bluetooth_dialog_localized_strings_provider.h"
 #include "chrome/browser/ui/webui/settings/chromeos/constants/routes.mojom.h"
@@ -158,6 +159,8 @@ void BluetoothSection::AddLoadTimeData(content::WebUIDataSource* html_source) {
       {"bluetoothRemove", IDS_SETTINGS_BLUETOOTH_REMOVE},
       {"bluetoothPrimaryUserControlled",
        IDS_SETTINGS_BLUETOOTH_PRIMARY_USER_CONTROLLED},
+      {"bluetoothDeviceWithConnectionStatus",
+       IDS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_AND_CONNECTION_STATUS},
       {"bluetoothDeviceType_computer",
        IDS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_COMPUTER},
       {"bluetoothDeviceType_phone",
@@ -205,6 +208,19 @@ mojom::SearchResultIcon BluetoothSection::GetSectionIcon() const {
 
 std::string BluetoothSection::GetSectionPath() const {
   return mojom::kBluetoothSectionPath;
+}
+
+bool BluetoothSection::LogMetric(mojom::Setting setting,
+                                 base::Value& value) const {
+  switch (setting) {
+    case mojom::Setting::kBluetoothOnOff:
+      base::UmaHistogramBoolean("ChromeOS.Settings.Bluetooth.BluetoothOnOff",
+                                value.GetBool());
+      return true;
+
+    default:
+      return false;
+  }
 }
 
 void BluetoothSection::RegisterHierarchy(HierarchyGenerator* generator) const {
@@ -258,26 +274,28 @@ void BluetoothSection::OnFetchBluetoothAdapter(
 }
 
 void BluetoothSection::UpdateSearchTags() {
+  SearchTagRegistry::ScopedTagUpdater updater = registry()->StartUpdate();
+
   // Start with no search tags, then add them below if appropriate.
-  registry()->RemoveSearchTags(GetBluetoothSearchConcepts());
-  registry()->RemoveSearchTags(GetBluetoothOnSearchConcepts());
-  registry()->RemoveSearchTags(GetBluetoothOffSearchConcepts());
-  registry()->RemoveSearchTags(GetBluetoothConnectableSearchConcepts());
-  registry()->RemoveSearchTags(GetBluetoothConnectedSearchConcepts());
-  registry()->RemoveSearchTags(GetBluetoothPairableSearchConcepts());
-  registry()->RemoveSearchTags(GetBluetoothPairedSearchConcepts());
+  updater.RemoveSearchTags(GetBluetoothSearchConcepts());
+  updater.RemoveSearchTags(GetBluetoothOnSearchConcepts());
+  updater.RemoveSearchTags(GetBluetoothOffSearchConcepts());
+  updater.RemoveSearchTags(GetBluetoothConnectableSearchConcepts());
+  updater.RemoveSearchTags(GetBluetoothConnectedSearchConcepts());
+  updater.RemoveSearchTags(GetBluetoothPairableSearchConcepts());
+  updater.RemoveSearchTags(GetBluetoothPairedSearchConcepts());
 
   if (!bluetooth_adapter_->IsPresent())
     return;
 
-  registry()->AddSearchTags(GetBluetoothSearchConcepts());
+  updater.AddSearchTags(GetBluetoothSearchConcepts());
 
   if (!bluetooth_adapter_->IsPowered()) {
-    registry()->AddSearchTags(GetBluetoothOffSearchConcepts());
+    updater.AddSearchTags(GetBluetoothOffSearchConcepts());
     return;
   }
 
-  registry()->AddSearchTags(GetBluetoothOnSearchConcepts());
+  updater.AddSearchTags(GetBluetoothOnSearchConcepts());
 
   // Filter devices so that only those shown in the UI are returned. Note that
   // passing |max_devices| of 0 indicates that there is no maximum.
@@ -303,13 +321,13 @@ void BluetoothSection::UpdateSearchTags() {
   }
 
   if (connectable_device_exists)
-    registry()->AddSearchTags(GetBluetoothConnectableSearchConcepts());
+    updater.AddSearchTags(GetBluetoothConnectableSearchConcepts());
   if (connected_device_exists)
-    registry()->AddSearchTags(GetBluetoothConnectedSearchConcepts());
+    updater.AddSearchTags(GetBluetoothConnectedSearchConcepts());
   if (pairable_device_exists)
-    registry()->AddSearchTags(GetBluetoothPairableSearchConcepts());
+    updater.AddSearchTags(GetBluetoothPairableSearchConcepts());
   if (paired_device_exists)
-    registry()->AddSearchTags(GetBluetoothPairedSearchConcepts());
+    updater.AddSearchTags(GetBluetoothPairedSearchConcepts());
 }
 
 }  // namespace settings

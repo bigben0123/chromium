@@ -14,11 +14,11 @@
 #include "ash/public/cpp/app_list/app_list_types.h"
 #include "ash/public/cpp/assistant/controller/assistant_controller.h"
 #include "ash/public/cpp/assistant/controller/assistant_suggestions_controller.h"
-#include "ash/public/cpp/vector_icons/vector_icons.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/unguessable_token.h"
 #include "chrome/browser/ui/app_list/search/chrome_search_result.h"
 #include "chromeos/services/assistant/public/cpp/assistant_service.h"
+#include "chromeos/ui/vector_icons/vector_icons.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/paint_vector_icon.h"
 
@@ -79,9 +79,10 @@ class AssistantSearchResult : public ChromeSearchResult {
     SetDisplayIndex(ash::SearchResultDisplayIndex::kFirstIndex);
     SetDisplayType(ash::SearchResultDisplayType::kChip);
     SetResultType(ash::AppListSearchResultType::kAssistantChip);
+    SetMetricsType(ash::SearchResultType::ASSISTANT);
     SetTitle(base::UTF8ToUTF16(conversation_starter.text));
     SetChipIcon(gfx::CreateVectorIcon(
-        ash::kAssistantIcon,
+        chromeos::kAssistantIcon,
         ash::AppListConfig::instance().suggestion_chip_icon_dimension(),
         gfx::kPlaceholderColor));
 
@@ -97,11 +98,6 @@ class AssistantSearchResult : public ChromeSearchResult {
   ~AssistantSearchResult() override = default;
 
  private:
-  // ChromeSearchResult:
-  ash::SearchResultType GetSearchResultType() const override {
-    return ash::SearchResultType::ASSISTANT;
-  }
-
   void Open(int event_flags) override {
     // Opening of |action_url_| is delegated to the Assistant controller as only
     // the Assistant controller knows how to handle Assistant deep links.

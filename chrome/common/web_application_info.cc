@@ -4,8 +4,13 @@
 
 #include "chrome/common/web_application_info.h"
 
+#include "third_party/blink/public/mojom/manifest/manifest.mojom.h"
+
 // WebApplicationIconInfo
 WebApplicationIconInfo::WebApplicationIconInfo() = default;
+WebApplicationIconInfo::WebApplicationIconInfo(const GURL& url,
+                                               SquareSizePx size)
+    : url(url), square_size_px(size) {}
 
 WebApplicationIconInfo::WebApplicationIconInfo(const WebApplicationIconInfo&) =
     default;
@@ -71,8 +76,10 @@ WebApplicationInfo::~WebApplicationInfo() = default;
 
 bool operator==(const WebApplicationIconInfo& icon_info1,
                 const WebApplicationIconInfo& icon_info2) {
-  return std::tie(icon_info1.url, icon_info1.square_size_px) ==
-         std::tie(icon_info2.url, icon_info2.square_size_px);
+  return std::tie(icon_info1.url, icon_info1.square_size_px,
+                  icon_info1.purpose) == std::tie(icon_info2.url,
+                                                  icon_info2.square_size_px,
+                                                  icon_info2.purpose);
 }
 
 std::ostream& operator<<(std::ostream& out,
@@ -82,6 +89,7 @@ std::ostream& operator<<(std::ostream& out,
     out << *icon_info.square_size_px;
   else
     out << "none";
+  out << " purpose: " << icon_info.purpose;
   return out;
 }
 

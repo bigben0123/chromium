@@ -22,6 +22,7 @@ class FrameTracker;
 struct Geoposition;
 class JavaScriptDialogManager;
 struct KeyEvent;
+class MobileEmulationOverrideManager;
 struct MouseEvent;
 struct NetworkConditions;
 class Status;
@@ -204,6 +205,10 @@ class WebView {
   // Returns the JavaScriptDialogManager. Never null.
   virtual JavaScriptDialogManager* GetJavaScriptDialogManager() = 0;
 
+  // Returns the MobileEmulationOverrideManager.
+  virtual MobileEmulationOverrideManager* GetMobileEmulationOverrideManager()
+      const = 0;
+
   // Overrides normal geolocation with a given geoposition.
   virtual Status OverrideGeolocation(const Geoposition& geoposition) = 0;
 
@@ -265,6 +270,10 @@ class WebView {
   virtual std::unique_ptr<base::Value> GetCastIssueMessage() = 0;
 
   virtual void SetFrame(const std::string& new_frame_id) = 0;
+
+  virtual Status GetNodeIdByElement(const std::string& frame,
+                                    const base::DictionaryValue& element,
+                                    int* node_id) = 0;
 };
 
 #endif  // CHROME_TEST_CHROMEDRIVER_CHROME_WEB_VIEW_H_

@@ -4,8 +4,6 @@
 
 #include "ui/gl/gl_surface_glx_x11.h"
 
-#include "ui/gfx/x/x11.h"
-#include "ui/gfx/x/x11_types.h"
 
 using ui::X11EventSource;
 
@@ -21,8 +19,9 @@ GLSurfaceGLXX11::~GLSurfaceGLXX11() {
 void GLSurfaceGLXX11::RegisterEvents() {
   // Can be null in tests, when we don't care about Exposes.
   if (X11EventSource::HasInstance()) {
-    XSelectInput(gfx::GetXDisplay(), static_cast<uint32_t>(window()),
-                 ExposureMask);
+    x11::Connection::Get()->ChangeWindowAttributes(
+        {.window = static_cast<x11::Window>(window()),
+         .event_mask = x11::EventMask::Exposure});
     X11EventSource::GetInstance()->AddXEventDispatcher(this);
   }
 }

@@ -47,8 +47,20 @@ void FakeVideoDecoder::EnableEncryptedConfigSupport() {
   supports_encrypted_config_ = true;
 }
 
+void FakeVideoDecoder::SetIsPlatformDecoder(bool value) {
+  is_platform_decoder_ = value;
+}
+
 base::WeakPtr<FakeVideoDecoder> FakeVideoDecoder::GetWeakPtr() {
   return weak_factory_.GetWeakPtr();
+}
+
+bool FakeVideoDecoder::SupportsDecryption() const {
+  return supports_encrypted_config_;
+}
+
+bool FakeVideoDecoder::IsPlatformDecoder() const {
+  return is_platform_decoder_;
 }
 
 std::string FakeVideoDecoder::GetDisplayName() const {
@@ -221,15 +233,15 @@ int FakeVideoDecoder::GetMaxDecodeRequests() const {
 
 void FakeVideoDecoder::OnFrameDecoded(int buffer_size,
                                       DecodeCB decode_cb,
-                                      DecodeStatus status) {
+                                      Status status) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  if (status == DecodeStatus::OK) {
+  if (status.is_ok()) {
     total_bytes_decoded_ += buffer_size;
     if (bytes_decoded_cb_)
       bytes_decoded_cb_.Run(buffer_size);
   }
-  std::move(decode_cb).Run(status);
+  std::move(decode_cb).Run(std::move(status));
 }
 
 void FakeVideoDecoder::RunOrHoldDecode(DecodeCB decode_cb) {

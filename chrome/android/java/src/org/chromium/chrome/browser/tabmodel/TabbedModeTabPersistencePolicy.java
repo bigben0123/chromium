@@ -20,6 +20,7 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.task.AsyncTask;
 import org.chromium.base.task.BackgroundOnlyAsyncTask;
 import org.chromium.base.task.TaskRunner;
+import org.chromium.chrome.browser.app.tabmodel.TabWindowManagerSingleton;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
 import org.chromium.chrome.browser.multiwindow.MultiInstanceManager;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
@@ -111,7 +112,6 @@ public class TabbedModeTabPersistencePolicy implements TabPersistencePolicy {
      * @param selectorIndex The index that represents which state file to pull and save state to.
      * @return The name of the state file.
      */
-    @VisibleForTesting
     public static String getStateFileName(int selectorIndex) {
         return TabPersistentStore.getStateFileName(Integer.toString(selectorIndex));
     }
@@ -363,7 +363,7 @@ public class TabbedModeTabPersistencePolicy implements TabPersistencePolicy {
         @Override
         protected void onPostExecute(Void unused) {
             if (mDestroyed) return;
-            TabWindowManager tabWindowManager = TabWindowManager.getInstance();
+            TabWindowManager tabWindowManager = TabWindowManagerSingleton.getInstance();
 
             if (mTabFileNames != null) {
                 List<String> filesToDelete = new ArrayList<>();
@@ -398,7 +398,7 @@ public class TabbedModeTabPersistencePolicy implements TabPersistencePolicy {
         }
 
         private boolean shouldDeleteTabFile(int tabId, TabWindowManager tabWindowManager) {
-            return !tabWindowManager.tabExistsInAnySelector(tabId) && !mOtherTabIds.get(tabId);
+            return tabWindowManager.getTabById(tabId) == null && !mOtherTabIds.get(tabId);
         }
 
         /**

@@ -63,7 +63,7 @@ class COMPONENT_EXPORT(ASSISTANT_MODEL) AssistantResponse
 
   // Adds the specified |suggestions| that should be rendered for the
   // interaction.
-  void AddSuggestions(std::vector<AssistantSuggestion> suggestions);
+  void AddSuggestions(const std::vector<AssistantSuggestion>& suggestions);
 
   // Returns the suggestion uniquely identified by |id|.
   const AssistantSuggestion* GetSuggestionById(
@@ -88,9 +88,15 @@ class COMPONENT_EXPORT(ASSISTANT_MODEL) AssistantResponse
   // all UI elements in the response.
   void Process(ProcessingCallback callback);
 
+  // Return true if this response contains an identical ui element.
+  bool ContainsUiElement(const AssistantUiElement* element) const;
+
  private:
   void NotifyUiElementAdded(const AssistantUiElement* ui_element);
   void NotifySuggestionsAdded(const std::vector<AssistantSuggestion>&);
+
+  // Return true if the pending ui elements contain an identical ui element.
+  bool ContainsPendingUiElement(const AssistantUiElement* other) const;
 
   struct PendingUiElement;
   class Processor;

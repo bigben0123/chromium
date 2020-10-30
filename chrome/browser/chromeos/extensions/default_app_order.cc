@@ -54,18 +54,21 @@ const char* const kDefaultAppOrder[] = {
     arc::kGoogleCalendarAppId,
     extension_misc::kYoutubeAppId,
     arc::kYoutubeAppId,
+    arc::kYoutubeMusicAppId,                 // Youtube Music ARC app
+    default_web_apps::kYoutubeMusicAppId,    // Youtube Music Web app
     arc::kPlayMoviesAppId,                   // Play Movies & TV ARC app
     extension_misc::kGooglePlayMoviesAppId,  // Play Movies & TV Chrome app
     arc::kPlayMusicAppId,                    // Play Music ARC app
     extension_misc::kGooglePlayMusicAppId,   // Play Music Chrome app
-    default_web_apps::kYoutubeMusicAppId,
     arc::kPlayGamesAppId,
     arc::kPlayBooksAppId,                   // Play Books ARC app
     extension_misc::kGooglePlayBooksAppId,  // Play Books Chrome app
     extension_misc::kCameraAppId,
+    default_web_apps::kCameraAppId,
     extension_misc::kGooglePhotosAppId,
     arc::kGooglePhotosAppId,
     arc::kGoogleDuoAppId,
+    default_web_apps::kStadiaAppId,
     app_list::kDefaultPageBreak1,  // First default page break
     // TODO(crbug.com/976578): Remove after M78.
     extension_misc::kGoogleMapsAppId,
@@ -74,9 +77,7 @@ const char* const kDefaultAppOrder[] = {
     ash::kInternalAppIdSettings,
     default_web_apps::kSettingsAppId,
     default_web_apps::kOsSettingsAppId,
-    ash::kInternalAppIdDiscover,
     default_web_apps::kHelpAppId,
-    extension_misc::kGeniusAppId,
     extension_misc::kCalculatorAppId,
     default_web_apps::kCanvasAppId,
     extension_misc::kTextEditorAppId,

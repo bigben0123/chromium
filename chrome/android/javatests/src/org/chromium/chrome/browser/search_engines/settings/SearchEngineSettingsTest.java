@@ -8,6 +8,7 @@ import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.test.filters.SmallTest;
 
+import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
@@ -29,16 +30,16 @@ import org.chromium.components.browser_ui.settings.ManagedPreferenceDelegate;
 import org.chromium.components.browser_ui.site_settings.PermissionInfo;
 import org.chromium.components.browser_ui.site_settings.WebsitePreferenceBridgeJni;
 import org.chromium.components.content_settings.ContentSettingValues;
+import org.chromium.components.content_settings.ContentSettingsType;
+import org.chromium.components.policy.test.annotations.Policies;
 import org.chromium.components.search_engines.TemplateUrl;
 import org.chromium.components.search_engines.TemplateUrlService;
 import org.chromium.components.search_engines.TemplateUrlService.LoadListener;
 import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
-import org.chromium.policy.test.annotations.Policies;
 
 import java.util.List;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 
 /**
@@ -95,8 +96,9 @@ public class SearchEngineSettingsTest {
             // first and ensure that location permission is NOT granted.
             String keyword3 = pref.getKeywordFromIndexForTesting(3);
             String url = templateUrlService.getSearchEngineUrlFromTemplateUrl(keyword3);
-            WebsitePreferenceBridgeJni.get().setGeolocationSettingForOrigin(
-                    Profile.getLastUsedRegularProfile(), url, url, ContentSettingValues.BLOCK);
+            WebsitePreferenceBridgeJni.get().setSettingForOrigin(
+                    Profile.getLastUsedRegularProfile(), ContentSettingsType.GEOLOCATION, url, url,
+                    ContentSettingValues.BLOCK);
             keyword3 = pref.setValueForTesting("3");
             Assert.assertEquals(keyword3,
                     TemplateUrlServiceFactory.get()
@@ -112,12 +114,14 @@ public class SearchEngineSettingsTest {
             // setting to allow for search engine 3 before changing to search engine 2.
             // Otherwise the block setting will cause the content setting for search engine 2
             // to be reset when we switch to it.
-            WebsitePreferenceBridgeJni.get().setGeolocationSettingForOrigin(
-                    Profile.getLastUsedRegularProfile(), url, url, ContentSettingValues.ALLOW);
+            WebsitePreferenceBridgeJni.get().setSettingForOrigin(
+                    Profile.getLastUsedRegularProfile(), ContentSettingsType.GEOLOCATION, url, url,
+                    ContentSettingValues.ALLOW);
             keyword2 = pref.getKeywordFromIndexForTesting(2);
             url = templateUrlService.getSearchEngineUrlFromTemplateUrl(keyword2);
-            WebsitePreferenceBridgeJni.get().setGeolocationSettingForOrigin(
-                    Profile.getLastUsedRegularProfile(), url, url, ContentSettingValues.ALLOW);
+            WebsitePreferenceBridgeJni.get().setSettingForOrigin(
+                    Profile.getLastUsedRegularProfile(), ContentSettingsType.GEOLOCATION, url, url,
+                    ContentSettingValues.ALLOW);
             keyword2 = pref.setValueForTesting("2");
             Assert.assertEquals(keyword2,
                     TemplateUrlServiceFactory.get()
@@ -141,12 +145,7 @@ public class SearchEngineSettingsTest {
                 () -> { ChromeBrowserInitializer.getInstance().handleSynchronousStartup(); });
 
         ensureTemplateUrlServiceLoaded();
-        CriteriaHelper.pollUiThread(Criteria.equals(true, new Callable<Boolean>() {
-            @Override
-            public Boolean call() {
-                return TemplateUrlServiceFactory.get().isDefaultSearchManaged();
-            }
-        }));
+        CriteriaHelper.pollUiThread(() -> TemplateUrlServiceFactory.get().isDefaultSearchManaged());
 
         mMainSettingsTestRule.startSettingsActivity();
 
@@ -155,12 +154,9 @@ public class SearchEngineSettingsTest {
         final Preference searchEnginePref =
                 waitForPreference(mainSettings, MainSettings.PREF_SEARCH_ENGINE);
 
-        CriteriaHelper.pollUiThread(Criteria.equals(null, new Callable<Object>() {
-            @Override
-            public Object call() {
-                return searchEnginePref.getFragment();
-            }
-        }));
+        CriteriaHelper.pollUiThread(() -> {
+            Criteria.checkThat(searchEnginePref.getFragment(), Matchers.nullValue());
+        });
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             ManagedPreferenceDelegate managedPrefDelegate =
                     mainSettings.getManagedPreferenceDelegateForTest();
@@ -246,7 +242,7 @@ public class SearchEngineSettingsTest {
     private @ContentSettingValues int locationPermissionForSearchEngine(String keyword) {
         String url = TemplateUrlServiceFactory.get().getSearchEngineUrlFromTemplateUrl(keyword);
         PermissionInfo locationSettings =
-                new PermissionInfo(PermissionInfo.Type.GEOLOCATION, url, null, false);
+                new PermissionInfo(ContentSettingsType.GEOLOCATION, url, null, false);
         @ContentSettingValues
         int locationPermission =
                 locationSettings.getContentSetting(Profile.getLastUsedRegularProfile());
@@ -255,11 +251,9 @@ public class SearchEngineSettingsTest {
 
     private static Preference waitForPreference(final PreferenceFragmentCompat prefFragment,
             final String preferenceKey) throws ExecutionException {
-        CriteriaHelper.pollUiThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return prefFragment.findPreference(preferenceKey) != null;
-            }
+        CriteriaHelper.pollUiThread(() -> {
+            Criteria.checkThat("Expected valid preference for: " + preferenceKey,
+                    prefFragment.findPreference(preferenceKey), Matchers.notNullValue());
         });
 
         return TestThreadUtils.runOnUiThreadBlocking(

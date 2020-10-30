@@ -128,11 +128,14 @@ PolicyBase::~PolicyBase() {
 }
 
 void PolicyBase::AddRef() {
-  ::InterlockedIncrement(&ref_count);
+  // ref_count starts at 1 so cannot increase from 0 to 1.
+  CHECK(::InterlockedIncrement(&ref_count) > 1);
 }
 
 void PolicyBase::Release() {
-  if (0 == ::InterlockedDecrement(&ref_count))
+  LONG result = ::InterlockedDecrement(&ref_count);
+  CHECK(result >= 0);
+  if (result == 0)
     delete this;
 }
 
@@ -408,6 +411,16 @@ ResultCode PolicyBase::MakeJobObject(base::win::ScopedHandle* job) {
     return SBOX_ERROR_CANNOT_INIT_JOB;
 
   *job = job_obj.Take();
+  return SBOX_ALL_OK;
+}
+
+ResultCode PolicyBase::DropActiveProcessLimit(base::win::ScopedHandle* job) {
+  if (job_level_ >= JOB_INTERACTIVE)
+    return SBOX_ALL_OK;
+
+  if (ERROR_SUCCESS != Job::SetActiveProcessLimit(job, 0))
+    return SBOX_ERROR_CANNOT_UPDATE_JOB_PROCESS_LIMIT;
+
   return SBOX_ALL_OK;
 }
 

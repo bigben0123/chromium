@@ -34,8 +34,6 @@ class MockAssistant : public Assistant {
 
   MOCK_METHOD0(StartVoiceInteraction, void());
 
-  MOCK_METHOD2(StartWarmerWelcomeInteraction, void(int, bool));
-
   MOCK_METHOD1(StopActiveInteraction, void(bool));
 
   MOCK_METHOD1(AddAssistantInteractionSubscriber,
@@ -44,10 +42,9 @@ class MockAssistant : public Assistant {
   MOCK_METHOD1(RemoveAssistantInteractionSubscriber,
                void(AssistantInteractionSubscriber*));
 
-  MOCK_METHOD2(RetrieveNotification,
-               void(const mojom::AssistantNotification&, int));
+  MOCK_METHOD2(RetrieveNotification, void(const AssistantNotification&, int));
 
-  MOCK_METHOD1(DismissNotification, void(const mojom::AssistantNotification&));
+  MOCK_METHOD1(DismissNotification, void(const AssistantNotification&));
 
   MOCK_METHOD1(OnAccessibilityStatusChanged, void(bool));
 

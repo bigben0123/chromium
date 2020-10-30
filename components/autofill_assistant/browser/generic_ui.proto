@@ -26,12 +26,13 @@ message InteractionsProto {
   repeated InteractionProto interactions = 1;
 }
 
-// An interaction consists of a trigger event and a series of actions.
+// An interaction consists of a set of trigger events and a series of actions.
 message InteractionProto {
-  // Functions to call each time the event happens, in the specified order.
+  // Functions to call each time one of the events happens, in the specified
+  // order.
   repeated CallbackProto callbacks = 1;
-  // The trigger event for |callbacks|.
-  optional EventProto trigger_event = 2;
+  // The trigger events for |callbacks|.
+  repeated EventProto trigger_event = 2;
 }
 
 // UI Actions to invoke.
@@ -196,6 +197,9 @@ message AutofillFormatProto {
     CREDIT_CARD_RAW_NUMBER = -3;
     CREDIT_CARD_NUMBER_LAST_FOUR_DIGITS = -4;
     CREDIT_CARD_NETWORK_FOR_DISPLAY = -5;
+    // Currently only US states are supported. The state name is in lower case.
+    ADDRESS_HOME_STATE_NAME = -6;
+    CREDIT_CARD_NON_PADDED_EXP_MONTH = -7;
   }
   // The format string to use. May contain one or multiple "${key}"
   // placeholders, where the key is an integer corresponding to
@@ -206,9 +210,9 @@ message AutofillFormatProto {
   optional string locale = 2;
 }
 
-// A comparison of two values in the form |value_a| <mode> |value_b|. EQUAL is
-// supported for all values. All other comparison modes are only supported for
-// single integers, strings, and dates.
+// A comparison of two values in the form |value_a| <mode> |value_b|. EQUAL and
+// NOT_EQUAL are supported for all values. All other comparison modes are only
+// supported for single integers, strings, and dates.
 message ValueComparisonProto {
   enum Mode {
     UNDEFINED = 0;
@@ -217,6 +221,7 @@ message ValueComparisonProto {
     EQUAL = 3;
     GREATER_OR_EQUAL = 4;
     GREATER = 5;
+    NOT_EQUAL = 6;
   }
 
   // The first value to compare.

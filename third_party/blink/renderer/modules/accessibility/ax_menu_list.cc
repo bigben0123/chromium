@@ -74,19 +74,15 @@ void AXMenuList::AddChildren() {
   have_children_ = true;
 
   AXObjectCacheImpl& cache = AXObjectCache();
+  AXObject* popup = cache.Create(ax::mojom::blink::Role::kMenuListPopup, this);
+  DCHECK(popup);
 
-  AXObject* popup = cache.GetOrCreate(ax::mojom::Role::kMenuListPopup);
-  if (!popup)
-    return;
-
-  To<AXMockObject>(popup)->SetParent(this);
   if (!popup->AccessibilityIsIncludedInTree()) {
     cache.Remove(popup->AXObjectID());
     return;
   }
 
   children_.push_back(popup);
-
   popup->AddChildren();
 }
 

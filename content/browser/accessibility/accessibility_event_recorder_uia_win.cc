@@ -47,12 +47,11 @@ volatile base::subtle::Atomic32 AccessibilityEventRecorderUia::instantiated_ =
 
 // static
 std::unique_ptr<AccessibilityEventRecorder>
-AccessibilityEventRecorderUia::CreateUia(
-    BrowserAccessibilityManager* manager,
-    base::ProcessId pid,
-    const base::StringPiece& application_name_match_pattern) {
-  return std::make_unique<AccessibilityEventRecorderUia>(
-      manager, pid, application_name_match_pattern);
+AccessibilityEventRecorderUia::CreateUia(BrowserAccessibilityManager* manager,
+                                         base::ProcessId pid,
+                                         const AXTreeSelector& selector) {
+  return std::make_unique<AccessibilityEventRecorderUia>(manager, pid,
+                                                         selector.pattern);
 }
 
 AccessibilityEventRecorderUia::AccessibilityEventRecorderUia(

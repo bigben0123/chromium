@@ -24,6 +24,9 @@ namespace {
 const char kInactiveFrame[] =
     "XRFrame access outside the callback that produced it is invalid.";
 
+const char kInvalidView[] =
+    "XRView passed in to the method did not originate from current XRFrame.";
+
 const char kNonAnimationFrame[] =
     "getViewerPose can only be called on XRFrame objects passed to "
     "XRSession.requestAnimationFrame callbacks.";
@@ -47,7 +50,7 @@ XRFrame::XRFrame(XRSession* session, XRWorldInformation* world_information)
     : world_information_(world_information), session_(session) {}
 
 XRViewerPose* XRFrame::getViewerPose(XRReferenceSpace* reference_space,
-                                     ExceptionState& exception_state) const {
+                                     ExceptionState& exception_state) {
   DVLOG(3) << __func__;
   if (!is_active_) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
@@ -92,8 +95,7 @@ XRViewerPose* XRFrame::getViewerPose(XRReferenceSpace* reference_space,
     return nullptr;
   }
 
-  return MakeGarbageCollected<XRViewerPose>(session(),
-                                            *offset_space_from_viewer);
+  return MakeGarbageCollected<XRViewerPose>(this, *offset_space_from_viewer);
 }
 
 XRAnchorSet* XRFrame::trackedAnchors() const {
@@ -129,12 +131,34 @@ XRLightEstimate* XRFrame::getLightEstimate(
   return light_probe->getLightEstimate();
 }
 
+XRDepthInformation* XRFrame::getDepthInformation(
+    XRView* view,
+    ExceptionState& exception_state) const {
+  DVLOG(2) << __func__;
+
+  if (!is_active_) {
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
+                                      kInactiveFrame);
+    return nullptr;
+  }
+
+  if (this != view->frame()) {
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
+                                      kInvalidView);
+    return nullptr;
+  }
+
+  return session_->GetDepthInformation();
+}
+
 // Return an XRPose that has a transform of basespace_from_space, while
 // accounting for the base pose matrix of this frame. If computing a transform
 // isn't possible, return nullptr.
 XRPose* XRFrame::getPose(XRSpace* space,
                          XRSpace* basespace,
                          ExceptionState& exception_state) {
+  DVLOG(2) << __func__;
+
   if (!is_active_) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
                                       kInactiveFrame);
@@ -170,6 +194,10 @@ XRPose* XRFrame::getPose(XRSpace* space,
 void XRFrame::Deactivate() {
   is_active_ = false;
   is_animation_frame_ = false;
+}
+
+bool XRFrame::IsActive() const {
+  return is_active_;
 }
 
 HeapVector<Member<XRHitTestResult>> XRFrame::getHitTestResults(
@@ -246,6 +274,8 @@ ScriptPromise XRFrame::createAnchor(ScriptState* script_state,
     return {};
   }
 
+  DVLOG(3) << __func__ << ": space->ToString()=" << space->ToString();
+
   // The passed in space may be an offset space, we need to transform the pose
   // to account for origin-offset:
   auto native_origin_from_offset_space = space->NativeFromOffsetMatrix();
@@ -315,6 +345,11 @@ ScriptPromise XRFrame::CreateAnchorFromNonStationarySpace(
   return session_->CreateAnchorHelper(
       script_state, stationary_space_from_anchor,
       reference_space_information->native_origin, exception_state);
+}
+
+HeapVector<Member<XRImageTrackingResult>> XRFrame::getImageTrackingResults(
+    ExceptionState& exception_state) {
+  return session_->ImageTrackingResults(exception_state);
 }
 
 void XRFrame::Trace(Visitor* visitor) const {

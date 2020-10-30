@@ -18,7 +18,7 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.StreamUtil;
 import org.chromium.base.ThreadUtils;
-import org.chromium.chrome.browser.ChromeVersionInfo;
+import org.chromium.chrome.browser.version.ChromeVersionInfo;
 
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
@@ -29,7 +29,6 @@ import java.io.OutputStreamWriter;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.net.HttpURLConnection;
-import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.Date;
 
@@ -65,11 +64,14 @@ public class OmahaBase {
         public final String latestVersion;
         public final String downloadUrl;
         public final int serverDate;
+        public final String updateStatus;
 
-        protected VersionConfig(String latestVersion, String downloadUrl, int serverDate) {
+        protected VersionConfig(
+                String latestVersion, String downloadUrl, int serverDate, String updateStatus) {
             this.latestVersion = latestVersion;
             this.downloadUrl = downloadUrl;
             this.serverDate = serverDate;
+            this.updateStatus = updateStatus;
         }
     }
 
@@ -77,7 +79,7 @@ public class OmahaBase {
     @IntDef({UpdateStatus.UPDATED, UpdateStatus.OUTDATED, UpdateStatus.OFFLINE,
             UpdateStatus.FAILED})
     @Retention(RetentionPolicy.SOURCE)
-    @interface UpdateStatus {
+    public @interface UpdateStatus {
         int UPDATED = 0;
         int OUTDATED = 1;
         int OFFLINE = 2;
@@ -176,6 +178,16 @@ public class OmahaBase {
         // Since this update check is synchronous and blocking on the network
         // connection, it should not be run on the UI thread.
         assert !ThreadUtils.runningOnUiThread();
+        Log.i(TAG,
+                "OmahaBase::checkForUpdates(): Current version String: \"" + getInstalledVersion()
+                        + "\"");
+        // This is not available on developer builds.
+        if (getRequestGenerator() == null) {
+            Log.w(TAG,
+                    "OmahaBase::checkForUpdates(): Request generator is null. This is probably "
+                            + "a developer build.");
+            return UpdateStatus.FAILED;
+        }
         // Create all the metadata needed for an Omaha request.
         long currentTimestamp = getBackoffScheduler().getCurrentTime();
         String installSource =
@@ -189,10 +201,19 @@ public class OmahaBase {
         VersionConfig versionConfig = generateAndPostRequest(
                 currentTimestamp, sessionID, currentRequest, timestampOfInstall);
         if (versionConfig == null) {
+            Log.w(TAG, "OmahaBase::checkForUpdates(): versionConfig parsed from response is null.");
             return (mRequestErrorCode == RequestFailureException.ERROR_CONNECTIVITY)
                     ? UpdateStatus.OFFLINE
                     : UpdateStatus.FAILED;
         }
+        // If the version matches exactly, the Omaha server will return status="noupdate" without
+        // providing the latest version number.
+        if (versionConfig.updateStatus != null && versionConfig.updateStatus.equals("noupdate")) {
+            return UpdateStatus.UPDATED;
+        }
+        Log.i(TAG,
+                "OmahaBase::checkForUpdates(): Received latest version String from Omaha "
+                        + "server: \"" + versionConfig.latestVersion + "\"");
         // Compare the current version with the latest received from the server.
         VersionNumber current = VersionNumber.fromString(getInstalledVersion());
         VersionNumber latest = VersionNumber.fromString(versionConfig.latestVersion);
@@ -301,9 +322,9 @@ public class OmahaBase {
     }
 
     protected boolean generateAndPostRequest(long currentTimestamp, String sessionID) {
-        return generateAndPostRequest(
-                       currentTimestamp, sessionID, mCurrentRequest, mTimestampOfInstall)
-                != null;
+        mVersionConfig = generateAndPostRequest(
+                currentTimestamp, sessionID, mCurrentRequest, mTimestampOfInstall);
+        return mVersionConfig != null;
     }
 
     protected VersionConfig generateAndPostRequest(long currentTimestamp, String sessionID,
@@ -316,9 +337,13 @@ public class OmahaBase {
                     installAgeInDays,
                     mVersionConfig == null ? UNKNOWN_DATE : mVersionConfig.serverDate,
                     currentRequest);
+            Log.i(TAG, "OmahaBase::generateAndPostRequest(): Sending request to Omaha:\n" + xml);
 
             // Send the request to the server & wait for a response.
             String response = postRequest(currentTimestamp, xml);
+            Log.i(TAG,
+                    "OmahaBase::generateAndPostRequest(): Received response from Omaha:\n"
+                            + response);
 
             // Parse out the response.
             String appId = getRequestGenerator().getAppId();
@@ -397,12 +422,8 @@ public class OmahaBase {
      * @throws RequestFailureException if the request fails.
      */
     private String postRequest(long timestamp, String xml) throws RequestFailureException {
-        String response = null;
-
-        HttpURLConnection urlConnection = null;
+        HttpURLConnection urlConnection = createConnection();
         try {
-            urlConnection = createConnection();
-
             // Prepare the HTTP header.
             urlConnection.setDoOutput(true);
             urlConnection.setFixedLengthStreamingMode(
@@ -412,20 +433,10 @@ public class OmahaBase {
                 urlConnection.addRequestProperty("X-RequestAge", age);
             }
 
-            response = OmahaBase.sendRequestToServer(urlConnection, xml);
-        } catch (IllegalAccessError e) {
-            throw new RequestFailureException("Caught an IllegalAccessError:", e);
-        } catch (IllegalArgumentException e) {
-            throw new RequestFailureException("Caught an IllegalArgumentException:", e);
-        } catch (IllegalStateException e) {
-            throw new RequestFailureException("Caught an IllegalStateException:", e);
+            return OmahaBase.sendRequestToServer(urlConnection, xml);
         } finally {
-            if (urlConnection != null) {
-                urlConnection.disconnect();
-            }
+            urlConnection.disconnect();
         }
-
-        return response;
     }
 
     /**
@@ -439,8 +450,6 @@ public class OmahaBase {
             connection.setConnectTimeout(MS_CONNECTION_TIMEOUT);
             connection.setReadTimeout(MS_CONNECTION_TIMEOUT);
             return connection;
-        } catch (MalformedURLException e) {
-            throw new RequestFailureException("Caught a malformed URL exception.", e);
         } catch (IOException e) {
             throw new RequestFailureException("Failed to open connection to URL", e,
                     RequestFailureException.ERROR_CONNECTIVITY);
@@ -568,7 +577,9 @@ public class OmahaBase {
             writer.write(request, 0, request.length());
             StreamUtil.closeQuietly(writer);
             checkServerResponseCode(urlConnection);
-        } catch (IOException | SecurityException | ArrayIndexOutOfBoundsException e) {
+        } catch (IOException | SecurityException | IndexOutOfBoundsException e) {
+            // IndexOutOfBoundsException is thought to be triggered by a bug in okio.
+            // TODO(crbug.com/1111334): Record IndexOutOfBoundsException specifically.
             throw new RequestFailureException("Failed to write request to server: ", e,
                     RequestFailureException.ERROR_CONNECTIVITY);
         }
@@ -624,6 +635,8 @@ public class OmahaBase {
     static VersionConfig getVersionConfig(SharedPreferences sharedPref) {
         return new VersionConfig(sharedPref.getString(OmahaBase.PREF_LATEST_VERSION, ""),
                 sharedPref.getString(OmahaBase.PREF_MARKET_URL, ""),
-                sharedPref.getInt(OmahaBase.PREF_SERVER_DATE, -2));
+                sharedPref.getInt(OmahaBase.PREF_SERVER_DATE, -2),
+                // updateStatus is only used for the on-demand check.
+                null);
     }
 }

@@ -125,9 +125,16 @@ cr.define('settings', function() {
      */
     activeRoute_: null,
 
+    /**
+     * Converts prefs to settings metrics to help record pref changes.
+     * @private {PrefToSettingMetricConverter}
+     */
+    prefToSettingMetricConverter_: null,
+
     /** @override */
     created() {
       settings.Router.getInstance().initializeRouteFromUrl();
+      this.prefToSettingMetricConverter_ = new PrefToSettingMetricConverter();
     },
 
     /**
@@ -240,12 +247,17 @@ cr.define('settings', function() {
 
       window.addEventListener('focus', settings.recordPageFocus);
       window.addEventListener('blur', settings.recordPageBlur);
+
+      // Clicks need to be captured because unlike focus/blur to the settings
+      // window, a click's propagation can be stopped by child elements.
+      window.addEventListener('click', settings.recordClick, /*capture=*/true);
     },
 
     /** @override */
     detached() {
       window.removeEventListener('focus', settings.recordPageFocus);
       window.removeEventListener('blur', settings.recordPageBlur);
+      window.removeEventListener('click', settings.recordClick);
       settings.Router.getInstance().resetRouteForTesting();
     },
 
@@ -254,7 +266,7 @@ cr.define('settings', function() {
      * @param {!settings.Route} oldRoute
      */
     currentRouteChanged(newRoute, oldRoute) {
-      if (oldRoute && newRoute != oldRoute) {
+      if (oldRoute && newRoute !== oldRoute) {
         // Search triggers route changes and currentRouteChanged() is called
         // in attached() state which is extraneous for this metric.
         settings.recordNavigation();
@@ -269,27 +281,17 @@ cr.define('settings', function() {
         this.showDropShadows();
       }
 
-      const urlSearchQuery =
-          settings.Router.getInstance().getQueryParameters().get('search') ||
-          '';
-
-      if (urlSearchQuery) {
-        const route = settings.Router.getInstance().getCurrentRoute();
-        if (settings.routes.ADVANCED &&
-            settings.routes.ADVANCED.contains(route)) {
-          // If the route navigated to by a search result is in the advanced
-          // section, the advanced menu will expand.
-          this.advancedOpenedInMenu_ = true;
-        }
-      }
-
       if (loadTimeData.getBoolean('newOsSettingsSearch')) {
         // TODO(crbug/1080777): Remove when new os settings search complete.
         // This block prevents the old settings search code from being executed.
         return;
       }
 
-      if (urlSearchQuery == this.lastSearchQuery_) {
+      const urlSearchQuery =
+          settings.Router.getInstance().getQueryParameters().get('search') ||
+          '';
+
+      if (urlSearchQuery === this.lastSearchQuery_) {
         return;
       }
 
@@ -317,7 +319,7 @@ cr.define('settings', function() {
 
       // If the search was initiated by directly entering a search URL, need to
       // sync the URL parameter to the textbox.
-      if (urlSearchQuery != searchField.getValue()) {
+      if (urlSearchQuery !== searchField.getValue()) {
         // Setting the search box value without triggering a 'search-changed'
         // event, to prevent an unnecessary duplicate entry in |window.history|.
         searchField.setValue(urlSearchQuery, true /* noEvent */);
@@ -355,10 +357,26 @@ cr.define('settings', function() {
     },
 
     /**
+     * @param {!CustomEvent<!{prefKey: string, prefValue: *}>} e
      * @private
      */
-    onSettingChange_() {
-      settings.recordSettingChange();
+    onSettingChange_(e) {
+      const {prefKey, prefValue} = e.detail;
+      const settingMetric =
+          this.prefToSettingMetricConverter_.convertPrefToSettingMetric(
+              prefKey, prefValue);
+
+      // New metrics for this setting pref have not yet been implemented.
+      if (!settingMetric) {
+        settings.recordSettingChange();
+        return;
+      }
+
+      const setting = /** @type {!chromeos.settings.mojom.Setting} */ (
+          settingMetric.setting);
+      const value = /** @type {!chromeos.settings.mojom.SettingChangeValue} */ (
+          settingMetric.value);
+      settings.recordSettingChange(setting, value);
     },
 
     /**

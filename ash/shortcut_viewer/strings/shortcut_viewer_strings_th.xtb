@@ -47,6 +47,7 @@
 <translation id="2488661730534396940">เปิดใช้งานพื้นที่ทำงานด้านซ้าย</translation>
 <translation id="2515586267016047495">Alt</translation>
 <translation id="2530339807289914946">เลื่อนหน้าเว็บลง</translation>
+<translation id="2530896289327917474">เปิดหรือปิดการเรียกดูด้วยแป้นพิมพ์</translation>
 <translation id="2574014812750545982">รีเซ็ตระดับการซูมในหน้าเว็บ</translation>
 <translation id="2596078834055697711">ถ่ายภาพหน้าจอของหน้าต่าง</translation>
 <translation id="2685170433750953446"><ph name="SHIFT" /><ph name="SEPARATOR1" /><ph name="ALT" /><ph name="SEPARATOR2" /><ph name="L" /> แล้วกด <ph name="TAB" /> หรือ <ph name="RIGHT" /></translation>
@@ -159,7 +160,7 @@
 <translation id="6755851152783057058">เปลี่ยนไปใช้วิธีการป้อนข้อมูลที่ใช้ล่าสุด</translation>
 <translation id="6760706756348334449">ลดระดับเสียง</translation>
 <translation id="6941333068993625698">ส่งความคิดเห็น</translation>
-<translation id="6981982820502123353">การเข้าถึง</translation>
+<translation id="6981982820502123353">การช่วยเหลือพิเศษ</translation>
 <translation id="7020813747703216897">ไม่พบผลการค้นหาที่ตรงกัน</translation>
 <translation id="7025325401470358758">แผงถัดไป</translation>
 <translation id="7076878155205969899">ปิดเสียง</translation>
@@ -185,6 +186,7 @@
 <translation id="8234414138295101081">หมุนหน้าจอ 90 องศา</translation>
 <translation id="8241665785394195545">วงเล็บปิด</translation>
 <translation id="8264941229485248811">แสดงหรือซ่อนตัวตรวจสอบเครื่องมือสำหรับนักพัฒนาซอฟต์แวร์</translation>
+<translation id="8322502972606429618">แสดง 2-3 รายการล่าสุดที่คัดลอกลงในคลิปบอร์ด</translation>
 <translation id="836869401750819675">เปิดหน้าดาวน์โหลด</translation>
 <translation id="8388247778047144397">ลากลิงก์ไปยังพื้นที่ว่างบนแนวแท็บ</translation>
 <translation id="8389638407792712197">เปิดหน้าต่างใหม่</translation>

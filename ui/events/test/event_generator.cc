@@ -26,7 +26,6 @@
 #if defined(USE_X11)
 #include "ui/events/test/events_test_utils_x11.h"
 #include "ui/events/x/events_x_utils.h"
-#include "ui/gfx/x/x11.h"
 #endif
 
 #if defined(OS_WIN)
@@ -593,12 +592,16 @@ void EventGenerator::CancelTrackpadRest() {
   Dispatch(&scroll);
 }
 
-void EventGenerator::PressKey(ui::KeyboardCode key_code, int flags) {
-  DispatchKeyEvent(true, key_code, flags);
+void EventGenerator::PressKey(ui::KeyboardCode key_code,
+                              int flags,
+                              int source_device_id) {
+  DispatchKeyEvent(true, key_code, flags, source_device_id);
 }
 
-void EventGenerator::ReleaseKey(ui::KeyboardCode key_code, int flags) {
-  DispatchKeyEvent(false, key_code, flags);
+void EventGenerator::ReleaseKey(ui::KeyboardCode key_code,
+                                int flags,
+                                int source_device_id) {
+  DispatchKeyEvent(false, key_code, flags, source_device_id);
 }
 
 void EventGenerator::Dispatch(ui::Event* event) {
@@ -640,7 +643,8 @@ void EventGenerator::Init(gfx::NativeWindow root_window,
 
 void EventGenerator::DispatchKeyEvent(bool is_press,
                                       ui::KeyboardCode key_code,
-                                      int flags) {
+                                      int flags,
+                                      int source_device_id) {
 #if defined(OS_WIN)
   UINT key_press = WM_KEYDOWN;
   uint16_t character = ui::DomCodeToUsLayoutCharacter(
@@ -666,6 +670,7 @@ void EventGenerator::DispatchKeyEvent(bool is_press,
   ui::EventType type = is_press ? ui::ET_KEY_PRESSED : ui::ET_KEY_RELEASED;
   ui::KeyEvent keyev(type, key_code, flags);
 #endif  // OS_WIN
+  keyev.set_source_device_id(source_device_id);
   Dispatch(&keyev);
 }
 

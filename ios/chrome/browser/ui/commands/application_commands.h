@@ -7,6 +7,8 @@
 
 #import <Foundation/Foundation.h>
 
+#include "ios/public/provider/chrome/browser/user_feedback/user_feedback_sender.h"
+
 @class OpenNewTabCommand;
 @class ShowSigninCommand;
 @class StartVoiceSearchCommand;
@@ -41,6 +43,11 @@ enum class KeyRetrievalTriggerForUMA;
 - (void)showSavedPasswordsSettingsFromViewController:
     (UIViewController*)baseViewController;
 
+// Shows the list of saved passwords in the settings. Automatically starts
+// password check.
+- (void)showSavedPasswordsSettingsAndStartPasswordCheckFromViewController:
+    (UIViewController*)baseViewController;
+
 // Shows the list of profiles (addresess) in the settings.
 - (void)showProfileSettingsFromViewController:
     (UIViewController*)baseViewController;
@@ -70,6 +77,9 @@ enum class KeyRetrievalTriggerForUMA;
 // TODO(crbug.com/779791) : Do not pass baseViewController through dispatcher.
 // Shows the advanced sign-in settings.
 - (void)showAdvancedSigninSettingsFromViewController:
+    (UIViewController*)baseViewController;
+
+- (void)showLocationPermissionsFromViewController:
     (UIViewController*)baseViewController;
 
 // Presents the Trusted Vault reauth dialog.
@@ -108,7 +118,16 @@ enum class KeyRetrievalTriggerForUMA;
 
 // Shows the Report an Issue UI, presenting from |baseViewController|.
 - (void)showReportAnIssueFromViewController:
-    (UIViewController*)baseViewController;
+            (UIViewController*)baseViewController
+                                     sender:(UserFeedbackSender)sender;
+
+// Shows the Report an Issue UI, presenting from |baseViewController|, using
+// |specificProductData| for additional product data to be sent in the report.
+- (void)
+    showReportAnIssueFromViewController:(UIViewController*)baseViewController
+                                 sender:(UserFeedbackSender)sender
+                    specificProductData:(NSDictionary<NSString*, NSString*>*)
+                                            specificProductData;
 
 // Opens the |command| URL in a new tab.
 // TODO(crbug.com/907527): Check if it is possible to merge it with the
@@ -123,6 +142,12 @@ enum class KeyRetrievalTriggerForUMA;
 // TODO(crbug.com/779791) : Do not pass baseViewController through dispatcher.
 // Shows the Add Account UI, presenting from |baseViewController|.
 - (void)showAddAccountFromViewController:(UIViewController*)baseViewController;
+
+// TODO(crbug.com/779791) : Do not pass baseViewController through dispatcher.
+// Shows the consistency promo UI that allows users to sign in to Chrome using
+// the default accounts on the device.
+- (void)showConsistencyPromoFromViewController:
+    (UIViewController*)baseViewController;
 
 // Sets whether the UI is displaying incognito content.
 - (void)setIncognitoContentVisible:(BOOL)incognitoContentVisible;

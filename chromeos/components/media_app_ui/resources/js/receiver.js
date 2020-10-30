@@ -26,6 +26,13 @@ class ReceivedFile {
     this.token = file.token;
     this.error = file.error;
     this.fromClipboard = false;
+    if (file.canDelete) {
+      this.deleteOriginalFile = () => this.deleteOriginalFileImpl();
+    }
+    if (file.canRename) {
+      this.renameOriginalFile = (/** string */ newName) =>
+          this.renameOriginalFileImpl(newName);
+    }
   }
 
   /**
@@ -36,19 +43,26 @@ class ReceivedFile {
     /** @type {!OverwriteFileMessage} */
     const message = {token: this.token, blob: blob};
 
-    await parentMessagePipe.sendMessage(Message.OVERWRITE_FILE, message);
-
+    const result = /** @type {!OverwriteViaFilePickerResponse} */ (
+        await parentMessagePipe.sendMessage(Message.OVERWRITE_FILE, message));
     // Note the following are skipped if an exception is thrown above.
+    if (result.renamedTo) {
+      this.name = result.renamedTo;
+      // Assume a rename could have moved the file to a new folder via a file
+      // picker, which will break rename/delete functionality.
+      delete this.deleteOriginalFile;
+      delete this.renameOriginalFile;
+    }
+    this.error = result.errorName || '';
     this.blob = blob;
     this.size = blob.size;
     this.mimeType = blob.type;
   }
 
   /**
-   * @override
    * @return {!Promise<number>}
    */
-  async deleteOriginalFile() {
+  async deleteOriginalFileImpl() {
     const deleteResponse =
         /** @type {!DeleteFileResponse} */ (await parentMessagePipe.sendMessage(
             Message.DELETE_FILE, {token: this.token}));
@@ -56,15 +70,39 @@ class ReceivedFile {
   }
 
   /**
-   * @override
    * @param {string} newName
    * @return {!Promise<number>}
    */
-  async renameOriginalFile(newName) {
+  async renameOriginalFileImpl(newName) {
     const renameResponse =
         /** @type {!RenameFileResponse} */ (await parentMessagePipe.sendMessage(
             Message.RENAME_FILE, {token: this.token, newFilename: newName}));
+    if (renameResponse.renameResult === RenameResult.SUCCESS) {
+      this.name = newName;
+    }
     return renameResponse.renameResult;
+  }
+
+  /**
+   * @override
+   * @param {!Blob} blob
+   * @param {number} pickedFileToken
+   * @return {!Promise<undefined>}
+   */
+  async saveAs(blob, pickedFileToken) {
+    /** @type {!SaveAsMessage} */
+    const message = {blob, oldFileToken: this.token, pickedFileToken};
+    const result = /** @type {!SaveAsResponse} */ (
+        await parentMessagePipe.sendMessage(Message.SAVE_AS, message));
+    this.name = result.newFilename;
+    this.blob = blob;
+    this.size = blob.size;
+    this.mimeType = blob.type;
+    // Files obtained by a file picker currently can not be renamed/deleted.
+    // TODO(b/163285659): Detect when the new file is in the same folder as an
+    // on-launch file. Those should still be able to be renamed/deleted.
+    delete this.deleteOriginalFile;
+    delete this.renameOriginalFile;
   }
 }
 
@@ -96,6 +134,7 @@ class ReceivedFileList {
     }
 
     this.length = files.length;
+    this.currentFileIndex = files.length ? 0 : -1;
     /** @type {!Array<!ReceivedFile>} */
     this.files = files.map(f => new ReceivedFile(f));
     /** @type {number} */
@@ -118,31 +157,29 @@ class ReceivedFileList {
     return this.item(this.writableFileIndex);
   }
 
-  /**
-   * Loads in the next file in the list as a writable.
-   * @override
-   * @return {!Promise<undefined>}
-   */
-  async loadNext() {
+  /** @override */
+  async loadNext(currentFileToken) {
     // Awaiting this message send allows callers to wait for the full effects of
     // the navigation to complete. This may include a call to load a new set of
     // files, and the initial decode, which replaces this AbstractFileList and
     // alters other app state.
-    await parentMessagePipe.sendMessage(Message.NAVIGATE, {direction: 1});
+    await parentMessagePipe.sendMessage(
+        Message.NAVIGATE, {currentFileToken, direction: 1});
   }
 
-  /**
-   * Loads in the previous file in the list as a writable.
-   * @override
-   * @return {!Promise<undefined>}
-   */
-  async loadPrev() {
-    await parentMessagePipe.sendMessage(Message.NAVIGATE, {direction: -1});
+  /** @override */
+  async loadPrev(currentFileToken) {
+    await parentMessagePipe.sendMessage(
+        Message.NAVIGATE, {currentFileToken, direction: -1});
   }
 
   /** @override */
   addObserver(observer) {
     this.observers.push(observer);
+  }
+
+  async openFile() {
+    await parentMessagePipe.sendMessage(Message.OPEN_FILE);
   }
 
   /** @param {!Array<!ReceivedFile>} files */
@@ -189,13 +226,41 @@ const DELEGATE = {
     return /** @type {?string} */ (response['errorMessage']);
   },
   /**
-   * @param {!mediaApp.AbstractFile} abstractFile
+   * @param {string} suggestedName
+   * @param {string} mimeType
+   * @return {!Promise<!mediaApp.AbstractFile>}
+   */
+  async requestSaveFile(suggestedName, mimeType) {
+    /** @type {!RequestSaveFileMessage} */
+    const msg = {suggestedName, mimeType};
+    const response =
+        /** @type {!RequestSaveFileResponse} */ (
+            await parentMessagePipe.sendMessage(
+                Message.REQUEST_SAVE_FILE, msg));
+    return new ReceivedFile(response.pickedFileContext);
+  },
+  /**
    * @return {!Promise<undefined>}
    */
-  async saveCopy(/** !mediaApp.AbstractFile */ abstractFile) {
-    /** @type {!SaveCopyMessage} */
-    const msg = {blob: abstractFile.blob, suggestedName: abstractFile.name};
-    await parentMessagePipe.sendMessage(Message.SAVE_COPY, msg);
+  async openFile() {
+    await parentMessagePipe.sendMessage(Message.OPEN_FILE);
+  },
+  /**
+   * @param {!Blob} file
+   * @return {!Promise<!File>}
+   */
+  async extractPreview(file) {
+    try {
+      const [buffer] = /** @type {!Array<!ArrayBuffer>} */ (
+          await Promise.all([file.arrayBuffer(), loadPiex()]));
+      return await extractFromRawImageBuffer(buffer);
+    } catch (/** @type {!Error} */ e) {
+      console.warn(e);
+      if (e.name === 'Error') {
+        e.name = 'JpegNotFound';
+      }
+      throw e;
+    }
   }
 };
 
@@ -248,6 +313,13 @@ function mutationCallback(mutationsList, observer) {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
+  // TODO(crbug/1138798): Reorder .js deps so this can be done at load time.
+  // Note: go/bbsrc/flags.ts processes this, `window.features` variable.
+  /** @type{{features: Object<string, boolean>}} */ (window).features = {
+    imageAnnotation: loadTimeData.getBoolean('imageAnnotation'),
+    flagsMenu: loadTimeData.getBoolean('flagsMenu'),
+  };
+
   const app = getApp();
   if (app) {
     initializeApp(app);
@@ -258,6 +330,12 @@ window.addEventListener('DOMContentLoaded', () => {
   const observer = new MutationObserver(mutationCallback);
   observer.observe(document.body, {childList: true});
 });
+
+// Ensure that if no files are loaded into the media app there is a default
+// empty file list available.
+window.customLaunchData = {
+  files: new ReceivedFileList({files: [], writableFileIndex: 0})
+};
 
 // Attempting to show file pickers in the sandboxed <iframe> is guaranteed to
 // result in a SecurityError: hide them.

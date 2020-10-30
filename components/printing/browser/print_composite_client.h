@@ -18,7 +18,10 @@
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "printing/buildflags/buildflags.h"
+
+#if BUILDFLAG(ENABLE_TAGGED_PDF)
 #include "ui/accessibility/ax_tree_update_forward.h"
+#endif
 
 namespace printing {
 
@@ -31,17 +34,16 @@ class PrintCompositeClient
       public content::WebContentsObserver {
  public:
   explicit PrintCompositeClient(content::WebContents* web_contents);
+  PrintCompositeClient(const PrintCompositeClient&) = delete;
+  PrintCompositeClient& operator=(const PrintCompositeClient&) = delete;
   ~PrintCompositeClient() override;
 
   // content::WebContentsObserver
-  bool OnMessageReceived(const IPC::Message& message,
-                         content::RenderFrameHost* render_frame_host) override;
   void RenderFrameDeleted(content::RenderFrameHost* render_frame_host) override;
 
-  // IPC message handler.
 #if BUILDFLAG(ENABLE_TAGGED_PDF)
-  void OnAccessibilityTree(int document_cookie,
-                           const ui::AXTreeUpdate& accessibility_tree);
+  void SetAccessibilityTree(int document_cookie,
+                            const ui::AXTreeUpdate& accessibility_tree);
 #endif
 
   // Instructs the specified subframe to print.
@@ -114,7 +116,8 @@ class PrintCompositeClient
       mojom::PrintCompositor::Status status,
       base::ReadOnlySharedMemoryRegion region);
 
-  void OnDidPrintFrameContent(content::RenderFrameHost* render_frame_host,
+  void OnDidPrintFrameContent(int render_process_id,
+                              int render_frame_id,
                               int document_cookie,
                               mojom::DidPrintContentParamsPtr params);
 
@@ -129,6 +132,9 @@ class PrintCompositeClient
 
   // Remove the existing composite request.
   void RemoveCompositeRequest(int cookie);
+
+  // Checks if the |document_cookie| is not 0 and matches |document_cookie_|.
+  bool IsDocumentCookieValid(int document_cookie) const;
 
   // Get the composite request of a document. |cookie| must be valid and equal
   // to |document_cookie_|.
@@ -173,8 +179,6 @@ class PrintCompositeClient
   base::WeakPtrFactory<PrintCompositeClient> weak_ptr_factory_{this};
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
-
-  DISALLOW_COPY_AND_ASSIGN(PrintCompositeClient);
 };
 
 }  // namespace printing

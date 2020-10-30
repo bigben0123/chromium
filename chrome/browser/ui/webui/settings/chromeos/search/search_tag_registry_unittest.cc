@@ -5,11 +5,12 @@
 #include "chrome/browser/ui/webui/settings/chromeos/search/search_tag_registry.h"
 
 #include "base/no_destructor.h"
-#include "chrome/browser/chromeos/local_search_service/index.h"
-#include "chrome/browser/chromeos/local_search_service/local_search_service.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/ui/webui/settings/chromeos/constants/routes.mojom.h"
 #include "chrome/browser/ui/webui/settings/chromeos/search/search_concept.h"
 #include "chrome/grit/generated_resources.h"
+#include "chromeos/components/local_search_service/index_sync.h"
+#include "chromeos/components/local_search_service/local_search_service_sync.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -68,22 +69,33 @@ class SearchTagRegistryTest : public testing::Test {
   // testing::Test:
   void SetUp() override {
     search_tag_registry_.AddObserver(&observer_);
-    index_ = local_search_service_.GetIndex(
-        local_search_service::IndexId::kCrosSettings);
+    index_ = local_search_service_.GetIndexSync(
+        local_search_service::IndexId::kCrosSettings,
+        local_search_service::Backend::kLinearMap, nullptr /* local_state */);
   }
 
   void TearDown() override { search_tag_registry_.RemoveObserver(&observer_); }
 
-  local_search_service::LocalSearchService local_search_service_;
+  local_search_service::LocalSearchServiceSync local_search_service_;
   SearchTagRegistry search_tag_registry_;
   FakeObserver observer_;
-  local_search_service::Index* index_;
+  local_search_service::IndexSync* index_;
 };
 
 TEST_F(SearchTagRegistryTest, AddAndRemove) {
   // Add search tags; size of the index should increase.
-  search_tag_registry_.AddSearchTags(GetPrintingSearchConcepts());
-  EXPECT_EQ(3u, index_->GetSize());
+  {
+    SearchTagRegistry::ScopedTagUpdater updater =
+        search_tag_registry_.StartUpdate();
+    updater.AddSearchTags(GetPrintingSearchConcepts());
+
+    // Nothing should have happened yet, since |updater| has not gone out of
+    // scope.
+    EXPECT_EQ(0u, index_->GetSizeSync());
+    EXPECT_EQ(0u, observer_.num_calls());
+  }
+  // Now that it went out of scope, the update should have occurred.
+  EXPECT_EQ(3u, index_->GetSizeSync());
   EXPECT_EQ(1u, observer_.num_calls());
 
   std::string first_tag_id =
@@ -96,8 +108,18 @@ TEST_F(SearchTagRegistryTest, AddAndRemove) {
   EXPECT_EQ(mojom::Setting::kAddPrinter, add_printer_concept->id.setting);
 
   // Remove search tag; size should go back to 0.
-  search_tag_registry_.RemoveSearchTags(GetPrintingSearchConcepts());
-  EXPECT_EQ(0u, index_->GetSize());
+  {
+    SearchTagRegistry::ScopedTagUpdater updater =
+        search_tag_registry_.StartUpdate();
+    updater.RemoveSearchTags(GetPrintingSearchConcepts());
+
+    // Tags should not have been removed yet, since |updater| has not gone out
+    // of scope.
+    EXPECT_EQ(3u, index_->GetSizeSync());
+    EXPECT_EQ(1u, observer_.num_calls());
+  }
+  // Now that it went out of scope, the update should have occurred.
+  EXPECT_EQ(0u, index_->GetSizeSync());
   EXPECT_EQ(2u, observer_.num_calls());
 
   // The tag should no longer be accessible via GetTagMetadata().

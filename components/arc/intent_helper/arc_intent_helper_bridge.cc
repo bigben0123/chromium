@@ -140,11 +140,7 @@ void ArcIntentHelperBridge::OnIconInvalidated(const std::string& package_name) {
 void ArcIntentHelperBridge::OnOpenDownloads() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   RecordOpenType(ArcIntentHelperOpenType::DOWNLOADS);
-  // TODO(607411): If the FileManager is not yet open this will open to
-  // downloads by default, which is what we want.  However if it is open it will
-  // simply be brought to the forgeground without forcibly being navigated to
-  // downloads, which is probably not ideal.
-  ash::NewWindowDelegate::GetInstance()->OpenFileManager();
+  ash::NewWindowDelegate::GetInstance()->OpenDownloadsFolder();
 }
 
 void ArcIntentHelperBridge::OnOpenUrl(const std::string& url) {
@@ -316,6 +312,11 @@ bool ArcIntentHelperBridge::ShouldChromeHandleUrl(const GURL& url) {
 
   // Didn't find any matches for Android so let Chrome handle it.
   return true;
+}
+
+void ArcIntentHelperBridge::SetAdaptiveIconDelegate(
+    AdaptiveIconDelegate* delegate) {
+  icon_loader_.SetAdaptiveIconDelegate(delegate);
 }
 
 void ArcIntentHelperBridge::AddObserver(ArcIntentHelperObserver* observer) {

@@ -25,6 +25,7 @@
 #include "ui/base/clipboard/clipboard_metrics.h"
 #include "ui/base/clipboard/clipboard_monitor.h"
 #include "ui/base/clipboard/custom_data_helper.h"
+#include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
 #include "ui/base/nine_image_painter_factory.h"
 #include "ui/base/x/selection_owner.h"
 #include "ui/base/x/selection_requestor.h"
@@ -36,7 +37,6 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/x/connection.h"
 #include "ui/gfx/x/event.h"
-#include "ui/gfx/x/x11.h"
 #include "ui/gfx/x/x11_atom_cache.h"
 #include "ui/gfx/x/xfixes.h"
 #include "ui/gfx/x/xproto.h"
@@ -270,8 +270,8 @@ ClipboardX11::X11Details::X11Details()
       primary_owner_(connection_, x_window_, x11::Atom::PRIMARY) {
   SetStringProperty(x_window_, x11::Atom::WM_NAME, x11::Atom::STRING,
                     "Chromium clipboard");
-  x_window_events_ =
-      std::make_unique<XScopedEventSelector>(x_window_, PropertyChangeMask);
+  x_window_events_ = std::make_unique<XScopedEventSelector>(
+      x_window_, x11::EventMask::PropertyChange);
 
   if (X11EventSource::GetInstance())
     X11EventSource::GetInstance()->AddXEventDispatcher(this);
@@ -461,8 +461,6 @@ bool ClipboardX11::X11Details::DispatchXEvent(x11::Event* xev) {
       clipboard_owner_.OnSelectionClear(*xev);
     }
   } else if (auto* prop = xev->As<x11::PropertyNotifyEvent>()) {
-    if (prop->window != x_window_)
-      return false;
     if (primary_owner_.CanDispatchPropertyEvent(*xev))
       primary_owner_.OnPropertyEvent(*xev);
     if (clipboard_owner_.CanDispatchPropertyEvent(*xev))
@@ -497,14 +495,18 @@ uint64_t ClipboardX11::GetSequenceNumber(ClipboardBuffer buffer) const {
     return SelectionChangeObserver::GetInstance()->primary_sequence_number();
 }
 
-bool ClipboardX11::IsFormatAvailable(const ClipboardFormatType& format,
-                                     ClipboardBuffer buffer) const {
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
+bool ClipboardX11::IsFormatAvailable(
+    const ClipboardFormatType& format,
+    ClipboardBuffer buffer,
+    const DataTransferEndpoint* data_dst) const {
   DCHECK(CalledOnValidThread());
   DCHECK(IsSupportedClipboardBuffer(buffer));
 
   TargetList target_list = x11_details_->WaitAndGetTargetsList(buffer);
-  if (format.Equals(ClipboardFormatType::GetPlainTextType()) ||
-      format.Equals(ClipboardFormatType::GetUrlType())) {
+  if (format == ClipboardFormatType::GetPlainTextType() ||
+      format == ClipboardFormatType::GetUrlType()) {
     return target_list.ContainsText();
   }
   return target_list.ContainsFormat(format);
@@ -516,8 +518,11 @@ void ClipboardX11::Clear(ClipboardBuffer buffer) {
   x11_details_->Clear(buffer);
 }
 
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
 void ClipboardX11::ReadAvailableTypes(
     ClipboardBuffer buffer,
+    const DataTransferEndpoint* data_dst,
     std::vector<base::string16>* types) const {
   DCHECK(CalledOnValidThread());
   DCHECK(types);
@@ -542,9 +547,12 @@ void ClipboardX11::ReadAvailableTypes(
     ReadCustomDataTypes(data.GetData(), data.GetSize(), types);
 }
 
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
 std::vector<base::string16>
 ClipboardX11::ReadAvailablePlatformSpecificFormatNames(
-    ClipboardBuffer buffer) const {
+    ClipboardBuffer buffer,
+    const DataTransferEndpoint* data_dst) const {
   DCHECK(CalledOnValidThread());
 
   // Copy target_list(), so that XGetAtomNames can get a non-const Atom*.
@@ -568,7 +576,10 @@ ClipboardX11::ReadAvailablePlatformSpecificFormatNames(
   return types;
 }
 
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
 void ClipboardX11::ReadText(ClipboardBuffer buffer,
+                            const DataTransferEndpoint* data_dst,
                             base::string16* result) const {
   DCHECK(CalledOnValidThread());
   RecordRead(ClipboardFormatMetric::kText);
@@ -581,7 +592,10 @@ void ClipboardX11::ReadText(ClipboardBuffer buffer,
   }
 }
 
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
 void ClipboardX11::ReadAsciiText(ClipboardBuffer buffer,
+                                 const DataTransferEndpoint* data_dst,
                                  std::string* result) const {
   DCHECK(CalledOnValidThread());
   RecordRead(ClipboardFormatMetric::kText);
@@ -594,7 +608,10 @@ void ClipboardX11::ReadAsciiText(ClipboardBuffer buffer,
 
 // TODO(estade): handle different charsets.
 // TODO(port): set *src_url.
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
 void ClipboardX11::ReadHTML(ClipboardBuffer buffer,
+                            const DataTransferEndpoint* data_dst,
                             base::string16* markup,
                             std::string* src_url,
                             uint32_t* fragment_start,
@@ -619,7 +636,29 @@ void ClipboardX11::ReadHTML(ClipboardBuffer buffer,
   }
 }
 
-void ClipboardX11::ReadRTF(ClipboardBuffer buffer, std::string* result) const {
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
+void ClipboardX11::ReadSvg(ClipboardBuffer buffer,
+                           const DataTransferEndpoint* data_dst,
+                           base::string16* result) const {
+  DCHECK(CalledOnValidThread());
+  RecordRead(ClipboardFormatMetric::kSvg);
+
+  SelectionData data(x11_details_->RequestAndWaitForTypes(
+      buffer,
+      x11_details_->GetAtomsForFormat(ClipboardFormatType::GetSvgType())));
+  if (data.IsValid()) {
+    std::string markup;
+    data.AssignTo(&markup);
+    *result = base::UTF8ToUTF16(markup);
+  }
+}
+
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
+void ClipboardX11::ReadRTF(ClipboardBuffer buffer,
+                           const DataTransferEndpoint* data_dst,
+                           std::string* result) const {
   DCHECK(CalledOnValidThread());
   RecordRead(ClipboardFormatMetric::kRtf);
 
@@ -630,15 +669,21 @@ void ClipboardX11::ReadRTF(ClipboardBuffer buffer, std::string* result) const {
     data.AssignTo(result);
 }
 
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
 void ClipboardX11::ReadImage(ClipboardBuffer buffer,
+                             const DataTransferEndpoint* data_dst,
                              ReadImageCallback callback) const {
   DCHECK(IsSupportedClipboardBuffer(buffer));
   RecordRead(ClipboardFormatMetric::kImage);
   std::move(callback).Run(ReadImageInternal(buffer));
 }
 
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
 void ClipboardX11::ReadCustomData(ClipboardBuffer buffer,
                                   const base::string16& type,
+                                  const DataTransferEndpoint* data_dst,
                                   base::string16* result) const {
   DCHECK(CalledOnValidThread());
   RecordRead(ClipboardFormatMetric::kCustomData);
@@ -650,13 +695,20 @@ void ClipboardX11::ReadCustomData(ClipboardBuffer buffer,
     ReadCustomDataForType(data.GetData(), data.GetSize(), type, result);
 }
 
-void ClipboardX11::ReadBookmark(base::string16* title, std::string* url) const {
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
+void ClipboardX11::ReadBookmark(const DataTransferEndpoint* data_dst,
+                                base::string16* title,
+                                std::string* url) const {
   DCHECK(CalledOnValidThread());
   // TODO(erg): This was left NOTIMPLEMENTED() in the gtk port too.
   NOTIMPLEMENTED();
 }
 
+// |data_dst| is not used. It's only passed to be consistent with other
+// platforms.
 void ClipboardX11::ReadData(const ClipboardFormatType& format,
+                            const DataTransferEndpoint* data_dst,
                             std::string* result) const {
   DCHECK(CalledOnValidThread());
   RecordRead(ClipboardFormatMetric::kData);
@@ -667,8 +719,18 @@ void ClipboardX11::ReadData(const ClipboardFormatType& format,
     data.AssignTo(result);
 }
 
-void ClipboardX11::WritePortableRepresentations(ClipboardBuffer buffer,
-                                                const ObjectMap& objects) {
+#if defined(USE_OZONE)
+bool ClipboardX11::IsSelectionBufferAvailable() const {
+  return true;
+}
+#endif  // defined(USE_OZONE)
+
+// |data_src| is not used. It's only passed to be consistent with other
+// platforms.
+void ClipboardX11::WritePortableRepresentations(
+    ClipboardBuffer buffer,
+    const ObjectMap& objects,
+    std::unique_ptr<DataTransferEndpoint> data_src) {
   DCHECK(CalledOnValidThread());
   DCHECK(IsSupportedClipboardBuffer(buffer));
 
@@ -692,9 +754,12 @@ void ClipboardX11::WritePortableRepresentations(ClipboardBuffer buffer,
   }
 }
 
+// |data_src| is not used. It's only passed to be consistent with other
+// platforms.
 void ClipboardX11::WritePlatformRepresentations(
     ClipboardBuffer buffer,
-    std::vector<Clipboard::PlatformRepresentation> platform_representations) {
+    std::vector<Clipboard::PlatformRepresentation> platform_representations,
+    std::unique_ptr<DataTransferEndpoint> data_src) {
   DCHECK(CalledOnValidThread());
   DCHECK(IsSupportedClipboardBuffer(buffer));
 
@@ -709,9 +774,9 @@ void ClipboardX11::WriteText(const char* text_data, size_t text_len) {
       base::RefCountedString::TakeString(&str));
 
   x11_details_->InsertMapping(kMimeTypeText, mem);
-  x11_details_->InsertMapping(kText, mem);
-  x11_details_->InsertMapping(kString, mem);
-  x11_details_->InsertMapping(kUtf8String, mem);
+  x11_details_->InsertMapping(kMimeTypeLinuxText, mem);
+  x11_details_->InsertMapping(kMimeTypeLinuxString, mem);
+  x11_details_->InsertMapping(kMimeTypeLinuxUtf8String, mem);
 }
 
 void ClipboardX11::WriteHTML(const char* markup_data,
@@ -730,6 +795,14 @@ void ClipboardX11::WriteHTML(const char* markup_data,
   scoped_refptr<base::RefCountedMemory> mem(
       base::RefCountedString::TakeString(&data));
   x11_details_->InsertMapping(kMimeTypeHTML, mem);
+}
+
+void ClipboardX11::WriteSvg(const char* markup_data, size_t markup_len) {
+  std::string str(markup_data, markup_len);
+  scoped_refptr<base::RefCountedMemory> mem(
+      base::RefCountedString::TakeString(&str));
+
+  x11_details_->InsertMapping(kMimeTypeSvg, mem);
 }
 
 void ClipboardX11::WriteRTF(const char* rtf_data, size_t data_len) {

@@ -70,6 +70,7 @@
 
 #if defined(USE_OZONE)
 #include "ui/base/ime/input_method.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/ozone/public/ozone_platform.h"
 #endif
 
@@ -404,10 +405,11 @@ void GtkUi::Initialize() {
   // instance instead of using GtkUi context factory. This step is made upon
   // CreateInputMethod call. If the factory is not set, use the GtkUi context
   // factory.
-  if (!ui::OzonePlatform::GetInstance()->CreateInputMethod(
+  if (!features::IsUsingOzonePlatform() ||
+      !ui::OzonePlatform::GetInstance()->CreateInputMethod(
           nullptr, gfx::kNullAcceleratedWidget)) {
-    DCHECK(!ui::LinuxInputMethodContextFactory::instance());
-    ui::LinuxInputMethodContextFactory::SetInstance(this);
+    if (!ui::LinuxInputMethodContextFactory::instance())
+      ui::LinuxInputMethodContextFactory::SetInstance(this);
   }
 #endif
 
@@ -518,7 +520,7 @@ base::TimeDelta GtkUi::GetCursorBlinkInterval() const {
 
   // Dividing GTK's cursor blink cycle time (in milliseconds) by this value
   // yields an appropriate value for
-  // blink::mojom::RendererPreferences::caret_blink_interval.
+  // blink::RendererPreferences::caret_blink_interval.
   static const double kGtkCursorBlinkCycleFactor = 2000.0;
 
   gint cursor_blink_time = kGtkDefaultCursorBlinkTime;

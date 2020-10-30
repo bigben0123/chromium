@@ -4,19 +4,41 @@
 
 #include "ui/gfx/x/connection.h"
 
-#include <X11/Xlib-xcb.h>
-#include <X11/Xlib.h>
+#include <dlfcn.h>
 #include <xcb/xcb.h>
+#include <xcb/xcbext.h>
 
 #include <algorithm>
 
+#include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/no_destructor.h"
+#include "base/strings/string16.h"
+#include "base/threading/thread_local.h"
 #include "ui/gfx/x/bigreq.h"
 #include "ui/gfx/x/event.h"
+#include "ui/gfx/x/keyboard_state.h"
+#include "ui/gfx/x/randr.h"
 #include "ui/gfx/x/x11_switches.h"
+#include "ui/gfx/x/xkb.h"
+#include "ui/gfx/x/xproto.h"
 #include "ui/gfx/x/xproto_internal.h"
 #include "ui/gfx/x/xproto_types.h"
+
+// Some Xlib features are temporarily declared here.
+// TODO(https://crbug.com/1066670): remove these.
+extern "C" {
+enum XEventQueueOwner { XlibOwnsEventQueue = 0, XCBOwnsEventQueue };
+
+int XInitThreads(void);
+struct _XDisplay* XOpenDisplay(const char*);
+int XCloseDisplay(struct _XDisplay*);
+int XFlush(struct _XDisplay*);
+struct xcb_connection_t* XGetXCBConnection(struct _XDisplay* dpy);
+void XSetEventQueueOwner(struct _XDisplay* dpy, enum XEventQueueOwner owner);
+int (*XSynchronize(struct _XDisplay*, int))(struct _XDisplay*);
+}
 
 namespace x11 {
 
@@ -43,23 +65,103 @@ auto CompareSequenceIds(T t, U u) {
   return static_cast<SignedType>(t0 - u0);
 }
 
-XDisplay* OpenNewXDisplay() {
+XDisplay* OpenNewXDisplay(const std::string& address) {
   if (!XInitThreads())
     return nullptr;
   std::string display_str =
-      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kX11Display);
+      address.empty()
+          ? base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+                switches::kX11Display)
+          : address;
   return XOpenDisplay(display_str.empty() ? nullptr : display_str.c_str());
 }
 
-}  // namespace
-
-Connection* Connection::Get() {
-  static Connection* instance = new Connection;
-  return instance;
+base::ThreadLocalOwnedPointer<Connection>& GetConnectionTLS() {
+  static base::NoDestructor<base::ThreadLocalOwnedPointer<Connection>> tls;
+  return *tls;
 }
 
-Connection::Connection() : XProto(this), display_(OpenNewXDisplay()) {
+void DefaultErrorHandler(const x11::Error* error, const char* request_name) {
+  LOG(WARNING) << "X error received.  Request: x11::" << request_name
+               << "Request, Error: " << error->ToString();
+}
+
+void DefaultIOErrorHandler() {
+  LOG(ERROR) << "X connection error received.";
+}
+
+NO_SANITIZE("cfi-icall")
+void XlibSetErrorHandler(int (*handler)(void*, void*)) {
+  using Handler = int (*)(void*, void*);
+  using SetErrorHandlerType = int (*)(Handler);
+  auto* x_set_error_handler = reinterpret_cast<SetErrorHandlerType>(
+      dlsym(RTLD_DEFAULT, "XSetErrorHandler"));
+  x_set_error_handler(handler);
+}
+
+int XlibErrorHandler(void*, void*) {
+  LOG(WARNING) << "Xlib error received";
+  return 0;
+}
+
+class UnknownError : public Error {
+ public:
+  explicit UnknownError(FutureBase::RawError error_bytes)
+      : error_bytes_(error_bytes) {}
+
+  ~UnknownError() override = default;
+
+  std::string ToString() const override {
+    std::stringstream ss;
+    ss << "x11::UnknownError{";
+    // Errors are always a fixed 32 bytes.
+    for (size_t i = 0; i < 32; i++) {
+      char buf[3];
+      sprintf(buf, "%02x", error_bytes_->data()[i]);
+      ss << "0x" << buf;
+      if (i != 31)
+        ss << ", ";
+    }
+    ss << "}";
+    return ss.str();
+  }
+
+ private:
+  FutureBase::RawError error_bytes_;
+};
+
+}  // namespace
+
+// static
+Connection* Connection::Get() {
+  auto& tls = GetConnectionTLS();
+  if (Connection* connection = tls.Get())
+    return connection;
+  auto connection = std::make_unique<Connection>();
+  auto* p_connection = connection.get();
+  tls.Set(std::move(connection));
+  return p_connection;
+}
+
+// static
+void Connection::Set(std::unique_ptr<x11::Connection> connection) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(connection->sequence_checker_);
+  auto& tls = GetConnectionTLS();
+  DCHECK(!tls.Get());
+  tls.Set(std::move(connection));
+}
+
+Connection::Connection(const std::string& address)
+    : XProto(this),
+      display_(OpenNewXDisplay(address)),
+      display_string_(address),
+      error_handler_(base::BindRepeating(DefaultErrorHandler)),
+      io_error_handler_(base::BindOnce(DefaultIOErrorHandler)) {
+  char* host = nullptr;
+  int display = 0;
+  xcb_parse_display(address.c_str(), &host, &display, &default_screen_id_);
+  if (host)
+    free(host);
   if (display_) {
     XSetEventQueueOwner(display_, XCBOwnsEventQueue);
 
@@ -67,16 +169,7 @@ Connection::Connection() : XProto(this), display_(OpenNewXDisplay()) {
         xcb_get_setup(XcbConnection())));
     setup_ = Read<Setup>(&buf);
     default_screen_ = &setup_.roots[DefaultScreenId()];
-    default_root_depth_ = &*std::find_if(
-        default_screen_->allowed_depths.begin(),
-        default_screen_->allowed_depths.end(), [&](const Depth& depth) {
-          return depth.depth == default_screen_->root_depth;
-        });
-    default_root_visual_ = &*std::find_if(
-        default_root_depth_->visuals.begin(),
-        default_root_depth_->visuals.end(), [&](const VisualType visual) {
-          return visual.visual_id == default_screen_->root_visual;
-        });
+    InitRootDepthAndVisual();
   } else {
     // Default-initialize the setup data so we always have something to return.
     setup_.roots.emplace_back();
@@ -90,17 +183,46 @@ Connection::Connection() : XProto(this), display_(OpenNewXDisplay()) {
   ExtensionManager::Init(this);
   if (auto response = bigreq().Enable({}).Sync())
     extended_max_request_length_ = response->maximum_request_length;
+
+  const Format* formats[256];
+  memset(formats, 0, sizeof(formats));
+  for (const auto& format : setup_.pixmap_formats)
+    formats[format.depth] = &format;
+
+  for (const auto& depth : default_screen().allowed_depths) {
+    const Format* format = formats[depth.depth];
+    for (const auto& visual : depth.visuals)
+      default_screen_visuals_[visual.visual_id] = VisualInfo{format, &visual};
+  }
+
+  keyboard_state_ = CreateKeyboardState(this);
+
+  InitErrorParsers();
+
+  // The default Xlib error handler calls exit(1), which we don't want.  This
+  // shouldn't happen in the browser process since only XProto requests are
+  // made, but in the GPU process, GLX can make Xlib requests, so setting an
+  // error handler is necessary.  Importantly, there's also an IO error handler,
+  // and Xlib always calls exit(1) with no way to change this behavior.
+  XlibSetErrorHandler(XlibErrorHandler);
 }
 
 Connection::~Connection() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  platform_event_source.reset();
   if (display_)
     XCloseDisplay(display_);
 }
 
 xcb_connection_t* Connection::XcbConnection() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (!display())
     return nullptr;
-  return XGetXCBConnection(display());
+  auto* xcb_connection = XGetXCBConnection(display());
+  if (io_error_handler_ && xcb_connection_has_error(xcb_connection))
+    std::move(io_error_handler_).Run();
+  return xcb_connection;
 }
 
 Connection::Request::Request(unsigned int sequence,
@@ -108,62 +230,147 @@ Connection::Request::Request(unsigned int sequence,
     : sequence(sequence), callback(std::move(callback)) {}
 
 Connection::Request::Request(Request&& other)
-    : sequence(other.sequence), callback(std::move(other.callback)) {}
+    : sequence(other.sequence),
+      callback(std::move(other.callback)),
+      have_response(other.have_response),
+      reply(std::move(other.reply)),
+      error(std::move(other.error)) {}
 
 Connection::Request::~Request() = default;
 
-bool Connection::HasNextResponse() const {
-  return !requests_.empty() &&
-         CompareSequenceIds(XLastKnownRequestProcessed(display_),
-                            requests_.front().sequence) >= 0;
+bool Connection::HasNextResponse() {
+  if (requests_.empty())
+    return false;
+  auto& request = requests_.front();
+  if (request.have_response)
+    return true;
+
+  void* reply = nullptr;
+  xcb_generic_error_t* error = nullptr;
+  request.have_response =
+      xcb_poll_for_reply(XcbConnection(), request.sequence, &reply, &error);
+  if (reply)
+    request.reply = base::MakeRefCounted<MallocedRefCountedMemory>(reply);
+  if (error)
+    request.error = base::MakeRefCounted<MallocedRefCountedMemory>(error);
+  return request.have_response;
+}
+
+int Connection::GetFd() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return Ready() ? xcb_get_file_descriptor(XcbConnection()) : -1;
+}
+
+const std::string& Connection::DisplayString() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return display_string_;
 }
 
 int Connection::DefaultScreenId() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   // This is not part of the setup data as the server has no concept of a
   // default screen. Instead, it's part of the display name. Eg in
   // "localhost:0.0", the screen ID is the second "0".
-  return DefaultScreen(display_);
+  return default_screen_id_;
 }
 
 bool Connection::Ready() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return display_ && !xcb_connection_has_error(XGetXCBConnection(display_));
 }
 
 void Connection::Flush() {
-  XFlush(display_);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (display_)
+    XFlush(display_);
 }
 
 void Connection::Sync() {
-  GetInputFocus({}).Sync();
-}
-
-void Connection::ReadResponses() {
-  while (auto* event = xcb_poll_for_event(XcbConnection())) {
-    events_.emplace_back(base::MakeRefCounted<MallocedRefCountedMemory>(event),
-                         this);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (syncing_)
+    return;
+  {
+    base::AutoReset<bool> auto_reset(&syncing_, true);
+    GetInputFocus({}).Sync();
   }
 }
 
-bool Connection::HasPendingResponses() const {
+void Connection::SynchronizeForTest(bool synchronous) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  XSynchronize(display(), synchronous);
+  synchronous_ = synchronous;
+  if (synchronous_)
+    Sync();
+}
+
+void Connection::ReadResponses() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  while (auto* event = xcb_poll_for_event(XcbConnection())) {
+    events_.emplace_back(base::MakeRefCounted<MallocedRefCountedMemory>(event),
+                         this, true);
+  }
+}
+
+Event Connection::WaitForNextEvent() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (!events_.empty()) {
+    Event event = std::move(events_.front());
+    events_.pop_front();
+    return event;
+  }
+  if (auto* xcb_event = xcb_wait_for_event(XcbConnection())) {
+    return Event(base::MakeRefCounted<MallocedRefCountedMemory>(xcb_event),
+                 this, true);
+  }
+  return Event();
+}
+
+bool Connection::HasPendingResponses() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return !events_.empty() || HasNextResponse();
 }
 
+const Connection::VisualInfo* Connection::GetVisualInfoFromId(
+    VisualId id) const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  auto it = default_screen_visuals_.find(id);
+  if (it != default_screen_visuals_.end())
+    return &it->second;
+  return nullptr;
+}
+
+KeyCode Connection::KeysymToKeycode(uint32_t keysym) const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return keyboard_state_->KeysymToKeycode(keysym);
+}
+
+uint32_t Connection::KeycodeToKeysym(KeyCode keycode,
+                                     uint32_t modifiers) const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return keyboard_state_->KeycodeToKeysym(keycode, modifiers);
+}
+
+std::unique_ptr<Connection> Connection::Clone() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return std::make_unique<Connection>(display_string_);
+}
+
+void Connection::DetachFromSequence() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DETACH_FROM_SEQUENCE(sequence_checker_);
+}
+
 void Connection::Dispatch(Delegate* delegate) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(display_);
 
   auto process_next_response = [&] {
-    xcb_connection_t* connection = XGetXCBConnection(display_);
-    auto request = std::move(requests_.front());
+    DCHECK(!requests_.empty());
+    DCHECK(requests_.front().have_response);
+
+    Request request = std::move(requests_.front());
     requests_.pop();
-
-    void* raw_reply = nullptr;
-    xcb_generic_error_t* raw_error = nullptr;
-    xcb_poll_for_reply(connection, request.sequence, &raw_reply, &raw_error);
-
-    scoped_refptr<MallocedRefCountedMemory> reply;
-    if (raw_reply)
-      reply = base::MakeRefCounted<MallocedRefCountedMemory>(raw_reply);
-    std::move(request.callback).Run(reply, FutureBase::RawError{raw_error});
+    std::move(request.callback).Run(request.reply, request.error);
   };
 
   auto process_next_event = [&] {
@@ -171,6 +378,7 @@ void Connection::Dispatch(Delegate* delegate) {
 
     Event event = std::move(events_.front());
     events_.pop_front();
+    PreDispatchEvent(event);
     delegate->DispatchXEvent(&event);
   };
 
@@ -205,12 +413,104 @@ void Connection::Dispatch(Delegate* delegate) {
   }
 }
 
+Connection::ErrorHandler Connection::SetErrorHandler(ErrorHandler new_handler) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  return std::exchange(error_handler_, new_handler);
+}
+
+void Connection::SetIOErrorHandler(IOErrorHandler new_handler) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  io_error_handler_ = std::move(new_handler);
+}
+
+void Connection::InitRootDepthAndVisual() {
+  for (auto& depth : default_screen_->allowed_depths) {
+    for (auto& visual : depth.visuals) {
+      if (visual.visual_id == default_screen_->root_visual) {
+        default_root_depth_ = &depth;
+        default_root_visual_ = &visual;
+        return;
+      }
+    }
+  }
+  NOTREACHED();
+}
+
 void Connection::AddRequest(unsigned int sequence,
                             FutureBase::ResponseCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(requests_.empty() ||
          CompareSequenceIds(requests_.back().sequence, sequence) < 0);
 
   requests_.emplace(sequence, std::move(callback));
+}
+
+void Connection::PreDispatchEvent(const Event& event) {
+  if (auto* mapping = event.As<MappingNotifyEvent>()) {
+    if (mapping->request == Mapping::Modifier ||
+        mapping->request == Mapping::Keyboard) {
+      setup_.min_keycode = mapping->first_keycode;
+      setup_.max_keycode = static_cast<x11::KeyCode>(
+          static_cast<int>(mapping->first_keycode) + mapping->count - 1);
+      keyboard_state_->UpdateMapping();
+    }
+  }
+  if (auto* notify = event.As<x11::Xkb::NewKeyboardNotifyEvent>()) {
+    setup_.min_keycode = notify->minKeyCode;
+    setup_.max_keycode = notify->maxKeyCode;
+    keyboard_state_->UpdateMapping();
+  }
+
+  // This is adapted from XRRUpdateConfiguration.
+  if (auto* configure = event.As<ConfigureNotifyEvent>()) {
+    int index = ScreenIndexFromRootWindow(configure->window);
+    if (index != -1) {
+      setup_.roots[index].width_in_pixels = configure->width;
+      setup_.roots[index].height_in_pixels = configure->height;
+    }
+  } else if (auto* screen = event.As<RandR::ScreenChangeNotifyEvent>()) {
+    int index = ScreenIndexFromRootWindow(screen->root);
+    DCHECK_GE(index, 0);
+    bool portrait =
+        static_cast<bool>(screen->rotation & (RandR::Rotation::Rotate_90 |
+                                              RandR::Rotation::Rotate_270));
+    if (portrait) {
+      setup_.roots[index].width_in_pixels = screen->height;
+      setup_.roots[index].height_in_pixels = screen->width;
+      setup_.roots[index].width_in_millimeters = screen->mheight;
+      setup_.roots[index].height_in_millimeters = screen->mwidth;
+    } else {
+      setup_.roots[index].width_in_pixels = screen->width;
+      setup_.roots[index].height_in_pixels = screen->height;
+      setup_.roots[index].width_in_millimeters = screen->mwidth;
+      setup_.roots[index].height_in_millimeters = screen->mheight;
+    }
+  }
+}
+
+int Connection::ScreenIndexFromRootWindow(Window root) const {
+  for (size_t i = 0; i < setup_.roots.size(); i++) {
+    if (setup_.roots[i].root == root)
+      return i;
+  }
+  return -1;
+}
+
+std::unique_ptr<Error> Connection::ParseError(
+    FutureBase::RawError error_bytes) {
+  if (!error_bytes)
+    return nullptr;
+  struct ErrorHeader {
+    uint8_t response_type;
+    uint8_t error_code;
+    uint16_t sequence;
+  };
+  auto error_code = error_bytes->front_as<ErrorHeader>()->error_code;
+  if (auto parser = error_parsers_[error_code])
+    return parser(error_bytes);
+  return std::make_unique<UnknownError>(error_bytes);
 }
 
 }  // namespace x11

@@ -42,9 +42,21 @@ std::string GetPerfettoProducerName() {
   return base::StrCat({mojom::kPerfettoProducerNamePrefix, "123"});
 }
 
+RebindableTaskRunner* GetPerfettoTaskRunner() {
+  static base::NoDestructor<RebindableTaskRunner> task_runner;
+  return task_runner.get();
+}
+
 class PerfettoIntegrationTest : public testing::Test {
  public:
   void SetUp() override {
+    auto* perfetto_task_runner = GetPerfettoTaskRunner();
+    auto* perfetto_platform =
+        PerfettoTracedProcess::Get()->perfetto_platform_for_testing();
+    if (!perfetto_platform->did_start_task_runner())
+      perfetto_platform->StartTaskRunner(perfetto_task_runner);
+    perfetto_task_runner->set_task_runner(base::ThreadTaskRunnerHandle::Get());
+
     PerfettoTracedProcess::ResetTaskRunnerForTesting();
     PerfettoTracedProcess::Get()->ClearDataSourcesForTesting();
     data_source_ = TestDataSource::CreateAndRegisterDataSource(
@@ -387,9 +399,11 @@ TEST_F(PerfettoIntegrationTest, PerfettoPlatformTest) {
 
 TEST_F(PerfettoIntegrationTest, PerfettoClientLibraryTest) {
   PerfettoTracedProcess::Get()->SetupClientLibrary();
-  // Create a dummy tracing session without any active backends to check that
+  // Create a dummy tracing session without a real backend to check that
   // the client library was initialized.
-  auto tracing_session = perfetto::Tracing::NewTrace();
+  constexpr perfetto::BackendType kInvalidBackend(
+      static_cast<perfetto::BackendType>(1u << 31));
+  auto tracing_session = perfetto::Tracing::NewTrace(kInvalidBackend);
   EXPECT_TRUE(tracing_session);
 }
 

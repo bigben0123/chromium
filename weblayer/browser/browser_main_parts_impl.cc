@@ -6,7 +6,7 @@
 
 #include "base/base_switches.h"
 #include "base/bind.h"
-#include "base/message_loop/message_loop_current.h"
+#include "base/task/current_thread.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
@@ -19,14 +19,17 @@
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/main_function_params.h"
+#include "content/public/common/page_visibility_state.h"
+#include "content/public/common/result_codes.h"
 #include "content/public/common/url_constants.h"
-#include "services/service_manager/embedder/result_codes.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "weblayer/browser/browser_process.h"
 #include "weblayer/browser/cookie_settings_factory.h"
 #include "weblayer/browser/feature_list_creator.h"
 #include "weblayer/browser/host_content_settings_map_factory.h"
 #include "weblayer/browser/i18n_util.h"
+#include "weblayer/browser/no_state_prefetch/prerender_link_manager_factory.h"
+#include "weblayer/browser/no_state_prefetch/prerender_manager_factory.h"
 #include "weblayer/browser/permissions/weblayer_permissions_client.h"
 #include "weblayer/browser/stateful_ssl_host_state_delegate_factory.h"
 #include "weblayer/browser/translate_accept_languages_factory.h"
@@ -47,13 +50,14 @@
 #include "net/base/network_change_notifier.h"
 #include "weblayer/browser/android/metrics/uma_utils.h"
 #include "weblayer/browser/java/jni/MojoInterfaceRegistrar_jni.h"
+#include "weblayer/browser/media/local_presentation_manager_factory.h"
+#include "weblayer/browser/media/media_router_factory.h"
 #include "weblayer/browser/weblayer_factory_impl_android.h"
+#include "weblayer/common/features.h"
 #endif
 
-#if defined(USE_X11)
-#include "ui/base/x/x11_util.h"  // nogncheck
-#endif
 #if defined(USE_AURA) && defined(USE_X11)
+#include "ui/base/ui_base_features.h"
 #include "ui/events/devices/x11/touch_factory_x11.h"  // nogncheck
 #endif
 #if !defined(OS_CHROMEOS) && defined(USE_AURA) && defined(OS_LINUX)
@@ -80,6 +84,14 @@ void EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   CookieSettingsFactory::GetInstance();
   TranslateAcceptLanguagesFactory::GetInstance();
   TranslateRankerFactory::GetInstance();
+  PrerenderLinkManagerFactory::GetInstance();
+  PrerenderManagerFactory::GetInstance();
+#if defined(OS_ANDROID)
+  if (MediaRouterFactory::IsFeatureEnabled()) {
+    LocalPresentationManagerFactory::GetInstance();
+    MediaRouterFactory::GetInstance();
+  }
+#endif
 }
 
 void StopMessageLoop(base::OnceClosure quit_closure) {
@@ -125,22 +137,20 @@ int BrowserMainPartsImpl::PreCreateThreads() {
   }
 #endif
 
-  return service_manager::RESULT_CODE_NORMAL_EXIT;
+  return content::RESULT_CODE_NORMAL_EXIT;
 }
 
 void BrowserMainPartsImpl::PreMainMessageLoopStart() {
 #if defined(USE_AURA) && defined(USE_X11)
-  ui::TouchFactory::SetTouchDeviceListFromCommandLine();
+  if (!features::IsUsingOzonePlatform())
+    ui::TouchFactory::SetTouchDeviceListFromCommandLine();
 #endif
 }
 
 int BrowserMainPartsImpl::PreEarlyInitialization() {
   browser_process_ = std::make_unique<BrowserProcess>(std::move(local_state_));
 
-#if defined(USE_X11)
-  ui::SetDefaultX11ErrorHandlers();
-#endif
-#if defined(USE_AURA) && defined(OS_LINUX)
+#if defined(USE_AURA) && (defined(OS_LINUX) || defined(OS_CHROMEOS))
   ui::InitializeInputMethodForTesting();
 #endif
 #if defined(OS_ANDROID)
@@ -154,7 +164,7 @@ int BrowserMainPartsImpl::PreEarlyInitialization() {
       BrowserProcess::GetInstance()->GetSharedURLLoaderFactory());
   download_manager->set_application_locale(i18n::GetApplicationLocale());
 
-  return service_manager::RESULT_CODE_NORMAL_EXIT;
+  return content::RESULT_CODE_NORMAL_EXIT;
 }
 
 void BrowserMainPartsImpl::PreMainMessageLoopRun() {

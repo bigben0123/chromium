@@ -37,6 +37,7 @@ class CONTENT_EXPORT WebUIDataSourceImpl : public URLDataSourceImpl,
       const base::DictionaryValue& localized_strings) override;
   void AddBoolean(base::StringPiece name, bool value) override;
   void AddInteger(base::StringPiece name, int32_t value) override;
+  void AddDouble(base::StringPiece name, double value) override;
   void UseStringsJs() override;
   void AddResourcePath(base::StringPiece path, int resource_id) override;
   void SetDefaultResource(int resource_id) override;
@@ -48,6 +49,7 @@ class CONTENT_EXPORT WebUIDataSourceImpl : public URLDataSourceImpl,
   void DisableContentSecurityPolicy() override;
   void OverrideContentSecurityPolicy(network::mojom::CSPDirectiveName directive,
                                      const std::string& value) override;
+  void DisableTrustedTypesCSP() override;
   void DisableDenyXFrameOptions() override;
   void EnableReplaceI18nInJS() override;
   std::string GetSource() override;

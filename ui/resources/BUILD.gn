@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/jumbo.gni")
 import("//tools/grit/grit_rule.gni")
 import("//tools/grit/repack.gni")
 import("//ui/webui/webui_features.gni")
@@ -13,6 +12,9 @@ group("resources") {
     ":ui_unscaled_resources_grd",
     ":webui_resources_grd",
   ]
+  if (!is_android && !is_ios) {
+    public_deps += [ ":webui_generated_resources_grd" ]
+  }
 }
 
 grit("ui_resources_grd") {
@@ -41,7 +43,7 @@ grit("webui_resources_grd") {
 
   deps = [ "//ui/webui/resources:modulize" ]
   if (is_chromeos) {
-    deps += [ "//ui/webui/resources/css:cros_colors_css" ]
+    deps += [ "//ui/chromeos/colors:cros_colors_css" ]
   }
 
   outputs = [
@@ -56,6 +58,29 @@ grit("webui_resources_grd") {
   ]
 }
 
+if (!is_android && !is_ios) {
+  grit("webui_generated_resources_grd") {
+    enable_input_discovery_for_gn_analyze = false
+    defines = [ "SHARED_INTERMEDIATE_DIR=" +
+                rebase_path(root_gen_dir, root_build_dir) ]
+    source = "$root_gen_dir/ui/webui/resources/webui_generated_resources.grd"
+    deps = [ "//ui/webui/resources:build_grd" ]
+
+    outputs = [
+      "grit/webui_generated_resources.h",
+      "grit/webui_generated_resources_map.cc",
+      "grit/webui_generated_resources_map.h",
+      "webui_generated_resources.pak",
+    ]
+    grit_flags = [
+      "-E",
+      "root_gen_dir=" + rebase_path(root_gen_dir, root_build_dir),
+      "-E",
+      "root_src_dir=" + rebase_path("//", root_build_dir),
+    ]
+  }
+}
+
 if (!is_mac) {
   copy("copy_ui_resources_100_percent") {
     sources = [ "$root_gen_dir/ui/resources/ui_resources_100_percent.pak" ]
@@ -66,7 +91,7 @@ if (!is_mac) {
 
 # On iOS and Mac the string resources need to go into a locale subfolder, which
 # introduces an extra dependency.
-if (is_ios || is_mac) {
+if (is_apple) {
   group("ui_test_pak") {
     public_deps = [
       ":repack_ui_test_mac_locale_pack",
@@ -148,6 +173,10 @@ repack("repack_ui_test_pak_100_percent") {
       "$root_gen_dir/ui/chromeos/resources/ui_chromeos_resources_100_percent.pak",
       "$root_gen_dir/ui/chromeos/strings/ui_chromeos_strings_en-US.pak",
     ]
+  }
+
+  if (!is_android && !is_ios) {
+    sources += [ "$root_gen_dir/ui/resources/webui_generated_resources.pak" ]
   }
 
   output = "$root_out_dir/ui_test.pak"

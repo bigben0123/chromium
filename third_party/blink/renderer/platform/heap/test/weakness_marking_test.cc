@@ -208,20 +208,8 @@ TEST_F(WeaknessMarkingTest, SwapIntoAlreadyProcessedWeakSet) {
   // weakness callbacks. This is important as another backing may be swapped in
   // at some point after marking it initially.
   using WeakLinkedSet = HeapLinkedHashSet<WeakMember<IntegerObject>>;
-  Persistent<WeakLinkedSet> holder1(MakeGarbageCollected<WeakLinkedSet>());
-  Persistent<WeakLinkedSet> holder2(MakeGarbageCollected<WeakLinkedSet>());
-  holder1->insert(MakeGarbageCollected<IntegerObject>(1));
-  IncrementalMarkingTestDriver driver(ThreadState::Current());
-  driver.Start();
-  driver.FinishSteps();
-  holder1->Swap(*holder2.Get());
-  driver.FinishGC();
-
-  using NewWeakLinkedSet = HeapNewLinkedHashSet<WeakMember<IntegerObject>>;
-  Persistent<NewWeakLinkedSet> holder3(
-      MakeGarbageCollected<NewWeakLinkedSet>());
-  Persistent<NewWeakLinkedSet> holder4(
-      MakeGarbageCollected<NewWeakLinkedSet>());
+  Persistent<WeakLinkedSet> holder3(MakeGarbageCollected<WeakLinkedSet>());
+  Persistent<WeakLinkedSet> holder4(MakeGarbageCollected<WeakLinkedSet>());
   holder3->insert(MakeGarbageCollected<IntegerObject>(1));
   IncrementalMarkingTestDriver driver2(ThreadState::Current());
   driver2.Start();
@@ -253,6 +241,22 @@ TEST_F(WeaknessMarkingTest, ClearWeakHashTableAfterMarking) {
   driver.FinishSteps();
   holder->clear();
   driver.FinishGC();
+}
+
+TEST_F(WeaknessMarkingTest, StrongifyBackingOnStack) {
+  // Test eunsures that conservative GC strongifies the backing store of
+  // on-stack HeapLinkedHashSet.
+  using WeakSet = HeapLinkedHashSet<WeakMember<IntegerObject>>;
+  using StrongSet = HeapLinkedHashSet<Member<IntegerObject>>;
+  WeakSet weak_set_on_stack;
+  weak_set_on_stack.insert(MakeGarbageCollected<IntegerObject>(1));
+  StrongSet strong_set_on_stack;
+  strong_set_on_stack.insert(MakeGarbageCollected<IntegerObject>(1));
+  TestSupportingGC::ConservativelyCollectGarbage();
+  EXPECT_EQ(1u, weak_set_on_stack.size());
+  EXPECT_EQ(1u, strong_set_on_stack.size());
+  EXPECT_EQ(1, weak_set_on_stack.begin()->Get()->Value());
+  EXPECT_EQ(1, strong_set_on_stack.begin()->Get()->Value());
 }
 
 }  // namespace weakness_marking_test

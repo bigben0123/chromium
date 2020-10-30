@@ -11,18 +11,13 @@
 #include "base/bind.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/observer_list.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "components/sync/engine/commit_queue.h"
 #include "components/sync/engine/data_type_activation_response.h"
 #include "components/sync/engine/model_type_processor.h"
-#include "components/sync/engine_impl/cycle/non_blocking_type_debug_info_emitter.h"
 #include "components/sync/engine_impl/model_type_worker.h"
 #include "components/sync/nigori/cryptographer.h"
 #include "components/sync/nigori/keystore_keys_handler.h"
-#include "components/sync/syncable/directory.h"
-#include "components/sync/syncable/read_transaction.h"
-#include "components/sync/syncable/syncable_base_transaction.h"
 
 namespace syncer {
 
@@ -55,25 +50,16 @@ void CommitQueueProxy::NudgeForCommit() {
 
 }  // namespace
 
-ModelTypeRegistry::ModelTypeRegistry(
-    const std::vector<scoped_refptr<ModelSafeWorker>>& workers,
-    UserShare* user_share,
-    NudgeHandler* nudge_handler,
-    CancelationSignal* cancelation_signal,
-    KeystoreKeysHandler* keystore_keys_handler)
-    : user_share_(user_share),
-      nudge_handler_(nudge_handler),
+ModelTypeRegistry::ModelTypeRegistry(NudgeHandler* nudge_handler,
+                                     CancelationSignal* cancelation_signal,
+                                     KeystoreKeysHandler* keystore_keys_handler)
+    : nudge_handler_(nudge_handler),
       cancelation_signal_(cancelation_signal),
-      keystore_keys_handler_(keystore_keys_handler) {
-  for (size_t i = 0u; i < workers.size(); ++i) {
-    workers_map_.insert(
-        std::make_pair(workers[i]->GetModelSafeGroup(), workers[i]));
-  }
-}
+      keystore_keys_handler_(keystore_keys_handler) {}
 
 ModelTypeRegistry::~ModelTypeRegistry() = default;
 
-void ModelTypeRegistry::ConnectNonBlockingType(
+void ModelTypeRegistry::ConnectDataType(
     ModelType type,
     std::unique_ptr<DataTypeActivationResponse> activation_response) {
   DCHECK(!IsProxyType(type));
@@ -89,23 +75,13 @@ void ModelTypeRegistry::ConnectNonBlockingType(
   if (encrypted_types_.Has(type))
     cryptographer_copy = cryptographer_->Clone();
 
-  DataTypeDebugInfoEmitter* emitter = GetEmitter(type);
-  if (emitter == nullptr) {
-    auto new_emitter = std::make_unique<NonBlockingTypeDebugInfoEmitter>(
-        type, &type_debug_info_observers_);
-    emitter = new_emitter.get();
-    data_type_debug_info_emitter_map_.insert(
-        std::make_pair(type, std::move(new_emitter)));
-  }
-
   bool initial_sync_done =
       activation_response->model_type_state.initial_sync_done();
   auto worker = std::make_unique<ModelTypeWorker>(
       type, activation_response->model_type_state,
       /*trigger_initial_sync=*/!initial_sync_done,
       std::move(cryptographer_copy), passphrase_type_, nudge_handler_,
-      std::move(activation_response->type_processor), emitter,
-      cancelation_signal_);
+      std::move(activation_response->type_processor), cancelation_signal_);
 
   // Save a raw pointer and add the worker to our structures.
   ModelTypeWorker* worker_ptr = worker.get();
@@ -116,19 +92,9 @@ void ModelTypeRegistry::ConnectNonBlockingType(
   // Initialize Processor -> Worker communication channel.
   type_processor->ConnectSync(std::make_unique<CommitQueueProxy>(
       worker_ptr->AsWeakPtr(), base::SequencedTaskRunnerHandle::Get()));
-
-  // If there is still data for this type left in the directory, purge it now.
-  // TODO(crbug.com/1084499): The purge should be safe to do even if the initial
-  // USS sync has already happened, and also for NIGORI.
-  if (!initial_sync_done && directory()->InitialSyncEndedForType(type) &&
-      type != NIGORI) {
-    directory()->PurgeEntriesWithTypeIn(/*disabled_types=*/ModelTypeSet(type),
-                                        /*types_to_journal=*/ModelTypeSet(),
-                                        /*types_to_unapply=*/ModelTypeSet());
-  }
 }
 
-void ModelTypeRegistry::DisconnectNonBlockingType(ModelType type) {
+void ModelTypeRegistry::DisconnectDataType(ModelType type) {
   DVLOG(1) << "Disabling an off-thread sync type: " << ModelTypeToString(type);
 
   DCHECK(!IsProxyType(type));
@@ -162,7 +128,7 @@ void ModelTypeRegistry::DisconnectProxyType(ModelType type) {
 }
 
 ModelTypeSet ModelTypeRegistry::GetEnabledTypes() const {
-  return Union(GetEnabledNonBlockingTypes(), enabled_proxy_types_);
+  return Union(GetEnabledDataTypes(), enabled_proxy_types_);
 }
 
 ModelTypeSet ModelTypeRegistry::GetInitialSyncEndedTypes() const {
@@ -172,6 +138,14 @@ ModelTypeSet ModelTypeRegistry::GetInitialSyncEndedTypes() const {
       result.Put(kv.first);
   }
   return result;
+}
+
+ModelTypeSet ModelTypeRegistry::GetEnabledDataTypes() const {
+  ModelTypeSet enabled_types;
+  for (const auto& worker : model_type_workers_) {
+    enabled_types.Put(worker->GetModelType());
+  }
+  return enabled_types;
 }
 
 const UpdateHandler* ModelTypeRegistry::GetUpdateHandler(ModelType type) const {
@@ -191,32 +165,6 @@ KeystoreKeysHandler* ModelTypeRegistry::keystore_keys_handler() {
   return keystore_keys_handler_;
 }
 
-void ModelTypeRegistry::RegisterDirectoryTypeDebugInfoObserver(
-    TypeDebugInfoObserver* observer) {
-  if (!type_debug_info_observers_.HasObserver(observer))
-    type_debug_info_observers_.AddObserver(observer);
-}
-
-void ModelTypeRegistry::UnregisterDirectoryTypeDebugInfoObserver(
-    TypeDebugInfoObserver* observer) {
-  type_debug_info_observers_.RemoveObserver(observer);
-}
-
-bool ModelTypeRegistry::HasDirectoryTypeDebugInfoObserver(
-    const TypeDebugInfoObserver* observer) const {
-  return type_debug_info_observers_.HasObserver(observer);
-}
-
-void ModelTypeRegistry::RequestEmitDebugInfo() {
-  for (const auto& kv : data_type_debug_info_emitter_map_) {
-    kv.second->EmitCommitCountersUpdate();
-    kv.second->EmitUpdateCountersUpdate();
-    // Although this breaks encapsulation, don't emit status counters here.
-    // They've already been asked for manually on the UI thread because USS
-    // emitters don't have a working implementation yet.
-  }
-}
-
 bool ModelTypeRegistry::HasUnsyncedItems() const {
   // For model type workers, we ask them individually.
   for (const auto& worker : model_type_workers_) {
@@ -225,9 +173,7 @@ bool ModelTypeRegistry::HasUnsyncedItems() const {
     }
   }
 
-  // Verify directory state.
-  ReadTransaction trans(FROM_HERE, user_share_);
-  return trans.GetWrappedTrans()->directory()->unsynced_entity_count() != 0;
+  return false;
 }
 
 base::WeakPtr<ModelTypeConnector> ModelTypeRegistry::AsWeakPtr() {
@@ -235,7 +181,6 @@ base::WeakPtr<ModelTypeConnector> ModelTypeRegistry::AsWeakPtr() {
 }
 
 void ModelTypeRegistry::OnPassphraseRequired(
-    PassphraseRequiredReason reason,
     const KeyDerivationParams& key_derivation_params,
     const sync_pb::EncryptedData& pending_keys) {}
 
@@ -272,8 +217,6 @@ void ModelTypeRegistry::OnEncryptedTypesChanged(ModelTypeSet encrypted_types,
   OnEncryptionStateChanged();
 }
 
-void ModelTypeRegistry::OnEncryptionComplete() {}
-
 void ModelTypeRegistry::OnCryptographerStateChanged(
     Cryptographer* cryptographer,
     bool has_pending_keys) {
@@ -297,23 +240,6 @@ void ModelTypeRegistry::OnEncryptionStateChanged() {
       worker->UpdateCryptographer(cryptographer_->Clone());
     }
   }
-}
-
-DataTypeDebugInfoEmitter* ModelTypeRegistry::GetEmitter(ModelType type) {
-  DataTypeDebugInfoEmitter* raw_emitter = nullptr;
-  auto it = data_type_debug_info_emitter_map_.find(type);
-  if (it != data_type_debug_info_emitter_map_.end()) {
-    raw_emitter = it->second.get();
-  }
-  return raw_emitter;
-}
-
-ModelTypeSet ModelTypeRegistry::GetEnabledNonBlockingTypes() const {
-  ModelTypeSet enabled_non_blocking_types;
-  for (const auto& worker : model_type_workers_) {
-    enabled_non_blocking_types.Put(worker->GetModelType());
-  }
-  return enabled_non_blocking_types;
 }
 
 }  // namespace syncer

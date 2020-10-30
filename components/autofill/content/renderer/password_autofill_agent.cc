@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/feature_list.h"
 #include "base/i18n/case_conversion.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
@@ -35,6 +36,7 @@
 #include "components/autofill/core/common/mojom/autofill_types.mojom.h"
 #include "components/autofill/core/common/password_form_fill_data.h"
 #include "components/autofill/core/common/signatures.h"
+#include "components/password_manager/core/common/password_manager_features.h"
 #include "components/safe_browsing/buildflags.h"
 #include "content/public/renderer/document_state.h"
 #include "content/public/renderer/render_frame.h"
@@ -354,17 +356,6 @@ bool FormHasPasswordField(const FormData& form) {
   return false;
 }
 
-// Whether any of the fields in |form| is a non-empty password field.
-bool FormHasNonEmptyPasswordField(const FormData& form) {
-  for (const auto& field : form.fields) {
-    if (field.IsPasswordInputElement()) {
-      if (!field.value.empty() || !field.typed_value.empty())
-        return true;
-    }
-  }
-  return false;
-}
-
 void AnnotateFieldWithParsingResult(WebDocument doc,
                                     FieldRendererId renderer_id,
                                     const std::string& text) {
@@ -558,10 +549,11 @@ void PasswordAutofillAgent::UpdateStateForTextChange(
   WebInputElement mutable_element = element;  // We need a non-const.
 
   const base::string16 element_value = element.Value().Utf16();
-  field_data_manager_->UpdateFieldDataMap(element, element_value,
+  const FieldRendererId element_id(element.UniqueRendererFormControlId());
+  field_data_manager_->UpdateFieldDataMap(element_id, element_value,
                                           FieldPropertiesFlags::kUserTyped);
 
-  ProvisionallySavePassword(element.Form(), element, RESTRICTION_NONE);
+  InformBrowserAboutUserInput(element.Form(), element);
 
   if (element.IsPasswordFieldForAutofill()) {
     auto iter = password_to_username_.find(element);
@@ -645,8 +637,9 @@ void PasswordAutofillAgent::FillField(WebInputElement* input,
   DCHECK(!input->IsNull());
   input->SetAutofillValue(WebString::FromUTF16(credential));
   input->SetAutofillState(WebAutofillState::kAutofilled);
+  const FieldRendererId input_id(input->UniqueRendererFormControlId());
   field_data_manager_->UpdateFieldDataMap(
-      *input, credential, FieldPropertiesFlags::kAutofilledOnUserTrigger);
+      input_id, credential, FieldPropertiesFlags::kAutofilledOnUserTrigger);
 }
 
 void PasswordAutofillAgent::FillPasswordFieldAndSave(
@@ -655,8 +648,7 @@ void PasswordAutofillAgent::FillPasswordFieldAndSave(
   DCHECK(password_input);
   DCHECK(password_input->IsPasswordFieldForAutofill());
   FillField(password_input, credential);
-  ProvisionallySavePassword(password_input->Form(), *password_input,
-                            RESTRICTION_NONE);
+  InformBrowserAboutUserInput(password_input->Form(), *password_input);
 }
 
 bool PasswordAutofillAgent::PreviewSuggestion(
@@ -1194,7 +1186,6 @@ void PasswordAutofillAgent::OnProbablyFormSubmitted() {}
 // mojom::PasswordAutofillAgent:
 void PasswordAutofillAgent::FillPasswordForm(
     const PasswordFormFillData& form_data) {
-  DCHECK(form_data.has_renderer_ids);
   std::unique_ptr<RendererSavePasswordProgressLogger> logger;
   if (logging_state_active_) {
     logger.reset(new RendererSavePasswordProgressLogger(
@@ -1360,8 +1351,9 @@ void PasswordAutofillAgent::FocusedNodeHasChanged(const blink::WebNode& node) {
   }
 
   focus_state_notifier_.FocusedInputChanged(focused_field_type);
+  const FieldRendererId input_id(input_element->UniqueRendererFormControlId());
   field_data_manager_->UpdateFieldDataMapWithNullValue(
-      *input_element, FieldPropertiesFlags::kHadFocus);
+      input_id, FieldPropertiesFlags::kHadFocus);
 }
 
 std::unique_ptr<FormData> PasswordAutofillAgent::GetFormDataFromWebForm(
@@ -1450,29 +1442,23 @@ void PasswordAutofillAgent::ClearPreview(WebInputElement* username,
     password->SetAutofillState(password_autofill_state_);
   }
 }
-void PasswordAutofillAgent::ProvisionallySavePassword(
+void PasswordAutofillAgent::InformBrowserAboutUserInput(
     const WebFormElement& form,
-    const WebInputElement& element,
-    ProvisionallySaveRestriction restriction) {
+    const WebInputElement& element) {
   DCHECK(!form.IsNull() || !element.IsNull());
+  if (!FrameCanAccessPasswordManager())
+    return;
   SetLastUpdatedFormAndField(form, element);
   std::unique_ptr<FormData> form_data =
-      (form.IsNull() ? GetFormDataFromUnownedInputElements()
-                     : GetFormDataFromWebForm(form));
+      form.IsNull() ? GetFormDataFromUnownedInputElements()
+                    : GetFormDataFromWebForm(form);
   if (!form_data)
     return;
 
-  bool has_password = FormHasNonEmptyPasswordField(*form_data);
-  if (restriction == RESTRICTION_NON_EMPTY_PASSWORD && !has_password)
+  if (!FormHasPasswordField(*form_data))
     return;
 
-  if (!FrameCanAccessPasswordManager())
-    return;
-
-  if (has_password)
-    GetPasswordManagerDriver()->ShowManualFallbackForSaving(*form_data);
-  else
-    GetPasswordManagerDriver()->HideManualFallbackForSaving();
+  GetPasswordManagerDriver()->InformAboutUserInput(*form_data);
 
   browser_has_form_to_process_ = true;
 }
@@ -1529,7 +1515,11 @@ bool PasswordAutofillAgent::FillUserNameAndPassword(
         !username_element.Value().IsEmpty() &&
         (PossiblePrefilledUsernameValue(username_element.Value().Utf8(),
                                         possible_email_domain) ||
-         fill_data.username_may_use_prefilled_placeholder);
+         (fill_data.username_may_use_prefilled_placeholder &&
+          base::FeatureList::IsEnabled(
+              password_manager::features::
+                  kEnableOverwritingPlaceholderUsernames)));
+
     if (!username_element.Value().IsEmpty() &&
         username_element.GetAutofillState() == WebAutofillState::kNotFilled &&
         !prefilled_placeholder_username) {
@@ -1631,8 +1621,7 @@ void PasswordAutofillAgent::OnProvisionallySaveForm(
   }
 
   DCHECK_EQ(ElementChangeSource::WILL_SEND_SUBMIT_EVENT, source);
-  ProvisionallySavePassword(form, input_element,
-                            RESTRICTION_NON_EMPTY_PASSWORD);
+  InformBrowserAboutUserInput(form, input_element);
 }
 
 void PasswordAutofillAgent::OnFormSubmitted(const WebFormElement& form) {
@@ -1767,7 +1756,6 @@ void PasswordAutofillAgent::LogFirstFillingResult(
     return;
   UMA_HISTOGRAM_ENUMERATION("PasswordManager.FirstRendererFillingResult",
                             result);
-  DCHECK(form_data.has_renderer_ids);
   GetPasswordManagerDriver()->LogFirstFillingResult(
       form_data.form_renderer_id, base::strict_cast<int32_t>(result));
   recorded_first_filling_result_ = true;
@@ -1858,7 +1846,7 @@ void PasswordAutofillAgent::AutofillField(const base::string16& value,
   // intentionally interacting with the page.
   gatekeeper_.RegisterElement(&field);
   field_data_manager_.get()->UpdateFieldDataMap(
-      field, value, FieldPropertiesFlags::kAutofilledOnPageLoad);
+      field_id, value, FieldPropertiesFlags::kAutofilledOnPageLoad);
   autofilled_elements_cache_.emplace(field_id, WebString::FromUTF16(value));
   all_autofilled_elements_.insert(field_id);
 }

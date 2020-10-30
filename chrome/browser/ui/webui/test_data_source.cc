@@ -83,6 +83,10 @@ std::string TestDataSource::GetContentSecurityPolicy(
     return "script-src chrome://* 'self';";
   } else if (directive == network::mojom::CSPDirectiveName::WorkerSrc) {
     return "worker-src blob: 'self';";
+  } else if (directive ==
+                 network::mojom::CSPDirectiveName::RequireTrustedTypesFor ||
+             directive == network::mojom::CSPDirectiveName::TrustedTypes) {
+    return std::string();
   }
 
   return content::URLDataSource::GetContentSecurityPolicy(directive);
@@ -100,6 +104,20 @@ void TestDataSource::ReadFile(
 
   GURL url = GetURLForPath(path);
   CHECK(url.is_valid());
+  if (url.path() == "/chai.js") {
+    base::FilePath src_root;
+    CHECK(base::PathService::Get(base::DIR_SOURCE_ROOT, &src_root));
+    base::FilePath file_path =
+        src_root.AppendASCII("third_party/chaijs/chai.js")
+            .NormalizePathSeparators();
+    CHECK(base::ReadFileToString(file_path, &content))
+        << url.spec() << "=" << file_path.value();
+    scoped_refptr<base::RefCountedString> response =
+        base::RefCountedString::TakeString(&content);
+    std::move(callback).Run(response.get());
+    return;
+  }
+
   if (base::StartsWith(url.query(), kModuleQuery,
                        base::CompareCase::INSENSITIVE_ASCII)) {
     std::string js_path = url.query().substr(strlen(kModuleQuery));

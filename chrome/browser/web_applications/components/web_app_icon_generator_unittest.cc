@@ -167,13 +167,14 @@ void TestIconGeneration(int icon_size,
 class WebAppIconGeneratorTest : public testing::Test {
  public:
   WebAppIconGeneratorTest() = default;
+  WebAppIconGeneratorTest(const WebAppIconGeneratorTest&) = delete;
+  WebAppIconGeneratorTest& operator=(const WebAppIconGeneratorTest&) = delete;
 
  private:
   // Needed to bypass DCHECK in GetFallbackFont.
   base::test::TaskEnvironment task_environment_{
       base::test::TaskEnvironment::MainThreadType::UI};
 
-  DISALLOW_COPY_AND_ASSIGN(WebAppIconGeneratorTest);
 };
 
 TEST_F(WebAppIconGeneratorTest, ConstrainBitmapsToSizes) {
@@ -403,7 +404,7 @@ TEST_F(WebAppIconGeneratorTest, GenerateIcons) {
     // Only for large icons with a sharp letter: Peek a pixel at the center of
     // icon. This is tested on Linux and ChromeOS only because different OSes
     // use different text shaping engines.
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
     const SkColor letter_color = color_utils::GetColorWithMaxContrast(bg_color);
     if (size >= icon_size::k256) {
       SkColor center_color = bitmap.getColor(center_x, center_y);
@@ -411,7 +412,7 @@ TEST_F(WebAppIconGeneratorTest, GenerateIcons) {
       SCOPED_TRACE(center_color);
       EXPECT_TRUE(AreColorsEqual(letter_color, center_color, /*threshold=*/50));
     }
-#endif  // defined(OS_LINUX)
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
     sizes.erase(size);
   }
 

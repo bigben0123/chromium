@@ -28,8 +28,11 @@ class EventLatencyBrowserTest : public ContentBrowserTest {
 
  protected:
   RenderWidgetHostImpl* GetWidgetHost() {
-    return RenderWidgetHostImpl::From(
-        shell()->web_contents()->GetRenderViewHost()->GetWidget());
+    return RenderWidgetHostImpl::From(shell()
+                                          ->web_contents()
+                                          ->GetMainFrame()
+                                          ->GetRenderViewHost()
+                                          ->GetWidget());
   }
 
   // Starts the test server and navigates to the test page. Returns after the
@@ -180,6 +183,7 @@ IN_PROC_BROWSER_TEST_F(EventLatencyBrowserTest, DISABLED_KeyPressOnButton) {
        "SwapEndToPresentationCompositorFrame",
        1},
       {"EventLatency.KeyReleased.TotalLatency", 1},
+      {"EventLatency.TotalLatency", 2},
   };
   EXPECT_THAT(histogram_tester.GetTotalCountsForPrefix("EventLatency."),
               testing::ContainerEq(expected_counts));
@@ -305,6 +309,7 @@ IN_PROC_BROWSER_TEST_F(EventLatencyBrowserTest,
        "SwapEndToPresentationCompositorFrame",
        1},
       {"EventLatency.KeyReleased.TotalLatency", 1},
+      {"EventLatency.TotalLatency", 2},
   };
   EXPECT_THAT(histogram_tester.GetTotalCountsForPrefix("EventLatency."),
               testing::ContainerEq(expected_counts));
@@ -387,6 +392,7 @@ IN_PROC_BROWSER_TEST_F(EventLatencyBrowserTest,
        "SwapEndToPresentationCompositorFrame",
        2},
       {"EventLatency.KeyPressed.TotalLatency", 2},
+      {"EventLatency.TotalLatency", 2},
   };
   EXPECT_THAT(histogram_tester.GetTotalCountsForPrefix("EventLatency."),
               testing::ContainerEq(expected_counts));

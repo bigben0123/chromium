@@ -10,27 +10,38 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 
-namespace lite_video {
+namespace {
+
+// Determine whether the URL is valid and can be queried or
+// added to the blocklist.
+bool IsURLValidForBlocklist(const GURL& url) {
+  return url.SchemeIsHTTPOrHTTPS() && url.has_host();
+}
 
 // Separator between hosts for the rebuffer blocklist type.
 constexpr char kLiteVideoBlocklistKeySeparator[] = "_";
 
-// static
-base::Optional<std::string> LiteVideoUserBlocklist::GetRebufferBlocklistKey(
-    content::NavigationHandle* navigation_handle) {
-  const GURL url = navigation_handle->GetURL();
-  if (!url.SchemeIsHTTPOrHTTPS() || !url.has_host())
+// Returns the key for a navigation used for the rebuffer blocklist type.
+// The key format is "mainframe.com_subframe.com", if the navigation is the
+// mainframe navigation, the key omits subframe.com, e.g., "mainframe.com_"
+base::Optional<std::string> GetRebufferBlocklistKey(
+    const GURL& mainframe_url,
+    base::Optional<GURL> subframe_url) {
+  if (!IsURLValidForBlocklist(mainframe_url))
     return base::nullopt;
 
-  if (navigation_handle->IsInMainFrame())
-    return url.host() + kLiteVideoBlocklistKeySeparator;
+  if (!subframe_url)
+    return mainframe_url.host() + kLiteVideoBlocklistKeySeparator;
 
-  const GURL mainframe_url =
-      navigation_handle->GetWebContents()->GetLastCommittedURL();
-  if (!mainframe_url.SchemeIsHTTPOrHTTPS() || !mainframe_url.has_host())
+  if (!IsURLValidForBlocklist(*subframe_url))
     return base::nullopt;
-  return mainframe_url.host() + kLiteVideoBlocklistKeySeparator + url.host();
+  return mainframe_url.host() + kLiteVideoBlocklistKeySeparator +
+         subframe_url->host();
 }
+
+}  // namespace
+
+namespace lite_video {
 
 LiteVideoUserBlocklist::LiteVideoUserBlocklist(
     std::unique_ptr<blocklist::OptOutStore> opt_out_store,
@@ -46,19 +57,24 @@ LiteVideoBlocklistReason LiteVideoUserBlocklist::IsLiteVideoAllowedOnNavigation(
     content::NavigationHandle* navigation_handle) const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   GURL navigation_url = navigation_handle->GetURL();
-  if (!navigation_url.SchemeIsHTTPOrHTTPS() || !navigation_url.has_host())
+  if (!IsURLValidForBlocklist(navigation_url))
     return LiteVideoBlocklistReason::kNavigationNotEligibile;
 
   std::vector<blocklist::BlocklistReason> passed_reasons;
   auto blocklist_reason = blocklist::OptOutBlocklist::IsLoadedAndAllowed(
-      navigation_handle->GetURL().host(),
+      navigation_url.host(),
       static_cast<int>(LiteVideoBlocklistType::kNavigationBlocklist),
       /*opt_out=*/false, &passed_reasons);
   if (blocklist_reason != blocklist::BlocklistReason::kAllowed)
     return LiteVideoBlocklistReason::kNavigationBlocklisted;
 
   base::Optional<std::string> rebuffer_key =
-      GetRebufferBlocklistKey(navigation_handle);
+      navigation_handle->IsInMainFrame()
+          ? GetRebufferBlocklistKey(navigation_url, base::nullopt)
+          : GetRebufferBlocklistKey(
+                navigation_handle->GetWebContents()->GetLastCommittedURL(),
+                navigation_url);
+
   if (!rebuffer_key)
     return LiteVideoBlocklistReason::kNavigationNotEligibile;
 
@@ -111,6 +127,29 @@ LiteVideoUserBlocklist::GetAllowedTypes() const {
            features::LiteVideoBlocklistVersion()},
           {static_cast<int>(LiteVideoBlocklistType::kRebufferBlocklist),
            features::LiteVideoBlocklistVersion()}};
+}
+
+void LiteVideoUserBlocklist::AddNavigationToBlocklist(
+    content::NavigationHandle* navigation_handle,
+    bool opt_out) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (!IsURLValidForBlocklist(navigation_handle->GetURL()))
+    return;
+  AddEntry(navigation_handle->GetURL().host(), opt_out,
+           static_cast<int>(LiteVideoBlocklistType::kNavigationBlocklist));
+}
+
+void LiteVideoUserBlocklist::AddRebufferToBlocklist(
+    const GURL& mainframe_url,
+    base::Optional<GURL> subframe_url,
+    bool opt_out) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  base::Optional<std::string> rebuffer_key =
+      GetRebufferBlocklistKey(mainframe_url, subframe_url);
+  if (rebuffer_key) {
+    AddEntry(*rebuffer_key, opt_out,
+             static_cast<int>(LiteVideoBlocklistType::kRebufferBlocklist));
+  }
 }
 
 }  // namespace lite_video

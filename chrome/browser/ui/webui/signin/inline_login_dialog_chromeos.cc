@@ -10,14 +10,18 @@
 #include "ash/public/cpp/window_backdrop.h"
 #include "ash/public/cpp/window_properties.h"
 #include "base/check_op.h"
+#include "base/feature_list.h"
 #include "base/json/json_writer.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_functions.h"
+#include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/supervised_user/supervised_user_features.h"
+#include "chrome/browser/supervised_user/supervised_user_service.h"
+#include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #include "chrome/browser/ui/webui/chromeos/system_web_dialog_delegate.h"
 #include "chrome/common/webui_url_constants.h"
-#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/constants/chromeos_pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/session_manager/core/session_manager.h"
@@ -39,9 +43,6 @@ namespace {
 InlineLoginDialogChromeOS* dialog = nullptr;
 constexpr int kSigninDialogWidth = 768;
 constexpr int kSigninDialogHeight = 640;
-
-constexpr char kAccountAdditionSource[] =
-    "AccountManager.AccountAdditionSource";
 
 // Keep in sync with resources/chromeos/account_manager_error.js
 enum class AccountManagerErrorType {
@@ -82,18 +83,19 @@ GURL GetInlineLoginUrl(const std::string& email,
     return GetUrlWithEmailParam(chrome::kChromeUIChromeSigninURL, email);
   }
   // User type is Child.
-  if (!features::IsEduCoexistenceEnabled() ||
+  if (!arc::IsSecondaryAccountForChildEnabled() &&
       source == InlineLoginDialogChromeOS::Source::kArc) {
     return GURL(chrome::kChromeUIAccountManagerErrorURL);
   }
-  DCHECK_EQ(std::string(chrome::kChromeUIChromeSigninURL).back(), '/');
-  // chrome://chrome-signin/edu
-  const std::string kEduAccountLoginURL =
-      std::string(chrome::kChromeUIChromeSigninURL) + "edu";
-  return GetUrlWithEmailParam(kEduAccountLoginURL, email);
+  return GetUrlWithEmailParam(
+      SupervisedUserService::GetEduCoexistenceLoginUrl(), email);
 }
 
 }  // namespace
+
+// static
+const char InlineLoginDialogChromeOS::kAccountAdditionSource[] =
+    "AccountManager.AccountAdditionSource";
 
 // static
 void InlineLoginDialogChromeOS::Show(const std::string& email,
@@ -167,12 +169,19 @@ void InlineLoginDialogChromeOS::SetEduCoexistenceFlowResult(
   edu_coexistence_flow_result_ = result;
 }
 
+InlineLoginDialogChromeOS::InlineLoginDialogChromeOS(const Source& source)
+    : InlineLoginDialogChromeOS(GetInlineLoginUrl(std::string(), source),
+                                source) {}
+
 InlineLoginDialogChromeOS::InlineLoginDialogChromeOS(const GURL& url,
                                                      const Source& source)
     : SystemWebDialogDelegate(url, base::string16() /* title */),
       delegate_(this),
       source_(source),
-      url_(url) {}
+      url_(url) {
+  DCHECK(!dialog);
+  dialog = this;
+}
 
 InlineLoginDialogChromeOS::~InlineLoginDialogChromeOS() {
   DCHECK_EQ(this, dialog);
@@ -197,8 +206,7 @@ std::string InlineLoginDialogChromeOS::GetDialogArgs() const {
   if (source_ == Source::kArc &&
       ProfileManager::GetActiveUserProfile()->IsChild() &&
       ProfileManager::GetActiveUserProfile()->GetPrefs()->GetBoolean(
-          chromeos::prefs::kSecondaryGoogleAccountSigninAllowed) &&
-      features::IsEduCoexistenceEnabled()) {
+          chromeos::prefs::kSecondaryGoogleAccountSigninAllowed)) {
     error = AccountManagerErrorType::kChildUserArcDisabled;
   }
 
@@ -223,7 +231,8 @@ void InlineLoginDialogChromeOS::OnDialogShown(content::WebUI* webui) {
 }
 
 void InlineLoginDialogChromeOS::OnDialogClosed(const std::string& json_retval) {
-  if (ProfileManager::GetActiveUserProfile()->IsChild()) {
+  if (ProfileManager::GetActiveUserProfile()->IsChild() &&
+      !base::FeatureList::IsEnabled(supervised_users::kEduCoexistenceFlowV2)) {
     DCHECK(edu_coexistence_flow_result_.has_value());
     base::UmaHistogramEnumeration("AccountManager.EduCoexistence.FlowResult",
                                   edu_coexistence_flow_result_.value());

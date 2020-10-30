@@ -246,4 +246,24 @@ LayoutUnit NGLineInfo::ComputeWidth() const {
   return inline_size;
 }
 
+#if DCHECK_IS_ON()
+float NGLineInfo::ComputeWidthInFloat() const {
+  float inline_size = TextIndent();
+  for (const NGInlineItemResult& item_result : Results())
+    inline_size += item_result.inline_size.ToFloat();
+
+  return inline_size;
+}
+#endif
+
+std::ostream& operator<<(std::ostream& ostream, const NGLineInfo& line_info) {
+  // Feel free to add more NGLneInfo members.
+  ostream << "NGLineInfo available_width_=" << line_info.AvailableWidth()
+          << " width_=" << line_info.Width() << " Results=[\n";
+  for (const auto& result : line_info.Results()) {
+    ostream << "\t" << result.item->ToString() << "\n";
+  }
+  return ostream << "]";
+}
+
 }  // namespace blink

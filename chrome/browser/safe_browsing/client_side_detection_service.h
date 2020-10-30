@@ -55,10 +55,6 @@ class ClientSideDetectionService : public KeyedService {
   typedef base::Callback<void(GURL, bool)> ClientReportPhishingRequestCallback;
 
   explicit ClientSideDetectionService(Profile* profile);
-
-  // Create a ClientSideDetectionService with no associated profile, for tests.
-  explicit ClientSideDetectionService(
-      scoped_refptr<network::SharedURLLoaderFactory> url_loader);
   ~ClientSideDetectionService() override;
 
   void Shutdown() override;
@@ -86,7 +82,7 @@ class ClientSideDetectionService : public KeyedService {
   // SendClientReportPhishingRequest() was called.  You may set |callback| to
   // NULL if you don't care about the server verdict.
   virtual void SendClientReportPhishingRequest(
-      ClientPhishingRequest* verdict,
+      std::unique_ptr<ClientPhishingRequest> verdict,
       bool is_extended_reporting,
       bool is_enhanced_protection,
       const ClientReportPhishingRequestCallback& callback);
@@ -171,7 +167,7 @@ class ClientSideDetectionService : public KeyedService {
   // Starts sending the request to the client-side detection frontends.
   // This method takes ownership of both pointers.
   void StartClientReportPhishingRequest(
-      ClientPhishingRequest* verdict,
+      std::unique_ptr<ClientPhishingRequest> request,
       bool is_extended_reporting,
       bool is_enhanced_protection,
       const ClientReportPhishingRequestCallback& callback);

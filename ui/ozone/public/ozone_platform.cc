@@ -13,7 +13,9 @@
 #include "ui/events/devices/device_data_manager.h"
 #include "ui/ozone/platform_object.h"
 #include "ui/ozone/platform_selection.h"
+#include "ui/ozone/public/platform_menu_utils.h"
 #include "ui/ozone/public/platform_screen.h"
+#include "ui/ozone/public/platform_user_input_monitor.h"
 
 namespace ui {
 
@@ -35,6 +37,9 @@ void EnsureInstance() {
 }
 
 }  // namespace
+
+OzonePlatform::PlatformProperties::PlatformProperties() = default;
+OzonePlatform::PlatformProperties::~PlatformProperties() = default;
 
 OzonePlatform::OzonePlatform() {
   DCHECK(!g_instance) << "There should only be a single OzonePlatform.";
@@ -95,6 +100,10 @@ PlatformGLEGLUtility* OzonePlatform::GetPlatformGLEGLUtility() {
   return nullptr;
 }
 
+PlatformMenuUtils* OzonePlatform::GetPlatformMenuUtils() {
+  return nullptr;
+}
+
 bool OzonePlatform::IsNativePixmapConfigSupported(
     gfx::BufferFormat format,
     gfx::BufferUsage usage) const {
@@ -121,6 +130,12 @@ void OzonePlatform::AddInterfaces(mojo::BinderMap* binders) {}
 void OzonePlatform::AfterSandboxEntry() {
   // This should not be called in single-process mode.
   DCHECK(!single_process_);
+}
+
+std::unique_ptr<PlatformUserInputMonitor>
+OzonePlatform::GetPlatformUserInputMonitor(
+    const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner) {
+  return {};
 }
 
 void OzonePlatform::PostMainMessageLoopStart(

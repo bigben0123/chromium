@@ -33,10 +33,6 @@ class XRObjectSpace : public XRSpace {
     return object_->MojoFromObject();
   }
 
-  base::Optional<TransformationMatrix> NativeFromMojo() final {
-    return XRSpace::TryInvert(MojoFromNative());
-  }
-
   base::Optional<device::mojom::blink::XRNativeOriginInformation> NativeOrigin()
       const override {
     return XRNativeOriginInformation::Create(object_);
@@ -47,6 +43,8 @@ class XRObjectSpace : public XRSpace {
     // fixed relative to their surroundings (at least locally).
     return true;
   }
+
+  std::string ToString() const override { return "XRObjectSpace"; }
 
   void Trace(Visitor* visitor) const override {
     visitor->Trace(object_);

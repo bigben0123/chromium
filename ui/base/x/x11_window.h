@@ -16,14 +16,13 @@
 #include "base/memory/weak_ptr.h"
 #include "base/optional.h"
 #include "base/strings/string16.h"
+#include "ui/base/x/x11_cursor.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/geometry/size_f.h"
 #include "ui/gfx/x/event.h"
 #include "ui/gfx/x/sync.h"
-#include "ui/gfx/x/x11.h"
-#include "ui/gfx/x/x11_types.h"
 #include "ui/gfx/x/xfixes.h"
 #include "ui/gfx/x/xproto.h"
 
@@ -38,6 +37,7 @@ namespace ui {
 
 class Event;
 class XScopedEventSelector;
+class X11Cursor;
 
 ////////////////////////////////////////////////////////////////////////////////
 // XWindow class
@@ -115,6 +115,8 @@ class COMPONENT_EXPORT(UI_BASE_X) XWindow {
   void StackXWindowAbove(x11::Window window);
   void StackXWindowAtTop();
   bool IsTargetedBy(const x11::Event& xev) const;
+  bool IsTransientWindowTargetedBy(const x11::Event& x11_event) const;
+  void SetTransientWindow(x11::Window window);
   void WmMoveResize(int hittest, const gfx::Point& location) const;
   void ProcessEvent(x11::Event* xev);
 
@@ -126,7 +128,7 @@ class COMPONENT_EXPORT(UI_BASE_X) XWindow {
   bool IsFullscreen() const;
   gfx::Rect GetOuterBounds() const;
 
-  void SetCursor(::Cursor cursor);
+  void SetCursor(scoped_refptr<X11Cursor> cursor);
   bool SetTitle(base::string16 title);
   void SetXWindowOpacity(float opacity);
   void SetXWindowAspectRatio(const gfx::SizeF& aspect_ratio);
@@ -176,7 +178,7 @@ class COMPONENT_EXPORT(UI_BASE_X) XWindow {
   x11::Sync::Counter extended_update_counter() const {
     return extended_update_counter_;
   }
-  ::Cursor last_cursor() const { return last_cursor_; }
+  scoped_refptr<X11Cursor> last_cursor() const { return last_cursor_; }
 
  protected:
   // Updates |xwindow_|'s _NET_WM_USER_TIME if |xwindow_| is active.
@@ -261,6 +263,9 @@ class COMPONENT_EXPORT(UI_BASE_X) XWindow {
   x11::Connection* const connection_;
   x11::Window xwindow_ = x11::Window::None;
   x11::Window x_root_window_ = x11::Window::None;
+
+  // Any native, modal dialog hanging from this window.
+  x11::Window transient_window_ = x11::Window::None;
 
   // Events selected on |xwindow_|.
   std::unique_ptr<ui::XScopedEventSelector> xwindow_events_;
@@ -387,7 +392,9 @@ class COMPONENT_EXPORT(UI_BASE_X) XWindow {
   bool has_pointer_barriers_ = false;
   std::array<x11::XFixes::Barrier, 4> pointer_barriers_;
 
-  ::Cursor last_cursor_ = x11::None;
+  scoped_refptr<X11Cursor> last_cursor_;
+
+  base::CancelableOnceCallback<void(x11::Cursor)> on_cursor_loaded_;
 };
 
 }  // namespace ui

@@ -123,7 +123,7 @@ class TestTabModalConfirmDialogDelegate : public TabModalConfirmDialogDelegate {
 // is invoked on the other.
 IN_PROC_BROWSER_TEST_F(BrowserViewTest, CloseWithTabs) {
   Browser* browser2 =
-      new Browser(Browser::CreateParams(browser()->profile(), true));
+      Browser::Create(Browser::CreateParams(browser()->profile(), true));
   chrome::AddTabAt(browser2, GURL(), -1, true);
   chrome::AddTabAt(browser2, GURL(), -1, true);
   TestWebContentsObserver observer(
@@ -136,7 +136,7 @@ IN_PROC_BROWSER_TEST_F(BrowserViewTest, CloseWithTabs) {
 // BrowserView will destroy.
 IN_PROC_BROWSER_TEST_F(BrowserViewTest, CloseWithTabsStartWithActive) {
   Browser* browser2 =
-      new Browser(Browser::CreateParams(browser()->profile(), true));
+      Browser::Create(Browser::CreateParams(browser()->profile(), true));
   chrome::AddTabAt(browser2, GURL(), -1, true);
   chrome::AddTabAt(browser2, GURL(), -1, true);
   browser2->tab_strip_model()->ActivateTabAt(
@@ -321,7 +321,7 @@ IN_PROC_BROWSER_TEST_F(BrowserViewTest, ShowFaviconInTab) {
 
 // On Mac, voiceover treats tab modal dialogs as native windows, so setting an
 // accessible title for tab-modal dialogs is not necessary.
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
 
 // Open a tab-modal dialog and check that the accessible window title is the
 // title of the dialog.
@@ -347,6 +347,7 @@ IN_PROC_BROWSER_TEST_F(BrowserViewTest, GetAccessibleTabModalDialogTitle) {
 // Open a tab-modal dialog and check that the accessibility tree only contains
 // the dialog.
 IN_PROC_BROWSER_TEST_F(BrowserViewTest, GetAccessibleTabModalDialogTree) {
+  ui::AXPlatformNode::NotifyAddAXModeFlags(ui::kAXModeComplete);
   ui::AXPlatformNode* ax_node = ui::AXPlatformNode::FromNativeViewAccessible(
       browser_view()->GetWidget()->GetRootView()->GetNativeViewAccessible());
 // We expect this conversion to be safe on Windows, but can't guarantee that it
@@ -377,12 +378,12 @@ IN_PROC_BROWSER_TEST_F(BrowserViewTest, GetAccessibleTabModalDialogTree) {
             nullptr);
 }
 
-#endif  // !defined(OS_MACOSX)
+#endif  // !defined(OS_MAC)
 
 // Mac processes different accelerators and also focuses differently.
 // TODO(crbug.com/1055150): Implement RotatePaneFocus for Mac and add a similar
 // test using command+option+down/up arrows.
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
 IN_PROC_BROWSER_TEST_F(BrowserViewTest, F6CyclesThroughCaptionBubbleToo) {
   captions::CaptionController* caption_controller =
       captions::CaptionControllerFactory::GetForProfileIfExists(

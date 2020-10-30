@@ -21,6 +21,7 @@ import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ActivityTabProvider;
 import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior;
+import org.chromium.chrome.browser.omnibox.LocationBarDataProvider;
 import org.chromium.chrome.browser.omnibox.UrlBarEditingTextStateProvider;
 import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteController.OnSuggestionsReceivedListener;
 import org.chromium.chrome.browser.omnibox.suggestions.SuggestionListViewBinder.SuggestionListViewHolder;
@@ -28,17 +29,18 @@ import org.chromium.chrome.browser.omnibox.suggestions.answer.AnswerSuggestionVi
 import org.chromium.chrome.browser.omnibox.suggestions.base.BaseSuggestionView;
 import org.chromium.chrome.browser.omnibox.suggestions.base.BaseSuggestionViewBinder;
 import org.chromium.chrome.browser.omnibox.suggestions.basic.SuggestionViewViewBinder;
+import org.chromium.chrome.browser.omnibox.suggestions.carousel.BaseCarouselSuggestionViewBinder;
 import org.chromium.chrome.browser.omnibox.suggestions.editurl.EditUrlSuggestionView;
 import org.chromium.chrome.browser.omnibox.suggestions.editurl.EditUrlSuggestionViewBinder;
 import org.chromium.chrome.browser.omnibox.suggestions.entity.EntitySuggestionViewBinder;
 import org.chromium.chrome.browser.omnibox.suggestions.header.HeaderView;
 import org.chromium.chrome.browser.omnibox.suggestions.header.HeaderViewBinder;
+import org.chromium.chrome.browser.omnibox.suggestions.mostvisited.MostVisitedTilesProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.tail.TailSuggestionView;
 import org.chromium.chrome.browser.omnibox.suggestions.tail.TailSuggestionViewBinder;
 import org.chromium.chrome.browser.omnibox.voice.VoiceRecognitionHandler;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.share.ShareDelegate;
-import org.chromium.chrome.browser.toolbar.ToolbarDataProvider;
 import org.chromium.chrome.browser.util.KeyNavigationUtil;
 import org.chromium.components.query_tiles.QueryTile;
 import org.chromium.ui.ViewProvider;
@@ -173,6 +175,11 @@ public class AutocompleteCoordinatorImpl implements AutocompleteCoordinator {
                         mQueryTileCoordinator::bind);
 
                 adapter.registerType(
+                        OmniboxSuggestionUiType.TILE_NAVSUGGEST,
+                        MostVisitedTilesProcessor::createView,
+                        BaseCarouselSuggestionViewBinder::bind);
+
+                adapter.registerType(
                         OmniboxSuggestionUiType.HEADER,
                         parent -> new HeaderView(parent.getContext()),
                         HeaderViewBinder::bind);
@@ -208,8 +215,8 @@ public class AutocompleteCoordinatorImpl implements AutocompleteCoordinator {
     }
 
     @Override
-    public void setToolbarDataProvider(ToolbarDataProvider toolbarDataProvider) {
-        mMediator.setToolbarDataProvider(toolbarDataProvider);
+    public void setLocationBarDataProvider(LocationBarDataProvider locationBarDataProvider) {
+        mMediator.setLocationBarDataProvider(locationBarDataProvider);
     }
 
     @Override
@@ -220,6 +227,7 @@ public class AutocompleteCoordinatorImpl implements AutocompleteCoordinator {
     @Override
     public void setAutocompleteProfile(Profile profile) {
         mMediator.setAutocompleteProfile(profile);
+        mQueryTileCoordinator.setProfile(profile);
     }
 
     @Override
@@ -286,12 +294,11 @@ public class AutocompleteCoordinatorImpl implements AutocompleteCoordinator {
     public boolean handleKeyEvent(int keyCode, KeyEvent event) {
         boolean isShowingList = mDropdown != null && mDropdown.getViewGroup().isShown();
 
-        boolean isUpOrDown = KeyNavigationUtil.isGoUpOrDown(event);
-        if (isShowingList && mMediator.getSuggestionCount() > 0 && isUpOrDown) {
+        boolean isAnyDirection = KeyNavigationUtil.isGoAnyDirection(event);
+        if (isShowingList && mMediator.getSuggestionCount() > 0 && isAnyDirection) {
             mMediator.allowPendingItemSelection();
         }
-        boolean isValidListKey = isUpOrDown || KeyNavigationUtil.isGoRight(event)
-                || KeyNavigationUtil.isGoLeft(event) || KeyNavigationUtil.isEnter(event);
+        boolean isValidListKey = isAnyDirection || KeyNavigationUtil.isEnter(event);
         if (isShowingList && isValidListKey && mDropdown.getViewGroup().onKeyDown(keyCode, event)) {
             return true;
         }
@@ -322,24 +329,24 @@ public class AutocompleteCoordinatorImpl implements AutocompleteCoordinator {
         AutocompleteControllerJni.get().prefetchZeroSuggestResults();
     }
 
-    @VisibleForTesting
-    OmniboxSuggestionsDropdown getSuggestionsDropdown() {
+    @Override
+    public OmniboxSuggestionsDropdown getSuggestionsDropdownForTest() {
         return mDropdown;
     }
 
-    @VisibleForTesting
-    void setAutocompleteController(AutocompleteController controller) {
-        mMediator.setAutocompleteController(controller);
+    @Override
+    public void setAutocompleteControllerForTest(AutocompleteController controller) {
+        mMediator.setAutocompleteControllerForTest(controller);
     }
 
-    @VisibleForTesting
-    OnSuggestionsReceivedListener getSuggestionsReceivedListenerForTest() {
+    @Override
+    public OnSuggestionsReceivedListener getSuggestionsReceivedListenerForTest() {
         return mMediator;
     }
 
-    @VisibleForTesting
-    ModelList getSuggestionModelList() {
-        return mMediator.getSuggestionModelList();
+    @Override
+    public ModelList getSuggestionModelListForTest() {
+        return mMediator.getSuggestionModelListForTest();
     }
 
     private void onTileSelected(QueryTile queryTile) {

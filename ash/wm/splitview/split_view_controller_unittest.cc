@@ -47,6 +47,7 @@
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_window_drag_delegate.h"
 #include "ash/wm/tablet_mode/tablet_mode_window_resizer.h"
+#include "ash/wm/window_properties.h"
 #include "ash/wm/window_resizer.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_state_delegate.h"
@@ -56,6 +57,7 @@
 #include "base/stl_util.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
+#include "chromeos/ui/base/window_properties.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/test/test_windows.h"
@@ -1676,6 +1678,7 @@ TEST_P(SplitViewControllerTest, ResizingSnappedWindowWithMinimumSizeTest) {
   gfx::Rect display_bounds =
       screen_util::GetDisplayWorkAreaBoundsInScreenForActiveDeskContainer(
           window1.get());
+  ToggleOverview();
   EXPECT_TRUE(split_view_controller()->CanSnapWindow(window1.get()));
   split_view_controller()->SnapWindow(window1.get(), SplitViewController::LEFT);
   delegate1->set_minimum_size(
@@ -1824,6 +1827,7 @@ TEST_P(SplitViewControllerTest,
   // Snap the divider to one third position when there is only left window with
   // minimum size larger than one third of the display's width. The divider
   // should be snapped to the middle position after dragging.
+  ToggleOverview();
   split_view_controller()->SnapWindow(window1.get(), SplitViewController::LEFT);
   delegate1->set_minimum_size(
       gfx::Size(workarea_bounds.width() * 0.4f, workarea_bounds.height()));
@@ -1908,6 +1912,7 @@ TEST_P(SplitViewControllerTest,
           window1.get());
 
   // Divider should be moved to the middle at the beginning.
+  ToggleOverview();
   split_view_controller()->SnapWindow(window1.get(), SplitViewController::LEFT);
   ASSERT_TRUE(split_view_divider());
   EXPECT_GT(divider_position(), 0.33f * workarea_bounds.width());
@@ -2041,6 +2046,7 @@ TEST_P(SplitViewControllerTest,
   w1_state->SetDelegate(base::WrapUnique(window_state_delegate1));
 
   // Set up window.
+  ToggleOverview();
   split_view_controller()->SnapWindow(window1.get(), SplitViewController::LEFT);
 
   // Start a drag but don't release the mouse button.
@@ -2325,6 +2331,7 @@ TEST_P(SplitViewControllerTest, DividerClosestRatioOnWorkArea) {
 
   const gfx::Rect bounds(0, 0, 200, 200);
   std::unique_ptr<aura::Window> window(CreateWindow(bounds));
+  ToggleOverview();
   split_view_controller()->SnapWindow(window.get(), SplitViewController::LEFT);
 
   test_api.SetDisplayRotation(display::Display::ROTATE_90,
@@ -2397,6 +2404,7 @@ TEST_P(SplitViewControllerTest,
   // Enter split view.
   const gfx::Rect bounds(0, 0, 200, 200);
   std::unique_ptr<aura::Window> window(CreateWindow(bounds));
+  ToggleOverview();
   split_view_controller()->SnapWindow(window.get(), SplitViewController::LEFT);
   // Drag the divider so that the snapped window spans only one third of the way
   // across the work area.
@@ -2498,6 +2506,7 @@ TEST_P(SplitViewControllerTest, EndSplitViewWhileResizingBeyondMinimum) {
   gfx::Rect display_bounds =
       screen_util::GetDisplayWorkAreaBoundsInScreenForActiveDeskContainer(
           window.get());
+  ToggleOverview();
   split_view_controller()->SnapWindow(window.get(), SplitViewController::LEFT);
   delegate->set_minimum_size(
       gfx::Size(display_bounds.width() * 0.4f, display_bounds.height()));
@@ -2611,6 +2620,7 @@ TEST_P(SplitViewControllerTest, EndSplitViewDuringDividerSnapAnimation) {
   gfx::Rect display_bounds =
       screen_util::GetDisplayWorkAreaBoundsInScreenForActiveDeskContainer(
           window.get());
+  ToggleOverview();
   split_view_controller()->SnapWindow(window.get(), SplitViewController::LEFT);
   delegate->set_minimum_size(
       gfx::Size(display_bounds.width() * 0.4f, display_bounds.height()));
@@ -2674,6 +2684,7 @@ TEST_P(SplitViewControllerTest, ItemsRemovedFromOverviewOnSnap) {
 TEST_P(SplitViewControllerTest, EndSplitViewWhileDragging) {
   // Enter split view mode.
   std::unique_ptr<aura::Window> window = CreateTestWindow();
+  ToggleOverview();
   split_view_controller()->SnapWindow(window.get(), SplitViewController::LEFT);
 
   // Start resizing.
@@ -2704,6 +2715,69 @@ TEST_P(SplitViewControllerTest, EndSplitViewWhileDragging) {
   histograms().ExpectTotalCount(
       "Ash.SplitViewResize.PresentationTime.MaxLatency.TabletMode.SingleWindow",
       1);
+}
+
+// Tests that auto snapping is properly triggered if a window is going to
+// unminimized (visible but minimized) in tablet split view mode.
+TEST_P(SplitViewControllerTest, AutoSnapFromMinimizedState) {
+  const gfx::Rect bounds(0, 0, 400, 400);
+  std::unique_ptr<aura::Window> window1(CreateWindow(bounds));
+  std::unique_ptr<aura::Window> window2(CreateNonSnappableWindow(bounds));
+  std::unique_ptr<aura::Window> window3(CreateWindow(bounds));
+
+  // Nothing should happen in clamshell mode.
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(false);
+  WindowState::Get(window1.get())->Minimize();
+  window1->Show();
+  EXPECT_FALSE(split_view_controller()->InSplitViewMode());
+  EXPECT_FALSE(split_view_controller()->IsWindowInSplitView(window1.get()));
+
+  // Nothing should happen not in tablet split view mode.
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
+  WindowState::Get(window1.get())->Minimize();
+  window1->Show();
+  EXPECT_FALSE(split_view_controller()->InSplitViewMode());
+  EXPECT_FALSE(split_view_controller()->IsWindowInSplitView(window1.get()));
+
+  // Nothing should happen for a non-snappable window.
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
+  WindowState::Get(window2.get())->Minimize();
+  window2->Show();
+  EXPECT_FALSE(split_view_controller()->InSplitViewMode());
+  EXPECT_FALSE(split_view_controller()->IsWindowInSplitView(window2.get()));
+
+  // Nothing should happen for transient visibility changing due to dragging.
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
+  split_view_controller()->SnapWindow(window3.get(), SplitViewController::LEFT);
+  EXPECT_TRUE(split_view_controller()->InTabletSplitViewMode());
+  EXPECT_TRUE(split_view_controller()->IsWindowInSplitView(window3.get()));
+  EXPECT_EQ(split_view_controller()->GetPositionOfSnappedWindow(window3.get()),
+            SplitViewController::LEFT);
+
+  WindowState::Get(window1.get())->Minimize();
+  window1->SetProperty(kHideDuringWindowDragging, true);
+  window1->Show();
+  EXPECT_FALSE(split_view_controller()->IsWindowInSplitView(window1.get()));
+
+  window1->ClearProperty(kHideDuringWindowDragging);
+
+  // Should performs auto snapping when showing a snappable window in table
+  // split view mode.
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
+  split_view_controller()->SnapWindow(window3.get(), SplitViewController::LEFT);
+  EXPECT_TRUE(split_view_controller()->InTabletSplitViewMode());
+  EXPECT_TRUE(split_view_controller()->IsWindowInSplitView(window3.get()));
+  EXPECT_EQ(split_view_controller()->GetPositionOfSnappedWindow(window3.get()),
+            SplitViewController::LEFT);
+
+  WindowState::Get(window1.get())->Minimize();
+  window1->Show();
+  EXPECT_TRUE(split_view_controller()->InTabletSplitViewMode());
+  EXPECT_TRUE(split_view_controller()->IsWindowInSplitView(window1.get()));
+  EXPECT_EQ(split_view_controller()->GetPositionOfSnappedWindow(window1.get()),
+            SplitViewController::RIGHT);
+
+  EndSplitView();
 }
 
 // Test the tab-dragging related functionalities in tablet mode. Tab(s) can be
@@ -4540,12 +4614,12 @@ TEST_P(SplitViewTabDraggingTestWithClamshellSupport,
                        ->target_bounds())
                    .CenterPoint());
   CompleteDrag(std::move(resizer));
-  EXPECT_TRUE(dragged_tab->GetProperty(kIsShowingInOverviewKey));
+  EXPECT_TRUE(dragged_tab->GetProperty(chromeos::kIsShowingInOverviewKey));
 
   // Switch to clamshell mode and check that |snapped_window| keeps its snapped
   // window state.
   Shell::Get()->tablet_mode_controller()->SetEnabledForTest(false);
-  EXPECT_EQ(WindowStateType::kLeftSnapped,
+  EXPECT_EQ(chromeos::WindowStateType::kLeftSnapped,
             WindowState::Get(snapped_window.get())->GetStateType());
 }
 
@@ -4554,12 +4628,12 @@ class TestWindowDelegateWithWidget : public views::WidgetDelegate {
   TestWindowDelegateWithWidget(bool can_resize) {
     SetCanMaximize(true);
     SetCanResize(can_resize);
+    SetOwnedByWidget(true);
     SetFocusTraversesOut(true);
   }
   ~TestWindowDelegateWithWidget() override = default;
 
   // views::WidgetDelegate:
-  void DeleteDelegate() override { delete this; }
   views::Widget* GetWidget() override { return widget_; }
   const views::Widget* GetWidget() const override { return widget_; }
   bool CanActivate() const override { return true; }
@@ -4745,7 +4819,7 @@ TEST_P(SplitViewAppDraggingTest, ShelfVisibilityIfDraggingFullscreenedWindow) {
   const WMEvent fullscreen_event(WM_EVENT_TOGGLE_FULLSCREEN);
   window_state->OnWMEvent(&fullscreen_event);
   window_state->SetHideShelfWhenFullscreen(false);
-  window()->SetProperty(kImmersiveIsActive, true);
+  window()->SetProperty(chromeos::kImmersiveIsActive, true);
   shelf_layout_manager->UpdateVisibilityState();
   EXPECT_TRUE(window_state->IsFullscreen());
   EXPECT_FALSE(shelf_layout_manager->IsVisible());

@@ -39,7 +39,6 @@
 #include "content/browser/renderer_host/render_widget_host_input_event_router.h"
 #import "content/browser/renderer_host/text_input_client_mac.h"
 #import "content/browser/renderer_host/ui_events_helper.h"
-#include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_plugin_guest_manager.h"
 #include "content/public/browser/native_web_keyboard_event.h"
@@ -80,7 +79,7 @@ SkColor RenderWidgetHostViewMac::BrowserCompositorMacGetGutterColor() const {
   // When making an element on the page fullscreen the element's background
   // may not match the page's, so use black as the gutter color to avoid
   // flashes of brighter colors during the transition.
-  if (host()->delegate() && host()->delegate()->IsFullscreenForCurrentTab()) {
+  if (host()->delegate() && host()->delegate()->IsFullscreen()) {
     return SK_ColorBLACK;
   }
   return last_frame_root_background_color_;
@@ -215,6 +214,8 @@ RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget)
 
   if (GetTextInputManager())
     GetTextInputManager()->AddObserver(this);
+
+  host()->render_frame_metadata_provider()->AddObserver(this);
 }
 
 RenderWidgetHostViewMac::~RenderWidgetHostViewMac() {
@@ -422,7 +423,7 @@ void RenderWidgetHostViewMac::UpdateNSViewAndDisplayProperties() {
   }
 }
 
-void RenderWidgetHostViewMac::GetScreenInfo(ScreenInfo* screen_info) {
+void RenderWidgetHostViewMac::GetScreenInfo(blink::ScreenInfo* screen_info) {
   browser_compositor_->GetRendererScreenInfo(screen_info);
 }
 
@@ -456,18 +457,19 @@ void RenderWidgetHostViewMac::WasUnOccluded() {
 
   const bool renderer_should_record_presentation_time = !has_saved_frame;
   host()->WasShown(renderer_should_record_presentation_time
-                       ? tab_switch_start_state
-                       : base::nullopt);
+                       ? tab_switch_start_state.Clone()
+                       : blink::mojom::RecordContentToVisibleTimeRequestPtr());
 
   if (delegated_frame_host) {
     // If the frame for the renderer is already available, then the
     // tab-switching time is the presentation time for the browser-compositor.
     const bool record_presentation_time = has_saved_frame;
     delegated_frame_host->WasShown(
-        browser_compositor_->GetRendererLocalSurfaceIdAllocation()
-            .local_surface_id(),
+        browser_compositor_->GetRendererLocalSurfaceId(),
         browser_compositor_->GetRendererSize(),
-        record_presentation_time ? tab_switch_start_state : base::nullopt);
+        record_presentation_time
+            ? std::move(tab_switch_start_state)
+            : blink::mojom::RecordContentToVisibleTimeRequestPtr());
   }
 }
 
@@ -677,7 +679,6 @@ void RenderWidgetHostViewMac::OnRenderFrameMetadataChangedAfterActivation() {
                                           ->render_frame_metadata_provider()
                                           ->LastRenderFrameMetadata()
                                           .root_background_color;
-  RenderWidgetHostViewBase::OnRenderFrameMetadataChangedAfterActivation();
 }
 
 void RenderWidgetHostViewMac::RenderProcessGone() {
@@ -685,6 +686,8 @@ void RenderWidgetHostViewMac::RenderProcessGone() {
 }
 
 void RenderWidgetHostViewMac::Destroy() {
+  host()->render_frame_metadata_provider()->RemoveObserver(this);
+
   // Unlock the mouse in the NSView's process before destroying our bridge to
   // it.
   if (mouse_locked_) {
@@ -816,6 +819,12 @@ void RenderWidgetHostViewMac::SpeakSelection() {
   GetPageTextForSpeech(base::BindOnce(ui::TextServicesContextMenu::SpeakText));
 }
 
+void RenderWidgetHostViewMac::SetWindowFrameInScreen(const gfx::Rect& rect) {
+  DCHECK(GetInProcessNSView() && ![GetInProcessNSView() window])
+      << "This method should only be called in headless browser!";
+  OnWindowFrameInScreenChanged(rect);
+}
+
 //
 // RenderWidgetHostViewCocoa uses the stored selection text,
 // which implements NSServicesRequests protocol.
@@ -858,8 +867,7 @@ void RenderWidgetHostViewMac::OnDidUpdateVisualPropertiesComplete(
   browser_compositor_->UpdateSurfaceFromChild(
       host()->auto_resize_enabled(), metadata.device_scale_factor,
       metadata.viewport_size_in_pixels,
-      metadata.local_surface_id_allocation.value_or(
-          viz::LocalSurfaceIdAllocation()));
+      metadata.local_surface_id.value_or(viz::LocalSurfaceId()));
 }
 
 void RenderWidgetHostViewMac::TakeFallbackContentFrom(
@@ -1224,9 +1232,8 @@ RenderWidgetHostViewMac::CreateSyntheticGestureTarget() {
       new SyntheticGestureTargetMac(host, GetInProcessNSView()));
 }
 
-const viz::LocalSurfaceIdAllocation&
-RenderWidgetHostViewMac::GetLocalSurfaceIdAllocation() const {
-  return browser_compositor_->GetRendererLocalSurfaceIdAllocation();
+const viz::LocalSurfaceId& RenderWidgetHostViewMac::GetLocalSurfaceId() const {
+  return browser_compositor_->GetRendererLocalSurfaceId();
 }
 
 const viz::FrameSinkId& RenderWidgetHostViewMac::GetFrameSinkId() const {
@@ -2051,7 +2058,7 @@ void RenderWidgetHostViewMac::OnGotStringForDictionaryOverlay(
     int32_t target_widget_routing_id,
     ui::mojom::AttributedStringPtr attributed_string,
     const gfx::Point& baseline_point) {
-  if (attributed_string->string.empty()) {
+  if (!attributed_string || attributed_string->string.empty()) {
     // The PDF plugin does not support getting the attributed string at point.
     // Until it does, use NSPerformService(), which opens Dictionary.app.
     // TODO(shuchen): Support GetStringAtPoint() & GetStringFromRange() for PDF.

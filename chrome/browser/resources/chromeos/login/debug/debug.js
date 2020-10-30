@@ -224,7 +224,7 @@ cr.define('cr.ui.login.debug', function() {
       kind: ScreenKind.NORMAL,
     },
     {
-      id: 'eula',
+      id: 'oobe-eula-md',
       kind: ScreenKind.NORMAL,
       // TODO: Current logic triggers switching screens in focus(), making
       // it impossible to trigger  installation settings dialog.
@@ -234,9 +234,16 @@ cr.define('cr.ui.login.debug', function() {
       id: 'demo-setup',
       kind: ScreenKind.OTHER,
       suffix: 'demo',
+      handledSteps: 'progress,error',
       states: [
         {
-          id: 'progress',
+          id: 'download-resources',
+          trigger: (screen) => {
+            screen.setCurrentSetupStep('downloadResources');
+          },
+        },
+        {
+          id: 'enrollment',
           trigger: (screen) => {
             screen.setCurrentSetupStep('enrollment');
           },
@@ -311,34 +318,21 @@ cr.define('cr.ui.login.debug', function() {
       ],
     },
     {
-      id: 'enterprise-enrollment',
+      id: 'user-creation',
+      kind: ScreenKind.NORMAL,
+    },
+    {
+      id: 'offline-ad-login',
       kind: ScreenKind.NORMAL,
       suffix: 'E',
+    },
+    {
+      id: 'enterprise-enrollment',
+      kind: ScreenKind.NORMAL,
+      defaultState: 'step-signin',
+      handledSteps: 'error,ad-join',
+      suffix: 'E',
       states: [
-        {
-          id: 'signin',
-          trigger: (screen) => {
-            screen.showStep('signin');
-          },
-        },
-        {
-          id: 'working',
-          trigger: (screen) => {
-            screen.showStep('working');
-          },
-        },
-        {
-          id: 'attributes',
-          trigger: (screen) => {
-            screen.showStep('attribute-prompt');
-          },
-        },
-        {
-          id: 'success',
-          trigger: (screen) => {
-            screen.showStep('success');
-          },
-        },
         {
           id: 'error',
           trigger: (screen) => {
@@ -360,6 +354,10 @@ cr.define('cr.ui.login.debug', function() {
           },
         },
       ],
+    },
+    {
+      id: 'family-link-notice',
+      kind: ScreenKind.NORMAL,
     },
     {
       id: 'packaged-license',
@@ -387,18 +385,13 @@ cr.define('cr.ui.login.debug', function() {
       id: 'update-required',
       kind: ScreenKind.OTHER,
       suffix: 'E',
+      handledSteps: 'update-required-message,update-process,eol',
       states: [
         {
           id: 'initial',
           trigger: (screen) => {
             screen.setUIState(0);
             screen.setEnterpriseAndDeviceName('example.com', 'Chromebook');
-          },
-        },
-        {
-          id: 'need-permission',
-          trigger: (screen) => {
-            screen.setUIState(2);
           },
         },
         {
@@ -423,29 +416,11 @@ cr.define('cr.ui.login.debug', function() {
           },
         },
         {
-          id: 'completed-reboot',
-          trigger: (screen) => {
-            screen.setUIState(3);
-          },
-        },
-        {
           id: 'eol',
           trigger: (screen) => {
             screen.setUIState(5);
             screen.setEolMessage(
                 'Message from admin: please return device somewhere.');
-          },
-        },
-        {
-          id: 'no-network',
-          trigger: (screen) => {
-            screen.setUIState(6);
-          },
-        },
-        {
-          id: 'error',
-          trigger: (screen) => {
-            screen.setUIState(4);
           },
         },
       ],
@@ -475,6 +450,31 @@ cr.define('cr.ui.login.debug', function() {
     {
       id: 'tpm-error-message',
       kind: ScreenKind.ERROR,
+    },
+    {
+      id: 'signin-fatal-error',
+      kind: ScreenKind.ERROR,
+      states: [
+        {
+          id: 'SCRAPED_PASSWORD_VERIFICATION_FAILURE',
+          data: {
+            errorState: 1,
+          },
+        },
+        {
+          id: 'INSECURE_CONTENT_BLOCKED',
+          data: {
+            errorState: 2,
+            url: 'http://example.url/',
+          },
+        },
+        {
+          id: 'MISSING_GAIA_INFO',
+          data: {
+            errorState: 3,
+          },
+        },
+      ]
     },
     {
       id: 'reset',
@@ -557,7 +557,7 @@ cr.define('cr.ui.login.debug', function() {
           trigger: (screen) => {
             screen.loadAuthExtension({
               screenMode: 1,  // Offline
-              enterpriseDisplayDomain: 'example.com',
+              enterpriseDomainManager: 'example.com',
             });
           },
         },
@@ -572,9 +572,9 @@ cr.define('cr.ui.login.debug', function() {
           },
         },
         {
-          id: 'whitelist-customer',
+          id: 'allowlist-customer',
           trigger: (screen) => {
-            screen.showWhitelistCheckFailedError(true, {
+            screen.showAllowlistCheckFailedError(true, {
               enterpriseManaged: false,
             });
           },
@@ -675,6 +675,7 @@ cr.define('cr.ui.login.debug', function() {
     {
       id: 'encryption-migration',
       kind: ScreenKind.OTHER,
+      handledSteps: 'ready,migrating,not-enough-space',
       states: [
         {
           id: 'ready',
@@ -700,23 +701,12 @@ cr.define('cr.ui.login.debug', function() {
           },
         },
         {
-          id: 'migration-failed',
-          trigger: (screen) => {
-            screen.setUIState(2);
-          },
-        },
-        {
           id: 'not-enough-space',
           trigger: (screen) => {
-            screen.setUIState(3);
-            screen.setAvailableSpaceInString('1 GB');
-            screen.setNecessarySpaceInString('2 GB');
-          },
-        },
-        {
-          id: 'migrating-minimal',
-          trigger: (screen) => {
-            screen.setUIState(5);
+            screen.setUIState(4);
+            screen.setSpaceInfoInString(
+                '1 GB' /* availableSpaceSize */,
+                '2 GB' /* necessarySpaceSize */);
           },
         },
       ],
@@ -787,21 +777,7 @@ cr.define('cr.ui.login.debug', function() {
     {
       id: 'sync-consent',
       kind: ScreenKind.NORMAL,
-      states: [
-        {
-          id: 'no-split',
-          trigger: (screen) => {
-            $('sync-consent-impl')
-                .showScreen_('splitSettingsSyncConsentDialog');
-          },
-        },
-        {
-          id: 'split',
-          trigger: (screen) => {
-            $('sync-consent-impl').showScreen_('syncConsentOverviewDialog');
-          },
-        },
-      ],
+      defaultState: 'step-no-split',
     },
     {
       id: 'fingerprint-setup',
@@ -907,6 +883,20 @@ cr.define('cr.ui.login.debug', function() {
     {
       id: 'app-downloading',
       kind: ScreenKind.NORMAL,
+      states: [
+        {
+          id: 'single-app',
+          data: {
+            numOfApps: 1,
+          },
+        },
+        {
+          id: 'multiple-apps',
+          data: {
+            numOfApps: 2,
+          },
+        },
+      ],
     },
     {
       id: 'assistant-optin-flow',
@@ -923,6 +913,20 @@ cr.define('cr.ui.login.debug', function() {
     {
       id: 'marketing-opt-in',
       kind: ScreenKind.NORMAL,
+      states: [
+        {
+          id: 'WithOptionToSubscribe',
+          trigger: (screen) => {
+            screen.setOptInVisibility(true);
+          },
+        },
+        {
+          id: 'NoOptionToSubscribe',
+          trigger: (screen) => {
+            screen.setOptInVisibility(false);
+          },
+        },
+      ],
     },
   ];
 

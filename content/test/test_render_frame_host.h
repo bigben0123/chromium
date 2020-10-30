@@ -12,7 +12,8 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "content/browser/frame_host/render_frame_host_impl.h"
+#include "base/optional.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/common/frame_messages.h"
 #include "content/common/navigation_client.mojom-forward.h"
 #include "content/common/navigation_params.mojom-forward.h"
@@ -78,6 +79,9 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
   // RenderFrameHostTester implementation.
   void InitializeRenderFrameIfNeeded() override;
   TestRenderFrameHost* AppendChild(const std::string& frame_name) override;
+  TestRenderFrameHost* AppendChildWithPolicy(
+      const std::string& frame_name,
+      const blink::ParsedFeaturePolicy& allow) override;
   void Detach() override;
   void SendNavigateWithTransition(int nav_entry_id,
                                   bool did_create_new_entry,
@@ -124,7 +128,7 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
                                               bool has_user_gesture);
 
   void SimulateDidChangeOpener(
-      const base::UnguessableToken& opener_frame_token);
+      const base::Optional<base::UnguessableToken>& opener_frame_token);
 
   void DidEnforceInsecureRequestPolicy(
       blink::mojom::InsecureRequestPolicy policy);
@@ -151,7 +155,8 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
       bool was_fetched_via_cache,
       bool is_signed_exchange_inner_response,
       net::HttpResponseInfo::ConnectionInfo connection_info,
-      base::Optional<net::SSLInfo> ssl_info);
+      base::Optional<net::SSLInfo> ssl_info,
+      scoped_refptr<net::HttpResponseHeaders> response_headers);
 
   // Used to simulate the commit of a navigation having been processed in the
   // renderer. If parameters required to commit are not provided, they will be
@@ -168,7 +173,7 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
   // Send a message with the sandbox flags and feature policy
   void SendFramePolicy(network::mojom::WebSandboxFlags sandbox_flags,
                        const blink::ParsedFeaturePolicy& fp_header,
-                       const blink::DocumentPolicy::FeatureState& dp_header);
+                       const blink::DocumentPolicyFeatureState& dp_header);
 
   // Creates a WebBluetooth Service with a dummy InterfaceRequest.
   WebBluetoothServiceImpl* CreateWebBluetoothServiceForTesting();
@@ -210,9 +215,6 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
   // callbacks.
   void SimulateLoadingCompleted(LoadingScenario loading_scenario);
 
-  // Expose CreateNewFullscreenWidget for tests.
-  using RenderFrameHostImpl::CreateNewFullscreenWidget;
-
  protected:
   void SendCommitNavigation(
       mojom::NavigationClient* navigation_client,
@@ -224,13 +226,14 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
       network::mojom::URLLoaderClientEndpointsPtr url_loader_client_endpoints,
       std::unique_ptr<blink::PendingURLLoaderFactoryBundle>
           subresource_loader_factories,
-      base::Optional<std::vector<::content::mojom::TransferrableURLLoaderPtr>>
+      base::Optional<std::vector<blink::mojom::TransferrableURLLoaderPtr>>
           subresource_overrides,
       blink::mojom::ControllerServiceWorkerInfoPtr
           controller_service_worker_info,
       blink::mojom::ServiceWorkerContainerInfoForClientPtr container_info,
       mojo::PendingRemote<network::mojom::URLLoaderFactory>
           prefetch_loader_factory,
+      blink::mojom::PolicyContainerClientPtr policy_container,
       const base::UnguessableToken& devtools_navigation_token) override;
   void SendCommitFailedNavigation(
       mojom::NavigationClient* navigation_client,
@@ -255,7 +258,8 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
       bool was_fetched_via_cache,
       bool is_signed_exchange_inner_response,
       net::HttpResponseInfo::ConnectionInfo connection_info,
-      base::Optional<net::SSLInfo> ssl_info);
+      base::Optional<net::SSLInfo> ssl_info,
+      scoped_refptr<net::HttpResponseHeaders> response_headers);
 
   // Computes the page ID for a pending navigation in this RenderFrameHost;
   int32_t ComputeNextPageID();

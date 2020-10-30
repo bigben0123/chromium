@@ -4,8 +4,8 @@
 
 #include "components/exo/display.h"
 #include "ash/public/cpp/shell_window_ids.h"
-#include "ash/public/cpp/window_pin_type.h"
 #include "ash/wm/desks/desks_util.h"
+#include "chromeos/ui/base/window_pin_type.h"
 #include "components/exo/buffer.h"
 #include "components/exo/client_controlled_shell_surface.h"
 #include "components/exo/data_device.h"
@@ -18,6 +18,7 @@
 #include "components/exo/sub_surface.h"
 #include "components/exo/surface.h"
 #include "components/exo/test/exo_test_base.h"
+#include "components/exo/toast_surface_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(USE_OZONE)
@@ -126,7 +127,8 @@ TEST_F(DisplayTest, CreateClientControlledShellSurface) {
   std::unique_ptr<ClientControlledShellSurface> shell_surface1 =
       display->CreateClientControlledShellSurface(
           surface1.get(), ash::kShellWindowId_SystemModalContainer,
-          2.0 /* default_scale_factor */);
+          /*default_scale_factor=*/2.0,
+          /*default_scale_cancellation=*/true);
   ASSERT_TRUE(shell_surface1);
   EXPECT_EQ(shell_surface1->scale(), 2.0);
 
@@ -134,7 +136,8 @@ TEST_F(DisplayTest, CreateClientControlledShellSurface) {
   std::unique_ptr<ShellSurfaceBase> shell_surface2 =
       display->CreateClientControlledShellSurface(
           surface2.get(), ash::desks_util::GetActiveDeskContainerId(),
-          1.0 /* default_scale_factor */);
+          /*default_scale_factor=*/1.0,
+          /*default_scale_cancellation=*/true);
   EXPECT_TRUE(shell_surface2);
 }
 
@@ -241,7 +244,8 @@ class TestFileHelper : public FileHelper {
 
 TEST_F(DisplayTest, CreateDataDevice) {
   TestDataDeviceDelegate device_delegate;
-  Display display(nullptr, nullptr, std::make_unique<TestFileHelper>());
+  Display display(nullptr, nullptr, nullptr,
+                  std::make_unique<TestFileHelper>());
 
   std::unique_ptr<DataDevice> device =
       display.CreateDataDevice(&device_delegate);
@@ -257,13 +261,14 @@ TEST_F(DisplayTest, PinnedAlwaysOnTopWindow) {
   std::unique_ptr<ClientControlledShellSurface> shell_surface =
       display.CreateClientControlledShellSurface(
           surface.get(), ash::desks_util::GetActiveDeskContainerId(),
-          2.0 /* default_scale_factor */);
+          /*default_scale_factor=*/2.0,
+          /*default_scale_cancellation=*/true);
   ASSERT_TRUE(shell_surface);
   EXPECT_EQ(shell_surface->scale(), 2.0);
 
   // This should not crash
   shell_surface->SetAlwaysOnTop(true);
-  shell_surface->SetPinned(ash::WindowPinType::kPinned);
+  shell_surface->SetPinned(chromeos::WindowPinType::kPinned);
 }
 
 }  // namespace

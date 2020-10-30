@@ -11,11 +11,8 @@
 
 #include "base/android/jni_weak_ref.h"
 #include "base/macros.h"
+#include "components/password_manager/core/browser/password_form_forward.h"
 #include "components/password_manager/core/browser/password_store.h"
-
-namespace autofill {
-struct PasswordForm;
-}
 
 class PasswordEditDelegate;
 class Profile;
@@ -39,7 +36,8 @@ class PasswordEditingBridge {
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& context,
       Profile* profile,
-      base::span<const std::unique_ptr<autofill::PasswordForm>> forms_to_change,
+      base::span<const std::unique_ptr<password_manager::PasswordForm>>
+          forms_to_change,
       std::vector<base::string16> existing_usernames);
 
   void HandleEditSavedPasswordEntry(

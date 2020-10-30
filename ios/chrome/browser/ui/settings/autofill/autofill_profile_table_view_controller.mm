@@ -34,6 +34,7 @@
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #include "ios/chrome/grit/ios_strings.h"
+#import "net/base/mac/url_conversions.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -59,7 +60,9 @@ typedef NS_ENUM(NSInteger, ItemType) {
 
 #pragma mark - AutofillProfileTableViewController
 
-@interface AutofillProfileTableViewController () <PersonalDataManagerObserver> {
+@interface AutofillProfileTableViewController () <
+    PersonalDataManagerObserver,
+    PopoverLabelViewControllerDelegate> {
   autofill::PersonalDataManager* _personalDataManager;
 
   ChromeBrowserState* _browserState;
@@ -159,7 +162,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   switchItem.text =
       l10n_util::GetNSString(IDS_AUTOFILL_ENABLE_PROFILES_TOGGLE_LABEL);
   switchItem.on = [self isAutofillProfileEnabled];
-  switchItem.accessibilityIdentifier = @"addressItem_switch";
+  switchItem.accessibilityIdentifier = kAutofillAddressSwitchViewId;
   return switchItem;
 }
 
@@ -170,7 +173,9 @@ typedef NS_ENUM(NSInteger, ItemType) {
       l10n_util::GetNSString(IDS_AUTOFILL_ENABLE_PROFILES_TOGGLE_LABEL);
   // The status could only be off when the pref is managed.
   managedAddressItem.statusText = l10n_util::GetNSString(IDS_IOS_SETTING_OFF);
-  managedAddressItem.accessibilityIdentifier = @"addressItem_managed";
+  managedAddressItem.accessibilityHint =
+      l10n_util::GetNSString(IDS_IOS_TOGGLE_SETTING_MANAGED_ACCESSIBILITY_HINT);
+  managedAddressItem.accessibilityIdentifier = kAutofillAddressManagedViewId;
   return managedAddressItem;
 }
 
@@ -303,6 +308,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
 - (void)didTapManagedUIInfoButton:(UIButton*)buttonView {
   EnterpriseInfoPopoverViewController* bubbleViewController =
       [[EnterpriseInfoPopoverViewController alloc] initWithEnterpriseName:nil];
+  bubbleViewController.delegate = self;
   [self presentViewController:bubbleViewController animated:YES completion:nil];
 
   // Disable the button when showing the bubble.
@@ -496,6 +502,13 @@ typedef NS_ENUM(NSInteger, ItemType) {
   } else {
     _deletionInProgress = NO;
   }
+}
+
+#pragma mark - PopoverLabelViewControllerDelegate
+
+- (void)didTapLinkURL:(NSURL*)URL {
+  GURL convertedURL = net::GURLWithNSURL(URL);
+  [self view:nil didTapLinkURL:convertedURL];
 }
 
 @end

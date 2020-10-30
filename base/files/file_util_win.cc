@@ -352,6 +352,9 @@ DWORD DoDeleteFile(const FilePath& path, bool recursive) {
              : ReturnLastErrorOrSuccessOnNotFound();
 }
 
+// Deletes the file/directory at |path| (recursively if |recursive| and |path|
+// names a directory), returning true on success. Sets the Windows last-error
+// code and returns false on failure.
 bool DeleteFileAndRecordMetrics(const FilePath& path, bool recursive) {
   static constexpr char kRecursive[] = "DeleteFile.Recursive";
   static constexpr char kNonRecursive[] = "DeleteFile.NonRecursive";
@@ -369,6 +372,8 @@ bool DeleteFileAndRecordMetrics(const FilePath& path, bool recursive) {
     return true;
 
   RecordFilesystemError(operation, error);
+
+  ::SetLastError(error);
   return false;
 }
 
@@ -386,12 +391,8 @@ bool DeleteFile(const FilePath& path) {
   return DeleteFileAndRecordMetrics(path, /*recursive=*/false);
 }
 
-bool DeleteFileRecursively(const FilePath& path) {
+bool DeletePathRecursively(const FilePath& path) {
   return DeleteFileAndRecordMetrics(path, /*recursive=*/true);
-}
-
-bool DeleteFile(const FilePath& path, bool recursive) {
-  return DeleteFileAndRecordMetrics(path, recursive);
 }
 
 bool DeleteFileAfterReboot(const FilePath& path) {
@@ -462,17 +463,39 @@ bool PathExists(const FilePath& path) {
   return (GetFileAttributes(path.value().c_str()) != INVALID_FILE_ATTRIBUTES);
 }
 
-bool PathIsWritable(const FilePath& path) {
-  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
-  HANDLE dir =
-      CreateFile(path.value().c_str(), FILE_ADD_FILE, kFileShareAll, NULL,
-                 OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+namespace {
 
-  if (dir == INVALID_HANDLE_VALUE)
+bool PathHasAccess(const FilePath& path,
+                   DWORD dir_desired_access,
+                   DWORD file_desired_access) {
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
+
+  const wchar_t* const path_str = path.value().c_str();
+  DWORD fileattr = GetFileAttributes(path_str);
+  if (fileattr == INVALID_FILE_ATTRIBUTES)
     return false;
 
-  CloseHandle(dir);
-  return true;
+  bool is_directory = fileattr & FILE_ATTRIBUTE_DIRECTORY;
+  DWORD desired_access =
+      is_directory ? dir_desired_access : file_desired_access;
+  DWORD flags_and_attrs =
+      is_directory ? FILE_FLAG_BACKUP_SEMANTICS : FILE_ATTRIBUTE_NORMAL;
+
+  win::ScopedHandle file(CreateFile(path_str, desired_access, kFileShareAll,
+                                    nullptr, OPEN_EXISTING, flags_and_attrs,
+                                    nullptr));
+
+  return file.IsValid();
+}
+
+}  // namespace
+
+bool PathIsReadable(const FilePath& path) {
+  return PathHasAccess(path, FILE_LIST_DIRECTORY, GENERIC_READ);
+}
+
+bool PathIsWritable(const FilePath& path) {
+  return PathHasAccess(path, FILE_ADD_FILE, GENERIC_WRITE);
 }
 
 bool DirectoryExists(const FilePath& path) {
@@ -1068,7 +1091,7 @@ bool CopyAndDeleteDirectory(const FilePath& from_path,
                             const FilePath& to_path) {
   ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   if (CopyDirectory(from_path, to_path, true)) {
-    if (DeleteFileRecursively(from_path))
+    if (DeletePathRecursively(from_path))
       return true;
 
     // Like Move, this function is not transactional, so we just

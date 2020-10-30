@@ -8,6 +8,7 @@
 
 #include "base/auto_reset.h"
 #include "base/feature_list.h"
+#include "base/ios/ios_util.h"
 #include "build/build_config.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
 #include "components/omnibox/browser/autocomplete_input.h"
@@ -44,6 +45,8 @@ int AutocompleteClassifier::DefaultOmniboxProviders() {
       AutocompleteProvider::TYPE_KEYWORD |
 #else
       AutocompleteProvider::TYPE_CLIPBOARD |
+      AutocompleteProvider::TYPE_MOST_VISITED_SITES |
+      AutocompleteProvider::TYPE_VERBATIM_MATCH |
 #endif
       AutocompleteProvider::TYPE_ZERO_SUGGEST |
       AutocompleteProvider::TYPE_ZERO_SUGGEST_LOCAL_HISTORY |
@@ -57,7 +60,7 @@ int AutocompleteClassifier::DefaultOmniboxProviders() {
       AutocompleteProvider::TYPE_HISTORY_QUICK |
       AutocompleteProvider::TYPE_HISTORY_URL |
       AutocompleteProvider::TYPE_SEARCH | AutocompleteProvider::TYPE_SHORTCUTS |
-      (base::FeatureList::IsEnabled(query_tiles::features::kQueryTilesInOmnibox)
+      (query_tiles::features::IsEnabledQueryTilesInOmnibox()
            ? AutocompleteProvider::TYPE_QUERY_TILE
            : 0);
 }

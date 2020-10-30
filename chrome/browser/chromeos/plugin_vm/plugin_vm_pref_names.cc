@@ -26,16 +26,11 @@ const char kPluginVmImage[] = "plugin_vm.image";
 // this user on this device.
 const char kPluginVmImageExists[] = "plugin_vm.image_exists";
 
-// A boolean preference indicating whether Plugin VM is allowed to use printers.
+// Boolean preferences indicating whether Plugin VM is allowed to use certain
+// devices.
 const char kPluginVmPrintersAllowed[] = "plugin_vm.printers_allowed";
-
-// A boolean preference indicating whether Plugin VM is allowed to access the
-// camera.
 const char kPluginVmCameraAllowed[] = "plugin_vm.camera_allowed";
-
-// A boolean preference indicating whether Plugin VM is allowed to access the
-// microphone.
-const char kPluginVmMicrophoneAllowed[] = "plugin_vm.microphone_allowed";
+const char kPluginVmMicAllowed[] = "plugin_vm.mic_allowed";
 
 // A string preference that specifies PluginVm licensing user id.
 const char kPluginVmUserId[] = "plugin_vm.user_id";
@@ -63,7 +58,7 @@ void RegisterProfilePrefs(PrefRegistrySimple* registry) {
   // but we'll need to revisit before launch.
   registry->RegisterBooleanPref(kPluginVmPrintersAllowed, true);
   registry->RegisterBooleanPref(kPluginVmCameraAllowed, false);
-  registry->RegisterBooleanPref(kPluginVmMicrophoneAllowed, false);
+  registry->RegisterBooleanPref(kPluginVmMicAllowed, false);
   registry->RegisterStringPref(kPluginVmUserId, std::string());
   registry->RegisterBooleanPref(kPluginVmDataCollectionAllowed, false);
   registry->RegisterIntegerPref(kPluginVmRequiredFreeDiskSpaceGB,

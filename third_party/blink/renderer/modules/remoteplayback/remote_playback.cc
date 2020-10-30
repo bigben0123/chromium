@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/html/media/remote_playback_observer.h"
@@ -204,7 +205,8 @@ ScriptPromise RemotePlayback::prompt(ScriptState* script_state) {
     return promise;
   }
 
-  if (!LocalFrame::HasTransientUserActivation(media_element_->GetFrame())) {
+  if (!LocalFrame::HasTransientUserActivation(
+          media_element_->DomWindow()->GetFrame())) {
     resolver->Reject(MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kInvalidAccessError,
         "RemotePlayback::prompt() requires user gesture."));
@@ -502,7 +504,12 @@ void RemotePlayback::AvailabilityChanged(
   if (new_availability == old_availability)
     return;
 
-  for (auto& callback : availability_callbacks_.Values())
+  // Copy the callbacks to a temporary vector to prevent iterator invalidations,
+  // in case the JS callbacks invoke watchAvailability().
+  HeapVector<Member<AvailabilityCallbackWrapper>> callbacks;
+  CopyValuesToVector(availability_callbacks_, callbacks);
+
+  for (auto& callback : callbacks)
     callback->Run(this, new_availability);
 }
 

@@ -22,7 +22,6 @@
 #include "ui/views/layout/flex_layout.h"
 #include "ui/views/layout/flex_layout_types.h"
 #include "ui/views/view_class_properties.h"
-#include "ui/views/widget/widget_observer.h"
 
 struct ExtensionsToolbarContainer::DropInfo {
   DropInfo(ToolbarActionsModel::ActionId action_id, size_t index);
@@ -52,7 +51,7 @@ ExtensionsToolbarContainer::ExtensionsToolbarContainer(Browser* browser,
 
   model_observer_.Add(model_);
   // Do not flip the Extensions icon in RTL.
-  extensions_button_->EnableCanvasFlippingForRTLUI(false);
+  extensions_button_->SetFlipCanvasOnPaintForRTLUI(false);
 
   const views::FlexSpecification hide_icon_flex_specification =
       views::FlexSpecification(views::LayoutOrientation::kHorizontal,
@@ -107,7 +106,6 @@ ExtensionsToolbarContainer::~ExtensionsToolbarContainer() {
 
 void ExtensionsToolbarContainer::UpdateAllIcons() {
   extensions_button_->UpdateIcon();
-
   for (const auto& action : actions_)
     action->UpdateState();
 }
@@ -245,7 +243,7 @@ void ExtensionsToolbarContainer::OnContextMenuShown(
   // Only update the extension's toolbar visibility if the context menu is being
   // shown from an extension visible in the toolbar.
   if (!ExtensionsMenuView::IsShowing()) {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
     // TODO(crbug/1065584): Remove hiding active popup here once this bug is
     // fixed.
     HideActivePopup();
@@ -278,13 +276,13 @@ extensions::ExtensionContextMenuModel::ButtonVisibility
 ExtensionsToolbarContainer::GetActionVisibility(
     const ToolbarActionViewController* action) const {
   extensions::ExtensionContextMenuModel::ButtonVisibility visibility =
-      extensions::ExtensionContextMenuModel::VISIBLE;
+      extensions::ExtensionContextMenuModel::PINNED;
 
   if (ShouldForceVisibility(action->GetId()) &&
       !model_->IsActionPinned(action->GetId())) {
     visibility = extensions::ExtensionContextMenuModel::TRANSITIVELY_VISIBLE;
   } else if (!IsActionVisibleOnToolbar(action)) {
-    visibility = extensions::ExtensionContextMenuModel::OVERFLOWED;
+    visibility = extensions::ExtensionContextMenuModel::UNPINNED;
   }
   return visibility;
 }
@@ -351,7 +349,7 @@ void ExtensionsToolbarContainer::ShowToolbarActionBubble(
   views::View* const anchor_view = GetViewForId(extension_id);
 
   views::Widget* const widget = views::BubbleDialogDelegateView::CreateBubble(
-      new ToolbarActionsBarBubbleViews(
+      std::make_unique<ToolbarActionsBarBubbleViews>(
           anchor_view ? anchor_view : extensions_button_,
           anchor_view != nullptr, std::move(controller)));
 
@@ -471,8 +469,7 @@ void ExtensionsToolbarContainer::CreateActionForId(
   auto icon = std::make_unique<ToolbarActionView>(actions_.back().get(), this);
   // Set visibility before adding to prevent extraneous animation.
   icon->SetVisible(CanShowIconInToolbar() && model_->IsActionPinned(action_id));
-  icon->AddButtonObserver(this);
-  icon->AddObserver(this);
+  ObserveButton(icon.get());
   icons_.insert({action_id, AddChildView(std::move(icon))});
 }
 
@@ -663,9 +660,10 @@ void ExtensionsToolbarContainer::SetExtensionIconVisibility(
                            return GetViewForId(action_id) == GetViewForId(id);
                          });
   ToolbarActionView* extension_view = GetViewForId(*it);
-  extension_view->SetImage(
+  extension_view->SetImageModel(
       views::Button::STATE_NORMAL,
-      visible ? GetExtensionIcon(extension_view) : gfx::ImageSkia());
+      visible ? ui::ImageModel::FromImageSkia(GetExtensionIcon(extension_view))
+              : ui::ImageModel());
 }
 
 void ExtensionsToolbarContainer::UpdateContainerVisibility() {

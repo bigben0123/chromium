@@ -14,26 +14,28 @@ import androidx.annotation.VisibleForTesting;
 import org.chromium.base.Callback;
 import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.browser.ActivityTabProvider;
-import org.chromium.chrome.browser.GlobalDiscardableReferencePool;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.image_fetcher.ImageFetcher;
 import org.chromium.chrome.browser.image_fetcher.ImageFetcherConfig;
 import org.chromium.chrome.browser.image_fetcher.ImageFetcherFactory;
+import org.chromium.chrome.browser.omnibox.OmniboxSuggestionType;
 import org.chromium.chrome.browser.omnibox.UrlBarEditingTextStateProvider;
+import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteResult.GroupDetails;
 import org.chromium.chrome.browser.omnibox.suggestions.answer.AnswerSuggestionProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.basic.BasicSuggestionProcessor;
-import org.chromium.chrome.browser.omnibox.suggestions.basic.SuggestionHost;
 import org.chromium.chrome.browser.omnibox.suggestions.clipboard.ClipboardSuggestionProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.editurl.EditUrlSuggestionProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.entity.EntitySuggestionProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.header.HeaderProcessor;
+import org.chromium.chrome.browser.omnibox.suggestions.mostvisited.MostVisitedTilesProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.tail.TailSuggestionProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.tiles.TileSuggestionProcessor;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.share.ShareDelegate;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.ui.favicon.LargeIconBridge;
 import org.chromium.components.browser_ui.util.ConversionUtils;
+import org.chromium.components.browser_ui.util.GlobalDiscardableReferencePool;
+import org.chromium.components.favicon.LargeIconBridge;
 import org.chromium.components.query_tiles.QueryTile;
 import org.chromium.ui.modelutil.PropertyModel;
 
@@ -50,6 +52,7 @@ class DropdownItemViewInfoListBuilder {
     private static final int DEFAULT_SIZE_OF_VISIBLE_GROUP = 5;
 
     private final List<SuggestionProcessor> mPriorityOrderedSuggestionProcessors;
+    private @NonNull AutocompleteController mAutocompleteController;
 
     private HeaderProcessor mHeaderProcessor;
     private ActivityTabProvider mActivityTabProvider;
@@ -61,9 +64,10 @@ class DropdownItemViewInfoListBuilder {
     private boolean mEnableAdaptiveSuggestionsCount;
     private boolean mBuiltListHasFullyConcealedElements;
 
-    DropdownItemViewInfoListBuilder() {
+    DropdownItemViewInfoListBuilder(AutocompleteController controller) {
         mPriorityOrderedSuggestionProcessors = new ArrayList<>();
         mDropdownHeight = DROPDOWN_HEIGHT_UNKNOWN;
+        mAutocompleteController = controller;
     }
 
     /**
@@ -99,6 +103,8 @@ class DropdownItemViewInfoListBuilder {
         registerSuggestionProcessor(new TailSuggestionProcessor(context, host));
         registerSuggestionProcessor(
                 new TileSuggestionProcessor(context, queryTileSuggestionCallback));
+        registerSuggestionProcessor(
+                new MostVisitedTilesProcessor(context, host, iconBridgeSupplier));
         registerSuggestionProcessor(
                 new BasicSuggestionProcessor(context, host, textProvider, iconBridgeSupplier));
     }
@@ -153,7 +159,7 @@ class DropdownItemViewInfoListBuilder {
 
         mIconBridge = new LargeIconBridge(profile);
         mImageFetcher = ImageFetcherFactory.createImageFetcher(ImageFetcherConfig.IN_MEMORY_ONLY,
-                GlobalDiscardableReferencePool.getReferencePool(), MAX_IMAGE_CACHE_SIZE);
+                profile, GlobalDiscardableReferencePool.getReferencePool(), MAX_IMAGE_CACHE_SIZE);
     }
 
     /**
@@ -203,6 +209,10 @@ class DropdownItemViewInfoListBuilder {
     void onUrlFocusChange(boolean hasFocus) {
         if (!hasFocus && mImageFetcher != null) {
             mImageFetcher.clear();
+        }
+
+        if (!hasFocus) {
+            mBuiltListHasFullyConcealedElements = false;
         }
 
         mHeaderProcessor.onUrlFocusChange(hasFocus);
@@ -270,10 +280,18 @@ class DropdownItemViewInfoListBuilder {
 
             if (currentGroup != suggestion.getGroupId()) {
                 currentGroup = suggestion.getGroupId();
-                final PropertyModel model = mHeaderProcessor.createModel();
-                mHeaderProcessor.populateModel(model, currentGroup,
-                        autocompleteResult.getGroupHeaders().get(currentGroup));
-                viewInfoList.add(new DropdownItemViewInfo(mHeaderProcessor, model, currentGroup));
+                final GroupDetails details =
+                        autocompleteResult.getGroupsDetails().get(currentGroup);
+
+                // Only add the Header Group when both ID and details are specified.
+                // Note that despite GroupsDetails map not holding <null> values,
+                // a group definition for specific ID may be unavailable.
+                if (details != null) {
+                    final PropertyModel model = mHeaderProcessor.createModel();
+                    mHeaderProcessor.populateModel(model, currentGroup, details.title);
+                    viewInfoList.add(
+                            new DropdownItemViewInfo(mHeaderProcessor, model, currentGroup));
+                }
             }
 
             final PropertyModel model = processor.createModel();
@@ -341,6 +359,50 @@ class DropdownItemViewInfoListBuilder {
     void groupSuggestionsBySearchVsURL(
             List<Pair<OmniboxSuggestion, SuggestionProcessor>> suggestionsPairedWithProcessors,
             int numVisibleSuggestions) {
+        final int firstIndexWithHeader = findFirstIndexWithHeader(suggestionsPairedWithProcessors);
+        final int firstIndexForGrouping =
+                findFirstIndexForGrouping(suggestionsPairedWithProcessors);
+
+        // Check if we have any suggestions we can group.
+        if (firstIndexWithHeader <= firstIndexForGrouping) return;
+
+        // Compute the index of first concealed element as a start of the second group.
+        // This addresses the situation, where all visible and some concealed suggestions are
+        // specialized (eg. visible default match, query tiles and concealed clipboard suggestion).
+        final int firstIndexInConcealedGroup = Math.max(
+                Math.min(numVisibleSuggestions, firstIndexWithHeader), firstIndexForGrouping);
+
+        // Comparator addressing the suggestion grouping.
+        final Comparator<Pair<OmniboxSuggestion, SuggestionProcessor>> comparator =
+                (pair1, pair2) -> {
+            if (pair1.first.isSearchSuggestion() != pair2.first.isSearchSuggestion()) {
+                return pair1.first.isSearchSuggestion() ? -1 : 1;
+            }
+            return pair2.first.getRelevance() - pair1.first.getRelevance();
+        };
+
+        // Sort visible part of suggestions list.
+        if (firstIndexForGrouping < firstIndexInConcealedGroup) {
+            Collections.sort(suggestionsPairedWithProcessors.subList(
+                                     firstIndexForGrouping, firstIndexInConcealedGroup),
+                    comparator);
+            mAutocompleteController.groupSuggestionsBySearchVsURL(
+                    firstIndexForGrouping, firstIndexInConcealedGroup);
+        }
+
+        // Sort the concealed part of suggestions list.
+        if (firstIndexInConcealedGroup < firstIndexWithHeader) {
+            Collections.sort(suggestionsPairedWithProcessors.subList(
+                                     firstIndexInConcealedGroup, firstIndexWithHeader),
+                    comparator);
+            mAutocompleteController.groupSuggestionsBySearchVsURL(
+                    firstIndexInConcealedGroup, firstIndexWithHeader);
+        }
+    }
+
+    /** @return Index of the first suggestion decorated with a suggestion header. */
+    private int findFirstIndexWithHeader(
+            List<Pair<OmniboxSuggestion, SuggestionProcessor>> suggestionsPairedWithProcessors) {
         // Native counterpart ensures that suggestion with group headers always end up at the
         // end of the list. This guarantees that these suggestions are both grouped at the end
         // of the list and that there's nothing more we should do about them. See
@@ -354,28 +416,32 @@ class DropdownItemViewInfoListBuilder {
                 break;
             }
         }
+        return firstIndexWithHeader;
+    }
 
-        // Make sure we do not accidentally rearrange grouped suggestions.
-        if (numVisibleSuggestions > firstIndexWithHeader) {
-            numVisibleSuggestions = firstIndexWithHeader;
-        }
+    /**
+     * @return Index of the first element that should be used to group suggestions by
+     *         search vs URL.
+     */
+    private int findFirstIndexForGrouping(
+            List<Pair<OmniboxSuggestion, SuggestionProcessor>> suggestionsPairedWithProcessors) {
+        int firstIndexForGrouping;
+        // Find the first suggestion that will be the subject for grouping by search vs url.
+        // Note that the first suggestion is the default match and we never change it.
+        for (firstIndexForGrouping = 1;
+                firstIndexForGrouping < suggestionsPairedWithProcessors.size();
+                firstIndexForGrouping++) {
+            final @OmniboxSuggestionType int type =
+                    suggestionsPairedWithProcessors.get(firstIndexForGrouping).first.getType();
 
-        if (numVisibleSuggestions == 0) return;
-
-        final Comparator<Pair<OmniboxSuggestion, SuggestionProcessor>> comparator =
-                (pair1, pair2) -> {
-            if (pair1.first.isSearchSuggestion() != pair2.first.isSearchSuggestion()) {
-                return pair1.first.isSearchSuggestion() ? -1 : 1;
+            if (type != OmniboxSuggestionType.TILE_SUGGESTION
+                    && type != OmniboxSuggestionType.CLIPBOARD_TEXT
+                    && type != OmniboxSuggestionType.CLIPBOARD_URL
+                    && type != OmniboxSuggestionType.CLIPBOARD_IMAGE) {
+                break;
             }
-            return pair2.first.getRelevance() - pair1.first.getRelevance();
-        };
-
-        // Note: the first match is always the default match. We do not want to sort it.
-        Collections.sort(
-                suggestionsPairedWithProcessors.subList(1, numVisibleSuggestions), comparator);
-        Collections.sort(suggestionsPairedWithProcessors.subList(
-                                 numVisibleSuggestions, firstIndexWithHeader),
-                comparator);
+        }
+        return firstIndexForGrouping;
     }
 
     /**
@@ -392,5 +458,14 @@ class DropdownItemViewInfoListBuilder {
         }
         assert false : "No default handler for suggestions";
         return null;
+    }
+
+    /**
+     * Change the AutocompleteController instance that will be used by this class.
+     *
+     * @param controller New AutocompleteController to use.
+     */
+    void setAutocompleteControllerForTest(@NonNull AutocompleteController controller) {
+        mAutocompleteController = controller;
     }
 }

@@ -32,7 +32,7 @@
 #include "chrome/browser/notifications/notification_common.h"
 #include "chrome/browser/notifications/notification_display_service_impl.h"
 #include "chrome/browser/notifications/notification_handler.h"
-#include "chrome/browser/notifications/win/notification_image_retainer.h"
+#include "chrome/browser/notifications/notification_image_retainer.h"
 #include "chrome/browser/notifications/win/notification_metrics.h"
 #include "chrome/browser/notifications/win/notification_template_builder.h"
 #include "chrome/browser/notifications/win/notification_util.h"
@@ -83,12 +83,13 @@ typedef winfoundtn::ITypedEventHandler<
     ToastFailedHandler;
 
 // Templated wrapper for winfoundtn::GetActivationFactory().
-template <unsigned int size, typename T>
-HRESULT CreateActivationFactory(wchar_t const (&class_name)[size], T** object) {
+template <unsigned int size>
+HRESULT CreateActivationFactory(wchar_t const (&class_name)[size],
+                                const IID& iid,
+                                void** factory) {
   ScopedHString ref_class_name =
       ScopedHString::Create(base::StringPiece16(class_name, size - 1));
-  return base::win::RoGetActivationFactory(ref_class_name.get(),
-                                           IID_PPV_ARGS(object));
+  return base::win::RoGetActivationFactory(ref_class_name.get(), iid, factory);
 }
 
 void ForwardNotificationOperationOnUiThread(
@@ -158,6 +159,10 @@ class NotificationPlatformBridgeWinImpl
                                       InitializeExpectedDisplayedNotification,
                                   base::Unretained(this)));
   }
+  NotificationPlatformBridgeWinImpl(const NotificationPlatformBridgeWinImpl&) =
+      delete;
+  NotificationPlatformBridgeWinImpl& operator=(
+      const NotificationPlatformBridgeWinImpl&) = delete;
 
   // Obtain an IToastNotification interface from a given XML as in
   // |xml_template|. This function is only used when displaying notification in
@@ -180,7 +185,7 @@ class NotificationPlatformBridgeWinImpl
     }
 
     mswr::ComPtr<winxml::Dom::IXmlDocumentIO> document_io;
-    hr = inspectable.As<winxml::Dom::IXmlDocumentIO>(&document_io);
+    hr = inspectable.As(&document_io);
     if (FAILED(hr)) {
       LogDisplayHistogram(
           DisplayStatus::CONVERSION_FAILED_INSPECTABLE_TO_XML_IO);
@@ -210,7 +215,7 @@ class NotificationPlatformBridgeWinImpl
         toast_notification_factory;
     hr = CreateActivationFactory(
         RuntimeClass_Windows_UI_Notifications_ToastNotification,
-        toast_notification_factory.GetAddressOf());
+        IID_PPV_ARGS(&toast_notification_factory));
     if (FAILED(hr)) {
       LogDisplayHistogram(DisplayStatus::CREATE_FACTORY_FAILED);
       DLOG(ERROR) << "Unable to create the IToastNotificationFactory "
@@ -220,7 +225,7 @@ class NotificationPlatformBridgeWinImpl
 
     mswr::ComPtr<winui::Notifications::IToastNotification> toast_notification;
     hr = toast_notification_factory->CreateToastNotification(
-        document.Get(), toast_notification.GetAddressOf());
+        document.Get(), &toast_notification);
     if (FAILED(hr)) {
       LogDisplayHistogram(DisplayStatus::CREATE_TOAST_NOTIFICATION_FAILED);
       DLOG(ERROR) << "Unable to create the IToastNotification " << std::hex
@@ -426,6 +431,9 @@ class NotificationPlatformBridgeWinImpl
       DLOG(ERROR) << "Failed to remove notification with id "
                   << notification_id.c_str() << " " << std::hex << hr;
     } else {
+      // We expect the notification to be removed from the action center now.
+      displayed_notifications_.erase({profile_id, notification_id});
+
       LogCloseHistogram(CloseStatus::SUCCESS);
     }
   }
@@ -436,7 +444,7 @@ class NotificationPlatformBridgeWinImpl
         toast_manager;
     HRESULT hr = CreateActivationFactory(
         RuntimeClass_Windows_UI_Notifications_ToastNotificationManager,
-        toast_manager.GetAddressOf());
+        IID_PPV_ARGS(&toast_manager));
     if (FAILED(hr)) {
       LogHistoryHistogram(
           HistoryStatus::CREATE_TOAST_NOTIFICATION_MANAGER_FAILED);
@@ -447,9 +455,7 @@ class NotificationPlatformBridgeWinImpl
 
     mswr::ComPtr<winui::Notifications::IToastNotificationManagerStatics2>
         toast_manager2;
-    hr = toast_manager
-             .As<winui::Notifications::IToastNotificationManagerStatics2>(
-                 &toast_manager2);
+    hr = toast_manager.As(&toast_manager2);
     if (FAILED(hr)) {
       LogHistoryHistogram(
           HistoryStatus::QUERY_TOAST_MANAGER_STATISTICS2_FAILED);
@@ -460,7 +466,7 @@ class NotificationPlatformBridgeWinImpl
 
     mswr::ComPtr<winui::Notifications::IToastNotificationHistory>
         notification_history;
-    hr = toast_manager2->get_History(notification_history.GetAddressOf());
+    hr = toast_manager2->get_History(&notification_history);
     if (FAILED(hr)) {
       LogHistoryHistogram(HistoryStatus::GET_TOAST_HISTORY_FAILED);
       DLOG(ERROR) << "Failed to get IToastNotificationHistory " << std::hex
@@ -484,8 +490,7 @@ class NotificationPlatformBridgeWinImpl
     }
 
     mswr::ComPtr<winui::Notifications::IToastNotificationHistory2> history2;
-    HRESULT hr =
-        history.As<winui::Notifications::IToastNotificationHistory2>(&history2);
+    HRESULT hr = history.As(&history2);
     if (FAILED(hr)) {
       LogGetDisplayedStatus(
           GetDisplayedStatus::QUERY_TOAST_NOTIFICATION_HISTORY2_FAILED);
@@ -779,7 +784,7 @@ class NotificationPlatformBridgeWinImpl
         toast_manager;
     HRESULT hr = CreateActivationFactory(
         RuntimeClass_Windows_UI_Notifications_ToastNotificationManager,
-        toast_manager.GetAddressOf());
+        IID_PPV_ARGS(&toast_manager));
     if (FAILED(hr)) {
       LogDisplayHistogram(
           DisplayStatus::CREATE_TOAST_NOTIFICATION_MANAGER_FAILED);
@@ -851,8 +856,6 @@ class NotificationPlatformBridgeWinImpl
 
   // The ToastNotifier to use to communicate with the Action Center.
   mswr::ComPtr<winui::Notifications::IToastNotifier> notifier_;
-
-  DISALLOW_COPY_AND_ASSIGN(NotificationPlatformBridgeWinImpl);
 };
 
 std::vector<mswr::ComPtr<winui::Notifications::IToastNotification>>*

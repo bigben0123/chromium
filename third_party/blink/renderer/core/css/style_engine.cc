@@ -29,6 +29,7 @@
 
 #include "third_party/blink/renderer/core/css/style_engine.h"
 
+#include "third_party/blink/public/mojom/frame/color_scheme.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_theme_engine.h"
 #include "third_party/blink/renderer/core/css/css_default_style_sheets.h"
@@ -111,12 +112,17 @@ StyleEngine::StyleEngine(Document& document)
     : document_(&document),
       is_html_import_(document.IsHTMLImport()),
       document_style_sheet_collection_(
-          MakeGarbageCollected<DocumentStyleSheetCollection>(document)) {
+          MakeGarbageCollected<DocumentStyleSheetCollection>(document)),
+      owner_color_scheme_(mojom::blink::ColorScheme::kLight) {
   if (document.GetFrame()) {
     // We don't need to create CSSFontSelector for imported document or
     // HTMLTemplateElement's document, because those documents have no frame.
+    // Likewise for the StyleResolver.
     font_selector_ = CreateCSSFontSelectorFor(document);
     font_selector_->RegisterForInvalidationCallbacks(this);
+    resolver_ = MakeGarbageCollected<StyleResolver>(document);
+    if (const auto* owner = document.GetFrame()->Owner())
+      owner_color_scheme_ = owner->GetColorScheme();
   }
   if (document.IsInMainFrame())
     viewport_resolver_ = MakeGarbageCollected<ViewportStyleResolver>(document);
@@ -125,6 +131,7 @@ StyleEngine::StyleEngine(Document& document)
   if (auto* settings = GetDocument().GetSettings()) {
     if (!settings->GetForceDarkModeEnabled())
       preferred_color_scheme_ = settings->GetPreferredColorScheme();
+    UpdateColorSchemeMetrics();
   }
   if (Platform::Current() && Platform::Current()->ThemeEngine())
     forced_colors_ = Platform::Current()->ThemeEngine()->GetForcedColors();
@@ -465,6 +472,14 @@ void StyleEngine::RemoveTextTrack(TextTrack* text_track) {
   text_tracks_.erase(text_track);
 }
 
+Element* StyleEngine::EnsureVTTOriginatingElement() {
+  if (!vtt_originating_element_) {
+    vtt_originating_element_ = MakeGarbageCollected<Element>(
+        QualifiedName(g_null_atom, g_empty_atom, g_empty_atom), document_);
+  }
+  return vtt_originating_element_;
+}
+
 void StyleEngine::MediaQueryAffectingValueChanged(
     HeapHashSet<Member<TextTrack>>& text_tracks,
     MediaValueChange change) {
@@ -595,6 +610,8 @@ bool StyleEngine::NeedsActiveStyleUpdate() const {
 
 void StyleEngine::UpdateActiveStyle() {
   DCHECK(GetDocument().IsActive());
+  DCHECK(IsMainThread());
+  TRACE_EVENT0("blink", "Document::updateActiveStyle");
   UpdateViewport();
   UpdateActiveStyleSheets();
   UpdateGlobalRuleSet();
@@ -673,15 +690,12 @@ RuleSet* StyleEngine::RuleSetForSheet(CSSStyleSheet& sheet) {
     return nullptr;
 
   AddRuleFlags add_rule_flags = kRuleHasNoSpecialState;
-  if (document_->GetSecurityOrigin()->CanRequest(sheet.BaseURL()))
+  if (document_->GetExecutionContext()->GetSecurityOrigin()->CanRequest(
+          sheet.BaseURL())) {
     add_rule_flags = kRuleHasDocumentSecurityOrigin;
+  }
   return &sheet.Contents()->EnsureRuleSet(*media_query_evaluator_,
                                           add_rule_flags);
-}
-
-void StyleEngine::CreateResolver() {
-  resolver_ = MakeGarbageCollected<StyleResolver>(*document_);
-  resolver_->SetRuleUsageTracker(tracker_);
 }
 
 void StyleEngine::ClearResolvers() {
@@ -881,7 +895,6 @@ void StyleEngine::InvalidateStyleAndLayoutForFontUpdates() {
   if (!fonts_need_update_)
     return;
 
-  DCHECK(RuntimeEnabledFeatures::CSSReducedFontLoadingInvalidationsEnabled());
   TRACE_EVENT0("blink", "StyleEngine::InvalidateStyleAndLayoutForFontUpdates");
 
   fonts_need_update_ = false;
@@ -909,13 +922,7 @@ void StyleEngine::FontsNeedUpdate(FontSelector*, FontInvalidationReason) {
   if (resolver_)
     resolver_->InvalidateMatchedPropertiesCache();
   MarkViewportStyleDirty();
-
-  if (RuntimeEnabledFeatures::CSSReducedFontLoadingInvalidationsEnabled()) {
-    MarkFontsNeedUpdate();
-  } else {
-    MarkAllElementsForStyleRecalc(
-        StyleChangeReasonForTracing::Create(style_change_reason::kFonts));
-  }
+  MarkFontsNeedUpdate();
 
   probe::FontsUpdated(document_->GetExecutionContext(), nullptr, String(),
                       nullptr);
@@ -1491,6 +1498,7 @@ enum RuleSetFlags {
   kKeyframesRules = 1 << 1,
   kFullRecalcRules = 1 << 2,
   kPropertyRules = 1 << 3,
+  kScrollTimelineRules = 1 << 4,
 };
 
 unsigned GetRuleSetFlags(const HeapHashSet<Member<RuleSet>> rule_sets) {
@@ -1505,6 +1513,8 @@ unsigned GetRuleSetFlags(const HeapHashSet<Member<RuleSet>> rule_sets) {
       flags |= kFullRecalcRules;
     if (!rule_set->PropertyRules().IsEmpty())
       flags |= kPropertyRules;
+    if (!rule_set->ScrollTimelineRules().IsEmpty())
+      flags |= kScrollTimelineRules;
   }
   return flags;
 }
@@ -1655,6 +1665,23 @@ void StyleEngine::ApplyRuleSetChanges(
     }
   }
 
+  // TODO(crbug.com/1097055): Support user origin rules.
+  if (changed_rule_flags & kScrollTimelineRules) {
+    // @scroll-timeline rules are currently not allowed in shadow trees.
+    // https://drafts.csswg.org/scroll-animations-1/#scroll-timeline-at-rule
+    if (tree_scope.RootNode().IsDocumentNode()) {
+      scroll_timeline_map_.clear();
+
+      for (const ActiveStyleSheet& active_sheet : new_style_sheets) {
+        if (RuleSet* rule_set = active_sheet.second)
+          AddScrollTimelineRules(*rule_set);
+      }
+
+      MarkAllElementsForStyleRecalc(StyleChangeReasonForTracing::Create(
+          style_change_reason::kScrollTimeline));
+    }
+  }
+
   bool has_rebuilt_font_face_cache = false;
   if (rebuild_font_face_cache)
     has_rebuilt_font_face_cache = ClearFontFaceCacheAndAddUserFonts();
@@ -1759,11 +1786,10 @@ bool StyleEngine::UpdateRemUnits(const ComputedStyle* old_root_style,
     return false;
   if (!old_root_style || old_root_style->SpecifiedFontSize() !=
                              new_root_style->SpecifiedFontSize()) {
-    DCHECK(Resolver());
     // Resolved rem units are stored in the matched properties cache so we need
     // to make sure to invalidate the cache if the documentElement font size
     // changes.
-    Resolver()->InvalidateMatchedPropertiesCache();
+    GetStyleResolver().InvalidateMatchedPropertiesCache();
     return true;
   }
   return false;
@@ -1920,6 +1946,13 @@ void StyleEngine::AddPropertyRules(const RuleSet& rule_set) {
   }
 }
 
+void StyleEngine::AddScrollTimelineRules(const RuleSet& rule_set) {
+  const HeapVector<Member<StyleRuleScrollTimeline>> scroll_timeline_rules =
+      rule_set.ScrollTimelineRules();
+  for (const auto& rule : scroll_timeline_rules)
+    scroll_timeline_map_.Set(AtomicString(rule->GetName()), rule);
+}
+
 StyleRuleKeyframes* StyleEngine::KeyframeStylesForAnimation(
     const AtomicString& animation_name) {
   if (keyframes_rule_map_.IsEmpty())
@@ -1930,6 +1963,11 @@ StyleRuleKeyframes* StyleEngine::KeyframeStylesForAnimation(
     return nullptr;
 
   return it->value.Get();
+}
+
+StyleRuleScrollTimeline* StyleEngine::FindScrollTimelineRule(
+    const AtomicString& name) {
+  return scroll_timeline_map_.at(name);
 }
 
 DocumentStyleEnvironmentVariables& StyleEngine::EnsureEnvironmentVariables() {
@@ -1968,13 +2006,21 @@ void StyleEngine::RecalcStyle() {
   PropagateWritingModeAndDirectionToHTMLRoot();
 }
 
-void StyleEngine::ClearEnsuredDescendantStyles(Element& element) {
-  GetDocument().Lifecycle().AdvanceTo(DocumentLifecycle::kInStyleRecalc);
-  SelectorFilterRootScope filter_scope(&element);
-  element.ClearNeedsStyleRecalc();
-  element.RecalcDescendantStyles(StyleRecalcChange::kClearEnsured);
-  element.ClearChildNeedsStyleRecalc();
-  GetDocument().Lifecycle().AdvanceTo(DocumentLifecycle::kStyleClean);
+void StyleEngine::ClearEnsuredDescendantStyles(Element& root) {
+  Node* current = &root;
+  while (current) {
+    if (auto* element = DynamicTo<Element>(current)) {
+      if (const auto* style = element->GetComputedStyle()) {
+        DCHECK(style->IsEnsuredOutsideFlatTree());
+        element->SetComputedStyle(nullptr);
+        element->ClearNeedsStyleRecalc();
+        element->ClearChildNeedsStyleRecalc();
+        current = FlatTreeTraversal::Next(*current, &root);
+        continue;
+      }
+    }
+    current = FlatTreeTraversal::NextSkippingChildren(*current, &root);
+  }
 }
 
 void StyleEngine::RebuildLayoutTree() {
@@ -2050,7 +2096,7 @@ void StyleEngine::ViewportDefiningElementDidChange() {
     // need a recalc, this will not be updated as its done as part of setting
     // ComputedStyle on the LayoutObject. Force a SetStyle for body when the
     // ViewportDefiningElement changes in order to trigger an update of
-    // HasOverflowClip() and the PaintLayer in StyleDidChange().
+    // IsScrollContainer() and the PaintLayer in StyleDidChange().
     layout_object->SetStyle(ComputedStyle::Clone(*layout_object->Style()));
   }
 }
@@ -2069,14 +2115,24 @@ void StyleEngine::UpdateStyleInvalidationRoot(ContainerNode* ancestor,
 
 void StyleEngine::UpdateStyleRecalcRoot(ContainerNode* ancestor,
                                         Node* dirty_node) {
-  if (GetDocument().IsActive()) {
-    DCHECK(!in_layout_tree_rebuild_);
-    if (in_dom_removal_) {
-      ancestor = nullptr;
-      dirty_node = document_;
-    }
-    style_recalc_root_.Update(ancestor, dirty_node);
+  if (!GetDocument().IsActive())
+    return;
+  // We have at least one instance where we mark style dirty from style recalc
+  // (from LayoutTextControl::StyleDidChange()). That means we are in the
+  // process of traversing down the tree from the recalc root. Any updates to
+  // the style recalc root will be cleared after the style recalc traversal
+  // finishes and updating it may just trigger sanity DCHECKs in
+  // StyleTraversalRoot. Just return here instead.
+  if (GetDocument().InStyleRecalc()) {
+    DCHECK(allow_mark_style_dirty_from_recalc_);
+    return;
   }
+  DCHECK(!in_layout_tree_rebuild_);
+  if (in_dom_removal_) {
+    ancestor = nullptr;
+    dirty_node = document_;
+  }
+  style_recalc_root_.Update(ancestor, dirty_node);
 }
 
 void StyleEngine::UpdateLayoutTreeRebuildRoot(ContainerNode* ancestor,
@@ -2102,7 +2158,8 @@ bool StyleEngine::SupportsDarkColorScheme() {
     }
   }
   return has_dark &&
-         (!has_light || preferred_color_scheme_ == PreferredColorScheme::kDark);
+         (!has_light ||
+          preferred_color_scheme_ == mojom::blink::PreferredColorScheme::kDark);
 }
 
 void StyleEngine::UpdateColorScheme() {
@@ -2115,7 +2172,8 @@ void StyleEngine::UpdateColorScheme() {
   ForcedColors old_forced_colors = forced_colors_;
   forced_colors_ = web_theme_engine->GetForcedColors();
 
-  PreferredColorScheme old_preferred_color_scheme = preferred_color_scheme_;
+  mojom::blink::PreferredColorScheme old_preferred_color_scheme =
+      preferred_color_scheme_;
   preferred_color_scheme_ = settings->GetPreferredColorScheme();
   if (const auto* overrides =
           GetDocument().GetPage()->GetMediaFeatureOverrides()) {
@@ -2126,10 +2184,10 @@ void StyleEngine::UpdateColorScheme() {
   if (!SupportsDarkColorScheme() && settings->GetForceDarkModeEnabled()) {
     // Make sure we don't match (prefers-color-scheme: dark) when forced
     // darkening is enabled.
-    preferred_color_scheme_ = PreferredColorScheme::kLight;
+    preferred_color_scheme_ = mojom::blink::PreferredColorScheme::kLight;
   }
   if (GetDocument().Printing())
-    preferred_color_scheme_ = PreferredColorScheme::kLight;
+    preferred_color_scheme_ = mojom::blink::PreferredColorScheme::kLight;
 
   bool color_scheme_changed = false;
   if (forced_colors_ != old_forced_colors ||
@@ -2138,6 +2196,44 @@ void StyleEngine::UpdateColorScheme() {
     color_scheme_changed = true;
   }
   UpdateColorSchemeBackground(color_scheme_changed);
+
+  UpdateColorSchemeMetrics();
+}
+
+void StyleEngine::UpdateColorSchemeMetrics() {
+  auto* settings = GetDocument().GetSettings();
+  if (settings->GetForceDarkModeEnabled())
+    UseCounter::Count(GetDocument(), WebFeature::kForcedDarkMode);
+
+  // True if the preferred color scheme will match dark.
+  if (preferred_color_scheme_ == mojom::blink::PreferredColorScheme::kDark)
+    UseCounter::Count(GetDocument(), WebFeature::kPreferredColorSchemeDark);
+
+  // This is equal to kPreferredColorSchemeDark in most cases, but can differ
+  // with forced dark mode. With the system in dark mode and forced dark mode
+  // enabled, the preferred color scheme can be light while the setting is dark.
+  if (settings->GetPreferredColorScheme() ==
+      mojom::blink::PreferredColorScheme::kDark) {
+    UseCounter::Count(GetDocument(),
+                      WebFeature::kPreferredColorSchemeDarkSetting);
+  }
+
+  // Record kColorSchemeDarkSupportedOnRoot if the meta color-scheme contains
+  // dark (though dark may not be used). This metric is also recorded in
+  // longhands_custom.cc (see: ColorScheme::ApplyValue) if the root style
+  // color-scheme contains dark.
+  if (meta_color_scheme_) {
+    const auto* scheme_list = DynamicTo<CSSValueList>(*meta_color_scheme_);
+    if (scheme_list) {
+      for (auto& item : *scheme_list) {
+        const auto* ident = DynamicTo<CSSIdentifierValue>(*item);
+        if (ident && ident->GetValueID() == CSSValueID::kDark) {
+          UseCounter::Count(GetDocument(),
+                            WebFeature::kColorSchemeDarkSupportedOnRoot);
+        }
+      }
+    }
+  }
 }
 
 void StyleEngine::ColorSchemeChanged() {
@@ -2158,39 +2254,66 @@ void StyleEngine::UpdateColorSchemeBackground(bool color_scheme_changed) {
   if (!view)
     return;
 
-  bool use_color_adjust_background = false;
-  use_dark_background_ = false;
+  LocalFrameView::UseColorAdjustBackground use_color_adjust_background =
+      LocalFrameView::UseColorAdjustBackground::kNo;
 
   if (forced_colors_ != ForcedColors::kNone) {
-    use_color_adjust_background = true;
+    if (GetDocument().IsInMainFrame()) {
+      use_color_adjust_background =
+          LocalFrameView::UseColorAdjustBackground::kIfBaseNotTransparent;
+    }
   } else {
-    const ComputedStyle* style = nullptr;
-    if (auto* root_element = GetDocument().documentElement())
-      style = root_element->GetComputedStyle();
-    if (style) {
-      if (style->UsedColorSchemeForInitialColors() == WebColorScheme::kDark)
-        use_dark_background_ = true;
-    } else if (SupportsDarkColorScheme()) {
-      use_dark_background_ = true;
+    // Find out if we should use a canvas color that is different from the
+    // view's base background color in order to match the root element color-
+    // scheme. See spec:
+    // https://drafts.csswg.org/css-color-adjust/#color-scheme-effect
+    mojom::blink::ColorScheme root_color_scheme =
+        mojom::blink::ColorScheme::kLight;
+    if (auto* root_element = GetDocument().documentElement()) {
+      if (const ComputedStyle* style = root_element->GetComputedStyle())
+        root_color_scheme = style->UsedColorSchemeForInitialColors();
+      else if (SupportsDarkColorScheme())
+        root_color_scheme = mojom::blink::ColorScheme::kDark;
+    }
+    color_scheme_background_ =
+        root_color_scheme == mojom::blink::ColorScheme::kLight
+            ? Color::kWhite
+            : Color(0x12, 0x12, 0x12);
+    if (GetDocument().IsInMainFrame()) {
+      if (root_color_scheme == mojom::blink::ColorScheme::kDark) {
+        use_color_adjust_background =
+            LocalFrameView::UseColorAdjustBackground::kIfBaseNotTransparent;
+      }
+    } else if (root_color_scheme != owner_color_scheme_) {
+      // Iframes should paint a solid background if the embedding iframe has a
+      // used color-scheme different from the used color-scheme of the embedded
+      // root element. Normally, iframes as transparent by default.
+      use_color_adjust_background =
+          LocalFrameView::UseColorAdjustBackground::kYes;
     }
   }
 
-  use_color_adjust_background |= use_dark_background_;
   view->SetUseColorAdjustBackground(use_color_adjust_background,
                                     color_scheme_changed);
 }
 
+void StyleEngine::SetOwnerColorScheme(mojom::blink::ColorScheme color_scheme) {
+  DCHECK(!GetDocument().IsInMainFrame());
+  if (owner_color_scheme_ == color_scheme)
+    return;
+  owner_color_scheme_ = color_scheme;
+  UpdateColorSchemeBackground(true);
+}
+
 void StyleEngine::UpdateForcedBackgroundColor() {
   forced_background_color_ = LayoutTheme::GetTheme().SystemColor(
-      CSSValueID::kCanvas, WebColorScheme::kLight);
+      CSSValueID::kCanvas, mojom::blink::ColorScheme::kLight);
 }
 
 Color StyleEngine::ColorAdjustBackgroundColor() const {
-  if (use_dark_background_ && forced_colors_ == ForcedColors::kNone)
-    return Color::kBlack;
-
-  DCHECK(forced_colors_ != ForcedColors::kNone);
-  return ForcedBackgroundColor();
+  if (forced_colors_ != ForcedColors::kNone)
+    return ForcedBackgroundColor();
+  return color_scheme_background_;
 }
 
 void StyleEngine::MarkAllElementsForStyleRecalc(
@@ -2205,14 +2328,7 @@ void StyleEngine::UpdateViewportStyle() {
 
   viewport_style_dirty_ = false;
 
-  // TODO(futhark@chromium.org): Cannot access the EnsureStyleResolver()
-  // before calling StyleForViewport() below because apparently the
-  // StyleResolver's constructor has side effects. We should fix it. See
-  // printing/setPrinting.html, printing/width-overflow.html though they only
-  // fail on mac when accessing the resolver by what appears to be a viewport
-  // size difference.
-  scoped_refptr<ComputedStyle> viewport_style =
-      StyleResolver::StyleForViewport(GetDocument());
+  scoped_refptr<ComputedStyle> viewport_style = resolver_->StyleForViewport();
   if (ComputedStyle::ComputeDifference(
           viewport_style.get(), GetDocument().GetLayoutView()->Style()) !=
       ComputedStyle::Difference::kEqual) {
@@ -2238,6 +2354,7 @@ void StyleEngine::Trace(Visitor* visitor) const {
   visitor->Trace(active_user_style_sheets_);
   visitor->Trace(custom_element_default_style_sheets_);
   visitor->Trace(keyframes_rule_map_);
+  visitor->Trace(scroll_timeline_map_);
   visitor->Trace(inspector_style_sheet_);
   visitor->Trace(document_style_sheet_collection_);
   visitor->Trace(style_sheet_collection_map_);
@@ -2260,6 +2377,7 @@ void StyleEngine::Trace(Visitor* visitor) const {
   visitor->Trace(tracker_);
   visitor->Trace(meta_color_scheme_);
   visitor->Trace(text_tracks_);
+  visitor->Trace(vtt_originating_element_);
   FontSelectorClient::Trace(visitor);
 }
 

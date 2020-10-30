@@ -23,6 +23,12 @@
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 
+namespace chromeos {
+namespace bloom {
+class BloomController;
+}  // namespace bloom
+}  // namespace chromeos
+
 class AssistantSetup;
 class AssistantWebViewFactoryImpl;
 class ConversationStartersClientImpl;
@@ -55,9 +61,6 @@ class AssistantClientImpl : public ash::AssistantClient,
   // chromeos::assistant::AssisantClient overrides:
   void OnAssistantStatusChanged(
       chromeos::assistant::AssistantStatus new_status) override;
-  void RequestAssistantNotificationController(
-      mojo::PendingReceiver<ash::mojom::AssistantNotificationController>
-          receiver) override;
   void RequestAssistantVolumeControl(
       mojo::PendingReceiver<ash::mojom::AssistantVolumeControl> receiver)
       override;
@@ -103,6 +106,7 @@ class AssistantClientImpl : public ash::AssistantClient,
   std::unique_ptr<AssistantSetup> assistant_setup_;
   std::unique_ptr<AssistantWebViewFactoryImpl> assistant_web_view_factory_;
   std::unique_ptr<ConversationStartersClientImpl> conversation_starters_client_;
+  std::unique_ptr<chromeos::bloom::BloomController> bloom_controller_;
 
   bool initialized_ = false;
 

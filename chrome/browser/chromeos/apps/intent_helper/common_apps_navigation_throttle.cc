@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/debug/dump_without_crashing.h"
 #include "base/stl_util.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
@@ -16,6 +17,7 @@
 #include "chrome/browser/chromeos/apps/metrics/intent_handling_metrics.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/intent_picker_tab_helper.h"
+#include "chrome/browser/ui/web_applications/web_app_launch_utils.h"
 #include "chrome/common/chrome_features.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "components/services/app_service/public/mojom/types.mojom.h"
@@ -34,6 +36,8 @@ apps::PickerEntryType GetPickerEntryType(apps::mojom::AppType app_type) {
     case apps::mojom::AppType::kPluginVm:
     case apps::mojom::AppType::kExtension:
     case apps::mojom::AppType::kLacros:
+    case apps::mojom::AppType::kRemote:
+    case apps::mojom::AppType::kBorealis:
       break;
     case apps::mojom::AppType::kArc:
       picker_entry_type = apps::PickerEntryType::kArc;
@@ -41,8 +45,8 @@ apps::PickerEntryType GetPickerEntryType(apps::mojom::AppType app_type) {
     case apps::mojom::AppType::kWeb:
       picker_entry_type = apps::PickerEntryType::kWeb;
       break;
-    case apps::mojom::AppType::kMacNative:
-      picker_entry_type = apps::PickerEntryType::kMacNative;
+    case apps::mojom::AppType::kMacOs:
+      picker_entry_type = apps::PickerEntryType::kMacOs;
       break;
   }
   return picker_entry_type;
@@ -59,6 +63,12 @@ CommonAppsNavigationThrottle::MaybeCreate(content::NavigationHandle* handle) {
     return nullptr;
 
   content::WebContents* web_contents = handle->GetWebContents();
+
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+
+  if (!AppServiceProxyFactory::IsAppServiceAvailableForProfile(profile))
+    return nullptr;
 
   if (!apps::AppsNavigationThrottle::CanCreate(web_contents))
     return nullptr;
@@ -113,23 +123,40 @@ void CommonAppsNavigationThrottle::OnIntentPickerClosed(
   apps::AppServiceProxy* proxy =
       apps::AppServiceProxyFactory::GetForProfile(profile);
 
-  if (!proxy)
-    return;
+  // If the picker was closed without an app being chosen,
+  // e.g. due to the tab being closed. Keep count of this scenario so we can
+  // stop the UI from showing after 2+ dismissals.
+  if (entry_type == PickerEntryType::kUnknown &&
+      close_reason == IntentPickerCloseReason::DIALOG_DEACTIVATED) {
+    if (ui_auto_display_service)
+      ui_auto_display_service->IncrementCounter(url);
+  }
 
-  if (should_persist)
-    proxy->AddPreferredApp(launch_name, url);
+  if (should_persist) {
+    // TODO(https://crbug.com/853604): Remove this and convert to a DCHECK
+    // after finding out the root cause.
+    if (launch_name.empty()) {
+      base::debug::DumpWithoutCrashing();
+    } else {
+      proxy->AddPreferredApp(launch_name, url);
+    }
+  }
 
   if (should_launch_app) {
-    // TODO(crbug.com/853604): Distinguish the source from link and omnibox.
-    apps::mojom::LaunchSource launch_source =
-        apps::mojom::LaunchSource::kFromLink;
-    proxy->LaunchAppWithUrl(
-        launch_name,
-        GetEventFlags(apps::mojom::LaunchContainer::kLaunchContainerWindow,
-                      WindowOpenDisposition::NEW_WINDOW,
-                      /*prefer_container=*/true),
-        url, launch_source, display::kDefaultDisplayId);
-    CloseOrGoBack(web_contents);
+    if (entry_type == PickerEntryType::kWeb) {
+      web_app::ReparentWebContentsIntoAppBrowser(web_contents, launch_name);
+    } else {
+      // TODO(crbug.com/853604): Distinguish the source from link and omnibox.
+      apps::mojom::LaunchSource launch_source =
+          apps::mojom::LaunchSource::kFromLink;
+      proxy->LaunchAppWithUrl(
+          launch_name,
+          GetEventFlags(apps::mojom::LaunchContainer::kLaunchContainerWindow,
+                        WindowOpenDisposition::NEW_WINDOW,
+                        /*prefer_container=*/true),
+          url, launch_source, display::kDefaultDisplayId);
+      CloseOrGoBack(web_contents);
+    }
   }
 
   apps::AppsNavigationThrottle::PickerAction action =
@@ -181,10 +208,8 @@ CommonAppsNavigationThrottle::FindAllAppsForUrl(
   apps::AppServiceProxy* proxy =
       apps::AppServiceProxyFactory::GetForProfile(profile);
 
-  if (!proxy)
-    return apps;
-
-  std::vector<std::string> app_ids = proxy->GetAppIdsForUrl(url);
+  std::vector<std::string> app_ids =
+      proxy->GetAppIdsForUrl(url, /*exclude_browser=*/true);
 
   for (const std::string& app_id : app_ids) {
     proxy->AppRegistryCache().ForOneApp(
@@ -227,10 +252,8 @@ bool CommonAppsNavigationThrottle::ShouldCancelNavigation(
   apps::AppServiceProxy* proxy =
       apps::AppServiceProxyFactory::GetForProfile(profile);
 
-  if (!proxy)
-    return false;
-
-  std::vector<std::string> app_ids = proxy->GetAppIdsForUrl(url);
+  std::vector<std::string> app_ids =
+      proxy->GetAppIdsForUrl(url, /*exclude_browser=*/true);
 
   if (app_ids.empty())
     return false;
@@ -255,6 +278,11 @@ bool CommonAppsNavigationThrottle::ShouldCancelNavigation(
                           /*prefer_container=*/true),
             url, launch_source, display::kDefaultDisplayId);
         CloseOrGoBack(web_contents);
+        apps::IntentHandlingMetrics::RecordIntentPickerUserInteractionMetrics(
+            /*selected_app_package=*/preferred_app_id.value(),
+            GetPickerEntryType(app_type),
+            apps::IntentPickerCloseReason::PREFERRED_APP_FOUND,
+            apps::Source::kHttpOrHttps, /*should_persist=*/false);
         return true;
       }
     }
@@ -262,53 +290,40 @@ bool CommonAppsNavigationThrottle::ShouldCancelNavigation(
   return false;
 }
 
-bool CommonAppsNavigationThrottle::ShouldDeferNavigation(
-    content::NavigationHandle* handle) {
-  content::WebContents* web_contents = handle->GetWebContents();
-
-  const GURL& url = handle->GetURL();
-
-  std::vector<apps::IntentPickerAppInfo> apps_for_picker =
-      FindAllAppsForUrl(web_contents, url, {});
-
-  if (apps_for_picker.empty())
-    return false;
-
-  if (GetPickerShowState(apps_for_picker, web_contents, url) ==
-      PickerShowState::kOmnibox) {
-    return false;
+void CommonAppsNavigationThrottle::ShowIntentPickerForApps(
+    content::WebContents* web_contents,
+    IntentPickerAutoDisplayService* ui_auto_display_service,
+    const GURL& url,
+    std::vector<IntentPickerAppInfo> apps,
+    IntentPickerResponse callback) {
+  if (apps.empty()) {
+    IntentPickerTabHelper::SetShouldShowIcon(web_contents, false);
+    ui_displayed_ = false;
+    apps::IntentHandlingMetrics::RecordIntentPickerUserInteractionMetrics(
+        /*selected_app_package=*/std::string(), apps::PickerEntryType::kUnknown,
+        apps::IntentPickerCloseReason::ERROR_BEFORE_PICKER,
+        apps::Source::kHttpOrHttps, /*should_persist=*/false);
+    return;
   }
 
+  if (GetPickerShowState(apps, web_contents, url) ==
+      PickerShowState::kOmnibox) {
+    ui_displayed_ = false;
+    IntentPickerTabHelper::SetShouldShowIcon(web_contents, true);
+    return;
+  }
+
+  ui_displayed_ = true;
   IntentPickerTabHelper::LoadAppIcons(
-      web_contents, std::move(apps_for_picker),
-      base::BindOnce(
-          &CommonAppsNavigationThrottle::OnDeferredNavigationProcessed,
-          weak_factory_.GetWeakPtr()));
-  return true;
-}
-
-void CommonAppsNavigationThrottle::OnDeferredNavigationProcessed(
-    std::vector<apps::IntentPickerAppInfo> apps) {
-  content::NavigationHandle* handle = navigation_handle();
-  content::WebContents* web_contents = handle->GetWebContents();
-  const GURL& url = handle->GetURL();
-
-  ShowIntentPickerForApps(web_contents, ui_auto_display_service_, url,
-                          std::move(apps),
-                          base::BindOnce(&OnIntentPickerClosed, web_contents,
-                                         ui_auto_display_service_, url));
-
-  // We are about to resume the navigation, which may destroy this object.
-  Resume();
+      web_contents, std::move(apps),
+      base::BindOnce(&OnAppIconsLoaded, web_contents, ui_auto_display_service,
+                     url));
 }
 
 bool CommonAppsNavigationThrottle::ShouldAutoDisplayUi(
     const std::vector<apps::IntentPickerAppInfo>& apps_for_picker,
     content::WebContents* web_contents,
     const GURL& url) {
-  if (apps_for_picker.empty())
-    return false;
-
   // On devices with tablet form factor we should not pop out the intent
   // picker if Chrome has been chosen by the user as the platform for this URL.
   if (chromeos::switches::IsTabletFormFactor()) {
@@ -339,12 +354,17 @@ bool CommonAppsNavigationThrottle::ShouldAutoDisplayUi(
     auto preferred_app_id = proxy->PreferredApps().FindPreferredAppForUrl(url);
     if (preferred_app_id.has_value() &&
         preferred_app_id.value() == kUseBrowserForLink) {
+      apps::IntentHandlingMetrics::RecordIntentPickerUserInteractionMetrics(
+          /*selected_app_package=*/preferred_app_id.value(),
+          apps::PickerEntryType::kUnknown,
+          apps::IntentPickerCloseReason::PREFERRED_APP_FOUND,
+          apps::Source::kHttpOrHttps, /*should_persist=*/false);
       return false;
     }
   }
 
-  DCHECK(ui_auto_display_service_);
-  return ui_auto_display_service_->ShouldAutoDisplayUi(url);
+  return AppsNavigationThrottle::ShouldAutoDisplayUi(apps_for_picker,
+                                                     web_contents, url);
 }
 
 }  // namespace apps

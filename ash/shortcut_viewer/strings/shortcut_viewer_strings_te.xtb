@@ -10,7 +10,7 @@
 <translation id="1290373024480130896"><ph name="MODIFIER1" /><ph name="SEPARATOR1" /><ph name="MODIFIER2" /><ph name="SEPARATOR2" /><ph name="MODIFIER3" /><ph name="SEPARATOR3" /><ph name="KEY" /></translation>
 <translation id="1293699935367580298">Esc</translation>
 <translation id="1299858300159559687">మీ ప్రస్తుత పేజీని ముద్రించండి</translation>
-<translation id="1383876407941801731">వెతుకు</translation>
+<translation id="1383876407941801731">సెర్చ్</translation>
 <translation id="1454364489140280055"><ph name="CTRL" /><ph name="SEPARATOR1" /><ph name="SHIFT1" /><ph name="SEPARATOR2" /><ph name="G" /> లేదా <ph name="SHIFT2" /><ph name="SEPARATOR3" /><ph name="ENTER" /></translation>
 <translation id="1477442857810932985">పంక్తి చివరికి వెళ్లు</translation>
 <translation id="1499072997694708844">ఏదైనా తెరవబడిన 'కనుగొను' విండోను మూసివేస్తుంది లేదా మీ ప్రస్తుత పేజీని లోడ్ కాకుండా ఆపివేస్తుంది</translation>
@@ -47,6 +47,7 @@
 <translation id="2488661730534396940">ఎడమవైపు గల డెస్క్‌ను యాక్టివేట్ చేస్తుంది</translation>
 <translation id="2515586267016047495">Alt</translation>
 <translation id="2530339807289914946">వెబ్ పేజీని దిగువకు స్క్రోల్ చేయండి</translation>
+<translation id="2530896289327917474">క్యారెట్ బ్రౌజింగ్‌ను ఆన్ లేదా ఆఫ్ చేస్తుంది</translation>
 <translation id="2574014812750545982">పేజీలోని జూమ్ స్థాయిని రీసెట్ చేస్తుంది</translation>
 <translation id="2596078834055697711">విండో స్క్రీన్‌షాట్ తీయండి</translation>
 <translation id="2685170433750953446"><ph name="SHIFT" /><ph name="SEPARATOR1" /><ph name="ALT" /><ph name="SEPARATOR2" /><ph name="L" />, ఆపై <ph name="TAB" /> లేదా <ph name="RIGHT" /></translation>
@@ -185,6 +186,7 @@
 <translation id="8234414138295101081">స్క్రీన్‌ని 90 డిగ్రీలు తిప్పండి</translation>
 <translation id="8241665785394195545">కుడి బ్రాకెట్</translation>
 <translation id="8264941229485248811">డెవలపర్ సాధనాల ఇన్‌స్పెక్టర్‌ను చూపండి లేదా దాచండి</translation>
+<translation id="8322502972606429618">క్లిప్‌బోర్డ్‌లో చివరిగా కాపీ చేసిన కొన్ని అంశాలను చూపించండి</translation>
 <translation id="836869401750819675">డౌన్‌లోడ్‌ల పేజీని తెరవండి</translation>
 <translation id="8388247778047144397">లింక్‌ను ట్యాబ్ స్ట్రిప్‌లోని ఖాళీ ప్రాంతంలోకి లాగండి</translation>
 <translation id="8389638407792712197">కొత్త విండోను తెరవండి</translation>

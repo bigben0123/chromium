@@ -4,18 +4,12 @@
 
 #include "ui/gfx/x/event.h"
 
-#include <X11/Xlibint.h>
-#include <X11/extensions/XInput2.h>
-
-// Xlibint.h defines those as macros, which breaks the C++ versions in
-// the std namespace.
-#undef max
-#undef min
-#undef Data
+#include <xcb/xcb.h>
 
 #include <cstring>
 
 #include "base/check_op.h"
+#include "base/memory/scoped_refptr.h"
 #include "ui/gfx/x/connection.h"
 #include "ui/gfx/x/xproto.h"
 #include "ui/gfx/x/xproto_internal.h"
@@ -43,17 +37,11 @@ Event::Event(scoped_refptr<base::RefCountedMemory> event_bytes,
              bool sequence_valid) {
   auto* xcb_event = reinterpret_cast<xcb_generic_event_t*>(
       const_cast<uint8_t*>(event_bytes->data()));
-  XDisplay* display = connection->display();
-
   sequence_valid_ = sequence_valid;
   sequence_ = xcb_event->full_sequence;
   // KeymapNotify events are the only events that don't have a sequence.
   if ((xcb_event->response_type & ~kSendEventMask) !=
       x11::KeymapNotifyEvent::opcode) {
-    // Rewrite the sequence to the last seen sequence so that Xlib doesn't
-    // think the sequence wrapped around.
-    xcb_event->sequence = XLastKnownRequestProcessed(display);
-
     // On the wire, events are 32 bytes except for generic events which are
     // trailed by additional data.  XCB inserts an extended 4-byte sequence
     // between the 32-byte event and the additional data, so we need to shift
@@ -62,7 +50,21 @@ Event::Event(scoped_refptr<base::RefCountedMemory> event_bytes,
     if ((xcb_event->response_type & ~kSendEventMask) ==
         x11::GeGenericEvent::opcode) {
       auto* ge = reinterpret_cast<xcb_ge_event_t*>(xcb_event);
-      memmove(&ge->full_sequence, &ge[1], ge->length * 4);
+      constexpr size_t ge_length = sizeof(xcb_raw_generic_event_t);
+      constexpr size_t offset = sizeof(ge->full_sequence);
+      size_t extended_length = ge->length * 4;
+      if (extended_length < ge_length) {
+        // If the additional data is smaller than the fixed size event, shift
+        // the additional data to the left.
+        memmove(&ge->full_sequence, &ge[1], extended_length);
+      } else {
+        // Otherwise shift the fixed size event to the right.
+        char* addr = reinterpret_cast<char*>(xcb_event);
+        memmove(addr + offset, addr, ge_length);
+        event_bytes = base::MakeRefCounted<OffsetRefCountedMemory>(
+            event_bytes, offset, ge_length + extended_length);
+        xcb_event = reinterpret_cast<xcb_generic_event_t*>(addr + offset);
+      }
     }
   }
 
@@ -70,21 +72,6 @@ Event::Event(scoped_refptr<base::RefCountedMemory> event_bytes,
   // we parse it with ReadEvent().
   ReadBuffer buf(event_bytes);
   ReadEvent(this, connection, &buf);
-
-  _XEnq(display, reinterpret_cast<xEvent*>(xcb_event));
-  if (!XEventsQueued(display, QueuedAlready)) {
-    // If Xlib gets an event it doesn't recognize (eg. from an
-    // extension it doesn't know about), it won't add the event to the
-    // queue.  In this case, zero-out the event data.  This will set
-    // the event type to 0, which does not correspond to any event.
-    // This is safe because event handlers should always check the
-    // event type before downcasting to a concrete event.
-    memset(&xlib_event_, 0, sizeof(xlib_event_));
-    return;
-  }
-  XNextEvent(display, &xlib_event_);
-  if (xlib_event_.type == x11::GeGenericEvent::opcode)
-    XGetEventData(display, &xlib_event_.xcookie);
 }
 
 Event::Event(Event&& event) {
@@ -104,19 +91,6 @@ Event::~Event() {
 }
 
 void Event::Dealloc() {
-  if (xlib_event_.type == x11::GeGenericEvent::opcode &&
-      xlib_event_.xcookie.data) {
-    if (custom_allocated_xlib_event_) {
-      XIDeviceEvent* xiev =
-          static_cast<XIDeviceEvent*>(xlib_event_.xcookie.data);
-      delete[] xiev->valuators.mask;
-      delete[] xiev->valuators.values;
-      delete[] xiev->buttons.mask;
-      delete xiev;
-    } else {
-      XFreeEventData(xlib_event_.xcookie.display, &xlib_event_.xcookie);
-    }
-  }
   if (deleter_)
     deleter_(event_);
 }

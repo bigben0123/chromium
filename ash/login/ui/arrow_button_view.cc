@@ -4,6 +4,8 @@
 
 #include "ash/login/ui/arrow_button_view.h"
 
+#include <utility>
+
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "base/time/time.h"
 #include "cc/paint/paint_flags.h"
@@ -15,12 +17,14 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/views/controls/highlight_path_generator.h"
 
 namespace ash {
 namespace {
 
 // Arrow icon size.
 constexpr int kArrowIconSizeDp = 20;
+constexpr int kArrowIconBackroundRadius = 25;
 // An alpha value for disabled button.
 constexpr SkAlpha kButtonDisabledAlpha = 0x80;
 // How long does a single step of the loading animation take - i.e., the time it
@@ -48,8 +52,8 @@ void PaintLoadingArc(gfx::Canvas* canvas,
 
 }  // namespace
 
-ArrowButtonView::ArrowButtonView(views::ButtonListener* listener, int size)
-    : LoginButton(listener), size_(size) {
+ArrowButtonView::ArrowButtonView(PressedCallback callback, int size)
+    : LoginButton(std::move(callback)), size_(size) {
   SetPreferredSize(gfx::Size(size, size));
   SetFocusBehavior(FocusBehavior::ALWAYS);
 
@@ -64,7 +68,13 @@ ArrowButtonView::ArrowButtonView(views::ButtonListener* listener, int size)
       views::Button::STATE_DISABLED,
       gfx::CreateVectorIcon(kLockScreenArrowIcon, kArrowIconSizeDp,
                             SkColorSetA(SK_ColorWHITE, kButtonDisabledAlpha)));
+  focus_ring()->SetPathGenerator(
+      std::make_unique<views::FixedSizeCircleHighlightPathGenerator>(
+          kArrowIconBackroundRadius));
 }
+
+ArrowButtonView::ArrowButtonView(views::ButtonListener* listener, int size)
+    : ArrowButtonView(PressedCallback(listener, this), size) {}
 
 ArrowButtonView::~ArrowButtonView() = default;
 
@@ -91,6 +101,10 @@ void ArrowButtonView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   // TODO(tbarzic): Fix this - https://crbug.com/961930.
   if (GetAccessibleName().empty())
     node_data->SetNameExplicitlyEmpty();
+}
+
+const char* ArrowButtonView::GetClassName() const {
+  return "ArrowButtonView";
 }
 
 void ArrowButtonView::SetBackgroundColor(SkColor color) {

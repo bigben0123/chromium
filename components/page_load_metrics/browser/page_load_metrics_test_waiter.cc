@@ -35,9 +35,13 @@ void PageLoadMetricsTestWaiter::AddFrameSizeExpectation(const gfx::Size& size) {
   expected_frame_sizes_.insert(size);
 }
 
-void PageLoadMetricsTestWaiter::AddMainFrameDocumentIntersectionExpectation(
+void PageLoadMetricsTestWaiter::AddMainFrameIntersectionExpectation(
     const gfx::Rect& rect) {
   expected_main_frame_intersection_ = rect;
+}
+
+void PageLoadMetricsTestWaiter::AddMainFrameIntersectionExpectation() {
+  expected_main_frame_intersection_update_ = true;
 }
 
 void PageLoadMetricsTestWaiter::AddSubFrameExpectation(TimingField field) {
@@ -105,7 +109,15 @@ void PageLoadMetricsTestWaiter::OnTimingUpdated(
   const page_load_metrics::mojom::FrameMetadata& metadata =
       subframe_rfh ? GetDelegateForCommittedLoad().GetSubframeMetadata()
                    : GetDelegateForCommittedLoad().GetMainFrameMetadata();
-  TimingFieldBitSet matched_bits = GetMatchedBits(timing, metadata);
+  // There is no way to get the layout shift score only for a subframe so far.
+  // See the score only when the frame is the main frame.
+  const PageRenderData* render_data =
+      subframe_rfh ? nullptr
+                   : &GetDelegateForCommittedLoad().GetMainFrameRenderData();
+
+  TimingFieldBitSet matched_bits =
+      GetMatchedBits(timing, metadata, render_data);
+
   if (subframe_rfh) {
     subframe_expected_fields_.ClearMatching(matched_bits);
   } else {
@@ -192,9 +204,12 @@ void PageLoadMetricsTestWaiter::OnFrameIntersectionUpdate(
     content::RenderFrameHost* rfh,
     const page_load_metrics::mojom::FrameIntersectionUpdate&
         frame_intersection_update) {
+  if (frame_intersection_update.main_frame_intersection_rect)
+    expected_main_frame_intersection_update_ = false;
+
   if (expected_main_frame_intersection_ &&
       expected_main_frame_intersection_ ==
-          frame_intersection_update.main_frame_document_intersection_rect) {
+          frame_intersection_update.main_frame_intersection_rect) {
     expected_main_frame_intersection_.reset();
   }
   if (ExpectationsSatisfied() && run_loop_)
@@ -224,7 +239,8 @@ void PageLoadMetricsTestWaiter::FrameSizeChanged(
 PageLoadMetricsTestWaiter::TimingFieldBitSet
 PageLoadMetricsTestWaiter::GetMatchedBits(
     const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::mojom::FrameMetadata& metadata) {
+    const page_load_metrics::mojom::FrameMetadata& metadata,
+    const PageRenderData* render_data) {
   PageLoadMetricsTestWaiter::TimingFieldBitSet matched_bits;
   if (timing.document_timing->load_event_start)
     matched_bits.Set(TimingField::kLoadEvent);
@@ -256,6 +272,13 @@ PageLoadMetricsTestWaiter::GetMatchedBits(
       matched_bits.Set(
           TimingField::kFirstInputDelayAfterBackForwardCacheRestore);
     }
+  }
+
+  if (render_data) {
+    double layout_shift_score = render_data->layout_shift_score;
+    if (last_main_frame_layout_shift_score_ < layout_shift_score)
+      matched_bits.Set(TimingField::kLayoutShift);
+    last_main_frame_layout_shift_score_ = layout_shift_score;
   }
 
   return matched_bits;
@@ -333,7 +356,8 @@ bool PageLoadMetricsTestWaiter::ExpectationsSatisfied() const {
          SubframeNavigationExpectationsSatisfied() &&
          SubframeDataExpectationsSatisfied() && expected_frame_sizes_.empty() &&
          CpuTimeExpectationsSatisfied() &&
-         !expected_main_frame_intersection_.has_value();
+         !expected_main_frame_intersection_.has_value() &&
+         !expected_main_frame_intersection_update_;
 }
 
 PageLoadMetricsTestWaiter::WaiterMetricsObserver::~WaiterMetricsObserver() =

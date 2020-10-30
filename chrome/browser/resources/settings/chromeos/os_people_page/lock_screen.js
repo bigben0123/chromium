@@ -18,6 +18,7 @@ Polymer({
   is: 'settings-lock-screen',
 
   behaviors: [
+    DeepLinkingBehavior,
     I18nBehavior,
     LockStateBehavior,
     WebUIListenerBehavior,
@@ -129,8 +130,36 @@ Polymer({
       readOnly: true,
     },
 
+    /**
+     * True if quick unlock settings should be displayed on this machine.
+     * @private
+     */
+    quickUnlockPinAutosubmitFeatureEnabled_: {
+      type: Boolean,
+      value() {
+        return loadTimeData.getBoolean(
+            'quickUnlockPinAutosubmitFeatureEnabled');
+      },
+      readOnly: true,
+    },
+
     /** @private */
     showSetupPinDialog_: Boolean,
+
+    /** @private */
+    showPinAutosubmitDialog_: Boolean,
+
+    /**
+     * Used by DeepLinkingBehavior to focus this page's deep links.
+     * @type {!Set<!chromeos.settings.mojom.Setting>}
+     */
+    supportedSettingIds: {
+      type: Object,
+      value: () => new Set([
+        chromeos.settings.mojom.Setting.kLockScreen,
+        chromeos.settings.mojom.Setting.kChangeAuthPin,
+      ]),
+    },
   },
 
   /** @private {?settings.FingerprintBrowserProxy} */
@@ -153,13 +182,15 @@ Polymer({
    * @protected
    */
   currentRouteChanged(newRoute, oldRoute) {
-    if (newRoute == settings.routes.LOCK_SCREEN) {
+    if (newRoute === settings.routes.LOCK_SCREEN) {
       this.updateUnlockType(/*activeModesChanged=*/ false);
       this.updateNumFingerprints_();
+      this.attemptDeepLink();
     }
 
     if (this.requestPasswordIfApplicable_()) {
       this.showSetupPinDialog_ = false;
+      this.showPinAutosubmitDialog_ = false;
     }
   },
 
@@ -178,16 +209,41 @@ Polymer({
   },
 
   /**
+   * @param {!Event} event
+   * @private
+   */
+  onPinAutosubmitChange_(event) {
+    const target = /** @type {!SettingsToggleButtonElement} */ (event.target);
+    if (!this.authToken) {
+      console.error('PIN autosubmit setting changed with expired token.');
+      target.checked = !target.checked;
+      return;
+    }
+
+    // Read-only preference. Changes will be reflected directly on the toggle.
+    const autosubmitEnabled = target.checked;
+    target.resetToPrefValue();
+
+    if (autosubmitEnabled) {
+      this.showPinAutosubmitDialog_ = true;
+    } else {
+      // Call quick unlock to disable the auto-submit option.
+      this.quickUnlockPrivate.setPinAutosubmitEnabled(
+          this.authToken.token, '' /* PIN */, false /*enabled*/, function() {});
+    }
+  },
+
+  /**
    * Called when the unlock type has changed.
    * @param {!string} selected The current unlock type.
    * @private
    */
   selectedUnlockTypeChanged_(selected) {
-    if (selected == LockScreenUnlockType.VALUE_PENDING) {
+    if (selected === LockScreenUnlockType.VALUE_PENDING) {
       return;
     }
 
-    if (selected != LockScreenUnlockType.PIN_PASSWORD && this.setModes) {
+    if (selected !== LockScreenUnlockType.PIN_PASSWORD && this.setModes) {
       // If the user selects PASSWORD only (which sends an asynchronous
       // setModes.call() to clear the quick unlock capability), indicate to the
       // user immediately that the quick unlock capability is cleared by setting
@@ -220,12 +276,19 @@ Polymer({
   onSetModesChanged_() {
     if (this.requestPasswordIfApplicable_()) {
       this.showSetupPinDialog_ = false;
+      this.showPinAutosubmitDialog_ = false;
       return;
     }
 
     if (settings.Router.getInstance().getCurrentRoute() ===
         settings.routes.LOCK_SCREEN) {
-      this.focusDefaultElement_();
+      // Show deep links again if the user authentication dialog just closed.
+      this.attemptDeepLink().then(result => {
+        // If there were no supported deep links, focus the default element.
+        if (result.pendingSettingId == null) {
+          this.focusDefaultElement_();
+        }
+      });
     }
   },
 
@@ -243,6 +306,12 @@ Polymer({
   onSetupPinDialogClose_() {
     this.showSetupPinDialog_ = false;
     cr.ui.focusWithoutInk(assert(this.$$('#setupPinButton')));
+  },
+
+  /** @private */
+  onPinAutosubmitDialogClose_() {
+    this.showPinAutosubmitDialog_ = false;
+    cr.ui.focusWithoutInk(assert(this.$$('#enablePinAutoSubmit')));
   },
 
   /**

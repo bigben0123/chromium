@@ -4,21 +4,26 @@
 
 #include "content/shell/browser/shell_browser_main_parts.h"
 
+#include <utility>
+
 #include "base/base_switches.h"
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/message_loop/message_loop_current.h"
+#include "base/task/current_thread.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "cc/base/switches.h"
+#include "components/performance_manager/embedder/performance_manager_lifetime.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
+#include "content/public/common/result_codes.h"
 #include "content/public/common/url_constants.h"
 #include "content/shell/android/shell_descriptors.h"
 #include "content/shell/browser/shell.h"
@@ -30,7 +35,6 @@
 #include "net/base/filename_util.h"
 #include "net/base/net_module.h"
 #include "net/grit/net_resources.h"
-#include "services/service_manager/embedder/result_codes.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "url/gurl.h"
 
@@ -64,7 +68,6 @@
 #include "ui/gtk/gtk_ui.h"
 #include "ui/gtk/gtk_ui_delegate.h"
 #if defined(USE_X11)
-#include "ui/gfx/x/x11_types.h"            // nogncheck
 #include "ui/gtk/x/gtk_ui_delegate_x11.h"  // nogncheck
 #endif
 #endif
@@ -114,7 +117,7 @@ ShellBrowserMainParts::ShellBrowserMainParts(
 ShellBrowserMainParts::~ShellBrowserMainParts() {
 }
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
 void ShellBrowserMainParts::PreMainMessageLoopStart() {
 #if defined(USE_AURA) && defined(USE_X11)
   if (!features::IsUsingOzonePlatform())
@@ -133,10 +136,6 @@ void ShellBrowserMainParts::PostMainMessageLoopStart() {
 }
 
 int ShellBrowserMainParts::PreEarlyInitialization() {
-#if defined(USE_X11)
-  if (!features::IsUsingOzonePlatform())
-    ui::SetDefaultX11ErrorHandlers();
-#endif
 #if !defined(OS_CHROMEOS) && defined(USE_AURA) && defined(OS_LINUX)
   ui::InitializeInputMethodForTesting();
 #endif
@@ -144,7 +143,7 @@ int ShellBrowserMainParts::PreEarlyInitialization() {
   net::NetworkChangeNotifier::SetFactory(
       new net::NetworkChangeNotifierFactoryAndroid());
 #endif
-  return service_manager::RESULT_CODE_NORMAL_EXIT;
+  return RESULT_CODE_NORMAL_EXIT;
 }
 
 void ShellBrowserMainParts::InitializeBrowserContexts() {
@@ -167,7 +166,8 @@ void ShellBrowserMainParts::ToolkitInitialized() {
   if (features::IsUsingOzonePlatform())
     return;
 #endif
-  gtk_ui_delegate_ = std::make_unique<ui::GtkUiDelegateX11>(gfx::GetXDisplay());
+  gtk_ui_delegate_ =
+      std::make_unique<ui::GtkUiDelegateX11>(x11::Connection::Get());
   ui::GtkUiDelegate::SetInstance(gtk_ui_delegate_.get());
   views::LinuxUI* linux_ui = BuildGtkUi(gtk_ui_delegate_.get());
   linux_ui->UpdateDeviceScaleFactor();
@@ -187,6 +187,12 @@ int ShellBrowserMainParts::PreCreateThreads() {
   }
 #endif
   return 0;
+}
+
+void ShellBrowserMainParts::PostCreateThreads() {
+  performance_manager_lifetime_ =
+      std::make_unique<performance_manager::PerformanceManagerLifetime>(
+          performance_manager::Decorators::kNone, base::DoNothing());
 }
 
 void ShellBrowserMainParts::PreMainMessageLoopRun() {
@@ -214,6 +220,7 @@ void ShellBrowserMainParts::PostMainMessageLoopRun() {
 #if BUILDFLAG(USE_GTK)
   views::LinuxUI::SetInstance(nullptr);
 #endif
+  performance_manager_lifetime_.reset();
 }
 
 void ShellBrowserMainParts::PreDefaultMainMessageLoopRun(

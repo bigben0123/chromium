@@ -65,6 +65,12 @@ constexpr base::FilePath::CharType kBluetoothLogsFilePathOld[] =
 constexpr char kBluetoothLogsAttachmentName[] = "bluetooth_logs.bz2";
 constexpr char kBluetoothLogsAttachmentNameOld[] = "bluetooth_logs.old.bz2";
 
+constexpr int kKaleidoscopeProductId = 5192933;
+
+#if defined(OS_CHROMEOS)
+constexpr char kLacrosHistogramsFilename[] = "lacros_histograms.zip";
+#endif
+
 // Getting the filename of a blob prepends a "C:\fakepath" to the filename.
 // This is undesirable, strip it if it exists.
 std::string StripFakepath(const std::string& path) {
@@ -126,7 +132,8 @@ void FeedbackPrivateAPI::RequestFeedbackForFlow(
     const GURL& page_url,
     api::feedback_private::FeedbackFlow flow,
     bool from_assistant,
-    bool include_bluetooth_logs) {
+    bool include_bluetooth_logs,
+    bool from_kaleidoscope) {
   if (browser_context_ && EventRouter::Get(browser_context_)) {
     FeedbackInfo info;
     info.description = description_template;
@@ -154,13 +161,19 @@ void FeedbackPrivateAPI::RequestFeedbackForFlow(
       info.trace_id = std::make_unique<int>(manager->RequestTrace());
     }
     info.flow = flow;
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
     const bool use_system_window_frame = true;
 #else
     const bool use_system_window_frame = false;
 #endif
     info.use_system_window_frame =
         std::make_unique<bool>(use_system_window_frame);
+
+    // If the feedback is from Kaleidoscope then this should use a custom
+    // product ID.
+    if (from_kaleidoscope) {
+      info.product_id = std::make_unique<int>(kKaleidoscopeProductId);
+    }
 
     std::unique_ptr<base::ListValue> args =
         feedback_private::OnFeedbackRequested::Create(info);
@@ -197,13 +210,14 @@ ExtensionFunction::ResponseAction FeedbackPrivateGetStringsFunction::Run() {
   if (test_callback_ && !test_callback_->is_null())
     test_callback_->Run();
 
-  return RespondNow(OneArgument(std::move(dict)));
+  return RespondNow(
+      OneArgument(base::Value::FromUniquePtrValue(std::move(dict))));
 }
 
 ExtensionFunction::ResponseAction FeedbackPrivateGetUserEmailFunction::Run() {
   FeedbackPrivateDelegate* feedback_private_delegate =
       ExtensionsAPIClient::Get()->GetFeedbackPrivateDelegate();
-  return RespondNow(OneArgument(std::make_unique<base::Value>(
+  return RespondNow(OneArgument(base::Value(
       feedback_private_delegate->GetSignedInUserEmail(browser_context()))));
 }
 
@@ -346,7 +360,7 @@ ExtensionFunction::ResponseAction FeedbackPrivateSendFeedbackFunction::Run() {
 #if defined(OS_CHROMEOS)
     delegate->FetchExtraLogs(
         feedback_data,
-        base::BindOnce(&FeedbackPrivateSendFeedbackFunction::OnAllLogsFetched,
+        base::BindOnce(&FeedbackPrivateSendFeedbackFunction::OnAshLogsFetched,
                        this, send_histograms, send_bluetooth_logs,
                        send_tab_titles));
     return RespondLater();
@@ -401,14 +415,43 @@ void FeedbackPrivateSendFeedbackFunction::OnAllLogsFetched(
                  GetLandingPageType(*feedback_data)));
 }
 
+#if defined(OS_CHROMEOS)
+void FeedbackPrivateSendFeedbackFunction::OnAshLogsFetched(
+    bool send_histograms,
+    bool send_bluetooth_logs,
+    bool send_tab_titles,
+    scoped_refptr<feedback::FeedbackData> feedback_data) {
+  FeedbackPrivateDelegate* feedback_private_delegate =
+      ExtensionsAPIClient::Get()->GetFeedbackPrivateDelegate();
+  feedback_private_delegate->GetLacrosHistograms(base::BindOnce(
+      &FeedbackPrivateSendFeedbackFunction::OnLacrosHistogramsFetched, this,
+      send_histograms, send_bluetooth_logs, send_tab_titles, feedback_data));
+}
+
+void FeedbackPrivateSendFeedbackFunction::OnLacrosHistogramsFetched(
+    bool send_histograms,
+    bool send_bluetooth_logs,
+    bool send_tab_titles,
+    scoped_refptr<feedback::FeedbackData> feedback_data,
+    const std::string& compressed_histograms) {
+  // Attach lacros histogram to feedback data.
+  if (!compressed_histograms.empty()) {
+    feedback_data->AddFile(kLacrosHistogramsFilename,
+                           std::move(compressed_histograms));
+  }
+
+  OnAllLogsFetched(send_histograms, send_bluetooth_logs, send_tab_titles,
+                   feedback_data);
+}
+#endif  // defined(OS_CHROMEOS)
+
 void FeedbackPrivateSendFeedbackFunction::OnCompleted(
     api::feedback_private::LandingPageType type,
     bool success) {
-  Respond(TwoArguments(
-      std::make_unique<base::Value>(feedback_private::ToString(
-          success ? feedback_private::STATUS_SUCCESS
-                  : feedback_private::STATUS_DELAYED)),
-      std::make_unique<base::Value>(feedback_private::ToString(type))));
+  Respond(TwoArguments(base::Value(feedback_private::ToString(
+                           success ? feedback_private::STATUS_SUCCESS
+                                   : feedback_private::STATUS_DELAYED)),
+                       base::Value(feedback_private::ToString(type))));
   if (!success) {
     ExtensionsAPIClient::Get()
         ->GetFeedbackPrivateDelegate()

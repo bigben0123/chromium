@@ -51,7 +51,8 @@ bool IsExtensionInstallBlockedByPolicy(
   // and manifest type.
   // TODO(crbug.com/1088021): Find out the right way to handle extension policy
   // priority.
-  if (!extension_management->IsAllowedManifestType(manifest_type,
+  if (manifest_type != Manifest::Type::TYPE_UNKNOWN &&
+      !extension_management->IsAllowedManifestType(manifest_type,
                                                    extension_id)) {
     return true;
   }
@@ -108,7 +109,7 @@ ExtensionInstallStatus GetWebstoreExtensionInstallStatus(
     return kTerminated;
 
   if (registry->blocklisted_extensions().Contains(extension_id))
-    return kBlacklisted;
+    return kBlocklisted;
 
   // If an installed extension is disabled due to policy, returns
   // kBlockedByPolicy, kCanRequest or kRequestPending instead of kDisabled.

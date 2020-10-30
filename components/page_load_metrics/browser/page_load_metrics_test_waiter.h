@@ -33,6 +33,7 @@ class PageLoadMetricsTestWaiter
     kFirstInputDelay = 1 << 8,
     kFirstPaintAfterBackForwardCacheRestore = 1 << 9,
     kFirstInputDelayAfterBackForwardCacheRestore = 1 << 10,
+    kLayoutShift = 1 << 11,
   };
   using FrameTreeNodeId =
       page_load_metrics::PageLoadMetricsObserver::FrameTreeNodeId;
@@ -51,10 +52,14 @@ class PageLoadMetricsTestWaiter
   // size update of |size|.
   void AddFrameSizeExpectation(const gfx::Size& size);
 
-  // Add a main frame document intersection expectation. Expects that a frame
-  // receives an intersection update with a main frame document intersection
+  // Add a main frame intersection expectation. Expects that a frame
+  // receives an intersection update with a main frame intersection
   // of |rect|. Subsequent calls overwrite unmet expectations.
-  void AddMainFrameDocumentIntersectionExpectation(const gfx::Rect& rect);
+  void AddMainFrameIntersectionExpectation(const gfx::Rect& rect);
+
+  // Adds a main frame intersection expectation for any main frame
+  // intersection update for the page load.
+  void AddMainFrameIntersectionExpectation();
 
   // Add a single WebFeature expectation.
   void AddWebFeatureExpectation(blink::mojom::WebFeature web_feature);
@@ -181,9 +186,10 @@ class PageLoadMetricsTestWaiter
     bool operator()(const gfx::Size a, const gfx::Size b) const;
   };
 
-  static TimingFieldBitSet GetMatchedBits(
+  TimingFieldBitSet GetMatchedBits(
       const page_load_metrics::mojom::PageLoadTiming& timing,
-      const page_load_metrics::mojom::FrameMetadata& metadata);
+      const page_load_metrics::mojom::FrameMetadata& metadata,
+      const PageRenderData* render_data);
 
   // Updates observed page fields when a timing update is received by the
   // MetricsWebContentsObserver. Stops waiting if expectations are satsfied
@@ -261,9 +267,10 @@ class PageLoadMetricsTestWaiter
   std::set<gfx::Size, FrameSizeComparator> expected_frame_sizes_;
   std::set<gfx::Size, FrameSizeComparator> observed_frame_sizes_;
 
-  // Expectation for the main frame document intersection. Has a value when
+  // Expectation for the main frame intersection. Has a value when
   // an expectation has not been met.
   base::Optional<gfx::Rect> expected_main_frame_intersection_;
+  bool expected_main_frame_intersection_update_ = false;
 
   int current_complete_resources_ = 0;
   int64_t current_network_bytes_ = 0;
@@ -279,6 +286,8 @@ class PageLoadMetricsTestWaiter
 
   bool attach_on_tracker_creation_ = false;
   bool did_add_observer_ = false;
+
+  double last_main_frame_layout_shift_score_ = 0;
 
   base::WeakPtrFactory<PageLoadMetricsTestWaiter> weak_factory_{this};
 };

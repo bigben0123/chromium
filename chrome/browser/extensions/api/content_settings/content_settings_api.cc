@@ -179,7 +179,8 @@ ContentSettingsContentSettingGetFunction::Run() {
   result->SetString(content_settings_api_constants::kContentSettingKey,
                     setting_string);
 
-  return RespondNow(OneArgument(std::move(result)));
+  return RespondNow(
+      OneArgument(base::Value::FromUniquePtrValue(std::move(result))));
 }
 
 ExtensionFunction::ResponseAction
@@ -269,9 +270,7 @@ ContentSettingsContentSettingSetFunction::Run() {
 
   if (primary_pattern != secondary_pattern &&
       secondary_pattern != ContentSettingsPattern::Wildcard() &&
-      !info->website_settings_info()->SupportsEmbeddedExceptions() &&
-      base::FeatureList::IsEnabled(
-          permissions::features::kPermissionDelegation)) {
+      !info->website_settings_info()->SupportsSecondaryPattern()) {
     static const char kUnsupportedEmbeddedException[] =
         "Embedded patterns are not supported for this setting.";
     return RespondNow(Error(kUnsupportedEmbeddedException));
@@ -306,20 +305,26 @@ ContentSettingsContentSettingSetFunction::Run() {
     return RespondNow(Error(pref_keys::kIncognitoSessionOnlyErrorMessage));
   }
 
+  if (content_type == ContentSettingsType::PLUGINS) {
+    if (base::FeatureList::IsEnabled(
+            content_settings::kDisallowExtensionsToSetPluginContentSettings)) {
+      return RespondNow(Error(content_settings_api_constants::
+                                  kSettingPluginContentSettingsIsDisallowed));
+    }
+    if (base::FeatureList::IsEnabled(
+            content_settings::kDisallowWildcardsInPluginContentSettings) &&
+        primary_pattern.HasHostWildcards()) {
+      WriteToConsole(blink::mojom::ConsoleMessageLevel::kError,
+                     content_settings_api_constants::
+                         kWildcardPatternsForPluginsDisallowed);
+    }
+  }
+
   scoped_refptr<ContentSettingsStore> store =
       ContentSettingsService::Get(browser_context())->content_settings_store();
   store->SetExtensionContentSetting(extension_id(), primary_pattern,
                                     secondary_pattern, content_type,
                                     resource_identifier, setting, scope);
-
-  if (base::FeatureList::IsEnabled(
-          content_settings::kDisallowWildcardsInPluginContentSettings) &&
-      content_type == ContentSettingsType::PLUGINS &&
-      primary_pattern.HasWildcards()) {
-    WriteToConsole(
-        blink::mojom::ConsoleMessageLevel::kError,
-        content_settings_api_constants::kWildcardPatternsForPluginsDisallowed);
-  }
 
   return RespondNow(NoArguments());
 }
@@ -364,7 +369,7 @@ void ContentSettingsContentSettingGetResourceIdentifiersFunction::OnGotPlugins(
                     plugin_metadata->name());
     list->Append(std::move(dict));
   }
-  Respond(OneArgument(std::move(list)));
+  Respond(OneArgument(base::Value::FromUniquePtrValue(std::move(list))));
 }
 #endif  // BUILDFLAG(ENABLE_PLUGINS)
 

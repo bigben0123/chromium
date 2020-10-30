@@ -31,9 +31,9 @@
 
 #if defined(OS_WIN)
 #include "base/base_paths_win.h"
-#elif defined(OS_LINUX)
+#elif defined(OS_LINUX) || defined(OS_CHROMEOS)
 #include "base/nix/xdg_util.h"
-#elif defined(OS_MACOSX)
+#elif defined(OS_MAC)
 #include "base/base_paths_mac.h"
 #elif defined(OS_FUCHSIA)
 #include "base/base_paths_fuchsia.h"
@@ -48,10 +48,8 @@ ShellBrowserContext::ShellResourceContext::~ShellResourceContext() {
 
 ShellBrowserContext::ShellBrowserContext(bool off_the_record,
                                          bool delay_services_creation)
-    : resource_context_(new ShellResourceContext),
-      ignore_certificate_errors_(false),
-      off_the_record_(off_the_record),
-      guest_manager_(nullptr) {
+    : resource_context_(std::make_unique<ShellResourceContext>()),
+      off_the_record_(off_the_record) {
   InitWhileIOAllowed();
   if (!delay_services_creation) {
     BrowserContextDependencyManager::GetInstance()
@@ -106,14 +104,14 @@ void ShellBrowserContext::InitWhileIOAllowed() {
 #if defined(OS_WIN)
   CHECK(base::PathService::Get(base::DIR_LOCAL_APP_DATA, &path_));
   path_ = path_.Append(std::wstring(L"content_shell"));
-#elif defined(OS_LINUX)
+#elif defined(OS_LINUX) || defined(OS_CHROMEOS)
   std::unique_ptr<base::Environment> env(base::Environment::Create());
   base::FilePath config_dir(
       base::nix::GetXDGDirectory(env.get(),
                                  base::nix::kXdgConfigHomeEnvVar,
                                  base::nix::kDotConfigDir));
   path_ = config_dir.Append("content_shell");
-#elif defined(OS_MACOSX)
+#elif defined(OS_MAC)
   CHECK(base::PathService::Get(base::DIR_APP_DATA, &path_));
   path_ = path_.Append("Chromium Content Shell");
 #elif defined(OS_ANDROID)
@@ -167,7 +165,7 @@ ResourceContext* ShellBrowserContext::GetResourceContext()  {
 }
 
 BrowserPluginGuestManager* ShellBrowserContext::GetGuestManager() {
-  return guest_manager_;
+  return nullptr;
 }
 
 storage::SpecialStoragePolicy* ShellBrowserContext::GetSpecialStoragePolicy() {

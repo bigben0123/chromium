@@ -332,7 +332,7 @@ void ChromeDownloadManagerDelegateTest::SetUp() {
   if (base::FeatureList::IsEnabled(download::features::kDownloadLater)) {
     pref_service_->SetInteger(
         prefs::kDownloadLaterPromptStatus,
-        static_cast<int>(DownloadLaterPromptStatus::DONT_SHOW));
+        static_cast<int>(DownloadLaterPromptStatus::kDontShow));
   }
 #endif
 }
@@ -869,6 +869,11 @@ TEST_F(ChromeDownloadManagerDelegateTest, InterceptDownloadByOfflinePages) {
 
   should_intercept = delegate()->InterceptDownloadIfApplicable(
       kUrl, "", "", mime_type, "", 10, true /*is_transient*/, nullptr);
+  EXPECT_FALSE(should_intercept);
+
+  should_intercept = delegate()->InterceptDownloadIfApplicable(
+      kUrl, "", "attachment" /*content_disposition*/, mime_type, "", 10,
+      false /*is_transient*/, nullptr);
   EXPECT_FALSE(should_intercept);
 }
 #endif
@@ -1706,6 +1711,7 @@ class TestDownloadDialogBridge : public DownloadDialogBridge {
                   int64_t total_bytes,
                   DownloadLocationDialogType dialog_type,
                   const base::FilePath& suggested_path,
+                  bool supports_later_dialog,
                   DownloadDialogBridge::DialogCallback callback) override {
     dialog_shown_count_++;
     dialog_type_ = dialog_type;

@@ -91,6 +91,7 @@ class TestWebState : public WebState {
   void SetHasOpener(bool has_opener) override;
   bool CanTakeSnapshot() const override;
   void TakeSnapshot(const gfx::RectF& rect, SnapshotCallback callback) override;
+  void CreateFullPagePdf(base::OnceCallback<void(NSData*)> callback) override;
 
   // Setters for test data.
   void SetBrowserState(BrowserState* browser_state);
@@ -163,7 +164,7 @@ class TestWebState : public WebState {
   UIView* view_;
   CRWWebViewProxyType web_view_proxy_;
   NSData* last_loaded_data_;
-  base::CallbackList<ScriptCommandCallbackSignature> callback_list_;
+  base::RepeatingCallbackList<ScriptCommandCallbackSignature> callback_list_;
 
   // A list of observers notified when page state changes. Weak references.
   base::ObserverList<WebStateObserver, true>::Unchecked observers_;

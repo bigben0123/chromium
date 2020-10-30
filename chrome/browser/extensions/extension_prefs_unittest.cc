@@ -28,6 +28,7 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/install_flag.h"
 #include "extensions/browser/pref_names.h"
+#include "extensions/browser/pref_types.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/extension_id.h"
@@ -76,13 +77,13 @@ class ExtensionPrefsLastPingDay : public ExtensionPrefsTest {
  public:
   ExtensionPrefsLastPingDay()
       : extension_time_(Time::Now() - TimeDelta::FromHours(4)),
-        blacklist_time_(Time::Now() - TimeDelta::FromHours(2)) {}
+        blocklist_time_(Time::Now() - TimeDelta::FromHours(2)) {}
 
   void Initialize() override {
     extension_id_ = prefs_.AddExtensionAndReturnId("last_ping_day");
     EXPECT_TRUE(prefs()->LastPingDay(extension_id_).is_null());
     prefs()->SetLastPingDay(extension_id_, extension_time_);
-    prefs()->SetBlocklistLastPingDay(blacklist_time_);
+    prefs()->SetBlocklistLastPingDay(blocklist_time_);
   }
 
   void Verify() override {
@@ -91,12 +92,12 @@ class ExtensionPrefsLastPingDay : public ExtensionPrefsTest {
     EXPECT_TRUE(result == extension_time_);
     result = prefs()->BlocklistLastPingDay();
     EXPECT_FALSE(result.is_null());
-    EXPECT_TRUE(result == blacklist_time_);
+    EXPECT_TRUE(result == blocklist_time_);
   }
 
  private:
   Time extension_time_;
-  Time blacklist_time_;
+  Time blocklist_time_;
   std::string extension_id_;
 };
 TEST_F(ExtensionPrefsLastPingDay, LastPingDay) {}
@@ -431,15 +432,15 @@ class ExtensionPrefsAcknowledgment : public ExtensionPrefsTest {
         external_id_ = id;
         continue;
       }
-      if (blacklisted_id_.empty()) {
-        blacklisted_id_ = id;
+      if (blocklisted_id_.empty()) {
+        blocklisted_id_ = id;
         continue;
       }
     }
     // For each type of acknowledgment, acknowledge one installed and one
     // not-installed extension id.
     prefs()->AcknowledgeExternalExtension(external_id_);
-    prefs()->AcknowledgeBlocklistedExtension(blacklisted_id_);
+    prefs()->AcknowledgeBlocklistedExtension(blocklisted_id_);
     prefs()->AcknowledgeExternalExtension(not_installed_id_);
     prefs()->AcknowledgeBlocklistedExtension(not_installed_id_);
   }
@@ -453,7 +454,7 @@ class ExtensionPrefsAcknowledgment : public ExtensionPrefsTest {
       } else {
         EXPECT_FALSE(prefs()->IsExternalExtensionAcknowledged(id));
       }
-      if (id == blacklisted_id_) {
+      if (id == blocklisted_id_) {
         EXPECT_TRUE(prefs()->IsBlocklistedExtensionAcknowledged(id));
       } else {
         EXPECT_FALSE(prefs()->IsBlocklistedExtensionAcknowledged(id));
@@ -468,7 +469,7 @@ class ExtensionPrefsAcknowledgment : public ExtensionPrefsTest {
 
   std::string not_installed_id_;
   std::string external_id_;
-  std::string blacklisted_id_;
+  std::string blocklisted_id_;
 };
 TEST_F(ExtensionPrefsAcknowledgment, Acknowledgment) {}
 
@@ -778,10 +779,10 @@ PrefsPrepopulatedTestBase::PrefsPrepopulatedTestBase()
 PrefsPrepopulatedTestBase::~PrefsPrepopulatedTestBase() {
 }
 
-// Tests that blacklist state can be queried.
-class ExtensionPrefsBlacklistedExtensions : public ExtensionPrefsTest {
+// Tests that blocklist state can be queried.
+class ExtensionPrefsBlocklistedExtensions : public ExtensionPrefsTest {
  public:
-  ~ExtensionPrefsBlacklistedExtensions() override {}
+  ~ExtensionPrefsBlocklistedExtensions() override {}
 
   void Initialize() override {
     extension_a_ = prefs_.AddExtension("a");
@@ -827,7 +828,7 @@ class ExtensionPrefsBlacklistedExtensions : public ExtensionPrefsTest {
     }
 
     // The interesting part: make sure that we're cleaning up after ourselves
-    // when we're storing *just* the fact that the extension is blacklisted.
+    // when we're storing *just* the fact that the extension is blocklisted.
     std::string arbitrary_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     prefs()->SetExtensionBlocklistState(arbitrary_id, BLOCKLISTED_MALWARE);
@@ -856,14 +857,14 @@ class ExtensionPrefsBlacklistedExtensions : public ExtensionPrefsTest {
   scoped_refptr<const Extension> extension_b_;
   scoped_refptr<const Extension> extension_c_;
 };
-TEST_F(ExtensionPrefsBlacklistedExtensions,
-       ExtensionPrefsBlacklistedExtensions) {}
+TEST_F(ExtensionPrefsBlocklistedExtensions,
+       ExtensionPrefsBlocklistedExtensions) {}
 
-// Tests the blacklist state. Old "blacklist" preference should take precedence
-// over new "blacklist_state".
-class ExtensionPrefsBlacklistState : public ExtensionPrefsTest {
+// Tests the blocklist state. Old "blocklist" preference should take precedence
+// over new "blocklist_state".
+class ExtensionPrefsBlocklistState : public ExtensionPrefsTest {
  public:
-  ~ExtensionPrefsBlacklistState() override {}
+  ~ExtensionPrefsBlocklistState() override {}
 
   void Initialize() override { extension_a_ = prefs_.AddExtension("a"); }
 
@@ -900,7 +901,7 @@ class ExtensionPrefsBlacklistState : public ExtensionPrefsTest {
  private:
   scoped_refptr<const Extension> extension_a_;
 };
-TEST_F(ExtensionPrefsBlacklistState, ExtensionPrefsBlacklistState) {}
+TEST_F(ExtensionPrefsBlocklistState, ExtensionPrefsBlocklistState) {}
 
 // Tests clearing the last launched preference.
 class ExtensionPrefsClearLastLaunched : public ExtensionPrefsTest {
@@ -1330,6 +1331,112 @@ TEST_F(ExtensionPrefsSimpleTest, MigrateToNewExternalUninstallBits) {
       prefs.prefs()->IsExternalExtensionUninstalled(external_extension));
   EXPECT_FALSE(
       prefs.prefs()->IsExternalExtensionUninstalled(internal_extension));
+}
+
+// Tests the generic Get/Set functions for profile wide extension prefs.
+TEST_F(ExtensionPrefsSimpleTest, ProfileExtensionPrefsMapTest) {
+  constexpr PrefMap kTestBooleanPref = {"test.boolean", PrefType::kBool,
+                                        PrefScope::kProfile};
+  constexpr PrefMap kTestIntegerPref = {"test.integer", PrefType::kInteger,
+                                        PrefScope::kProfile};
+  constexpr PrefMap kTestStringPref = {"test.string", PrefType::kString,
+                                       PrefScope::kProfile};
+  constexpr PrefMap kTestTimePref = {"test.time", PrefType::kTime,
+                                     PrefScope::kProfile};
+  constexpr PrefMap kTestGURLPref = {"test.gurl", PrefType::kGURL,
+                                     PrefScope::kProfile};
+  constexpr PrefMap kTestDictPref = {"test.dict", PrefType::kDictionary,
+                                     PrefScope::kProfile};
+
+  content::BrowserTaskEnvironment task_environment_;
+  TestExtensionPrefs prefs(base::ThreadTaskRunnerHandle::Get());
+
+  auto* registry = prefs.pref_registry().get();
+  registry->RegisterBooleanPref(kTestBooleanPref.name, false);
+  registry->RegisterIntegerPref(kTestIntegerPref.name, 0);
+  registry->RegisterStringPref(kTestStringPref.name, std::string());
+  registry->RegisterStringPref(kTestTimePref.name, std::string());
+  registry->RegisterStringPref(kTestGURLPref.name, std::string());
+  registry->RegisterDictionaryPref(kTestDictPref.name);
+
+  prefs.prefs()->SetBooleanPref(kTestBooleanPref, true);
+  prefs.prefs()->SetIntegerPref(kTestIntegerPref, 1);
+  prefs.prefs()->SetStringPref(kTestStringPref, "foo");
+  base::Time time = base::Time::Now();
+  prefs.prefs()->SetTimePref(kTestTimePref, time);
+  GURL url = GURL("https://example/com");
+  prefs.prefs()->SetGURLPref(kTestGURLPref, url);
+  auto dict = std::make_unique<base::DictionaryValue>();
+  dict->SetString("key", "val");
+  prefs.prefs()->SetDictionaryPref(kTestDictPref, std::move(dict));
+
+  EXPECT_TRUE(prefs.prefs()->GetPrefAsBoolean(kTestBooleanPref));
+  EXPECT_EQ(prefs.prefs()->GetPrefAsInteger(kTestIntegerPref), 1);
+  EXPECT_EQ(prefs.prefs()->GetPrefAsString(kTestStringPref), "foo");
+  EXPECT_EQ(prefs.prefs()->GetPrefAsTime(kTestTimePref), time);
+  EXPECT_EQ(prefs.prefs()->GetPrefAsGURL(kTestGURLPref), url);
+  std::string string_val = std::string();
+  prefs.prefs()
+      ->GetPrefAsDictionary(kTestDictPref)
+      ->GetString("key", &string_val);
+  EXPECT_EQ(string_val, "val");
+}
+
+TEST_F(ExtensionPrefsSimpleTest, ExtensionSpecificPrefsMapTest) {
+  constexpr PrefMap kTestBooleanPref = {"test.boolean", PrefType::kBool,
+                                        PrefScope::kExtensionSpecific};
+  constexpr PrefMap kTestIntegerPref = {"test.integer", PrefType::kInteger,
+                                        PrefScope::kExtensionSpecific};
+  constexpr PrefMap kTestStringPref = {"test.string", PrefType::kString,
+                                       PrefScope::kExtensionSpecific};
+  constexpr PrefMap kTestDictPref = {"test.dict", PrefType::kDictionary,
+                                     PrefScope::kExtensionSpecific};
+  constexpr PrefMap kTestListPref = {"test.list", PrefType::kList,
+                                     PrefScope::kExtensionSpecific};
+  constexpr PrefMap kTestTimePref = {"test.time", PrefType::kTime,
+                                     PrefScope::kExtensionSpecific};
+
+  content::BrowserTaskEnvironment task_environment_;
+  TestExtensionPrefs prefs(base::ThreadTaskRunnerHandle::Get());
+
+  std::string extension_id = prefs.AddExtensionAndReturnId("1");
+  prefs.prefs()->SetBooleanPref(extension_id, kTestBooleanPref, true);
+  prefs.prefs()->SetIntegerPref(extension_id, kTestIntegerPref, 1);
+  prefs.prefs()->SetStringPref(extension_id, kTestStringPref, "foo");
+  auto dict = std::make_unique<base::DictionaryValue>();
+  dict->SetString("key", "val");
+  prefs.prefs()->SetDictionaryPref(extension_id, kTestDictPref,
+                                   std::move(dict));
+  auto list = base::ListValue();
+  list.AppendString("list_val");
+  prefs.prefs()->SetListPref(extension_id, kTestListPref, std::move(list));
+  base::Time time = base::Time::Now();
+  prefs.prefs()->SetTimePref(extension_id, kTestTimePref, time);
+
+  bool bool_value = false;
+  EXPECT_TRUE(prefs.prefs()->ReadPrefAsBoolean(extension_id, kTestBooleanPref,
+                                               &bool_value));
+  EXPECT_TRUE(bool_value);
+  int int_value = 0;
+  EXPECT_TRUE(prefs.prefs()->ReadPrefAsInteger(extension_id, kTestIntegerPref,
+                                               &int_value));
+  EXPECT_EQ(int_value, 1);
+  std::string string_value;
+  EXPECT_TRUE(prefs.prefs()->ReadPrefAsString(extension_id, kTestStringPref,
+                                              &string_value));
+  EXPECT_EQ(string_value, "foo");
+
+  const base::DictionaryValue* dict_val = nullptr;
+  prefs.prefs()->ReadPrefAsDictionary(extension_id, kTestDictPref, &dict_val);
+  dict_val->GetString("key", &string_value);
+  EXPECT_EQ(string_value, "val");
+
+  const base::ListValue* list_val = nullptr;
+  prefs.prefs()->ReadPrefAsList(extension_id, kTestListPref, &list_val);
+  EXPECT_TRUE(list_val->GetList()[0].is_string());
+  EXPECT_EQ(list_val->GetList()[0].GetString(), "list_val");
+
+  EXPECT_EQ(time, prefs.prefs()->ReadPrefAsTime(extension_id, kTestTimePref));
 }
 
 }  // namespace extensions

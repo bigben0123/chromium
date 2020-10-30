@@ -20,14 +20,15 @@ import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.task.PostTask;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.browserservices.BrowserServicesMetrics;
 import org.chromium.chrome.browser.browserservices.TrustedWebActivityClient;
 import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider;
-import org.chromium.chrome.browser.payments.PaymentRequestImpl;
+import org.chromium.chrome.browser.payments.ChromePaymentRequestService;
 import org.chromium.chrome.browser.payments.handler.PaymentHandlerCoordinator;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabLaunchType;
-import org.chromium.chrome.browser.tabmodel.document.AsyncTabCreationParams;
+import org.chromium.chrome.browser.tabmodel.AsyncTabCreationParams;
 import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
 import org.chromium.chrome.browser.webapps.ChromeWebApkHost;
 import org.chromium.chrome.browser.webapps.WebappDataStorage;
@@ -80,8 +81,12 @@ public class ServiceTabLauncher {
         if (disposition == WindowOpenDisposition.NEW_POPUP) {
             boolean success = false;
             if (PaymentHandlerCoordinator.isEnabled()) {
-                success = PaymentRequestImpl.openPaymentHandlerWindow(url,
-                        (webContents) -> onWebContentsForRequestAvailable(requestId, webContents));
+                WebContents paymentHandlerWebContent =
+                        ChromePaymentRequestService.openPaymentHandlerWindow(url);
+                if (paymentHandlerWebContent != null) {
+                    success = true;
+                    onWebContentsForRequestAvailable(requestId, paymentHandlerWebContent);
+                }
             } else {
                 success = createPopupCustomTab(requestId, url.getSpec(), incognito);
             }

@@ -27,7 +27,7 @@
 #include "chrome/browser/ui/web_applications/system_web_app_ui_utils.h"
 #include "chrome/browser/ui/web_applications/web_app_launch_utils.h"
 #include "chrome/browser/web_applications/components/app_registry_controller.h"
-#include "chrome/browser/web_applications/components/file_handler_manager.h"
+#include "chrome/browser/web_applications/components/os_integration_manager.h"
 #include "chrome/browser/web_applications/components/web_app_constants.h"
 #include "chrome/browser/web_applications/components/web_app_helpers.h"
 #include "chrome/browser/web_applications/components/web_app_install_utils.h"
@@ -45,7 +45,6 @@
 #include "content/public/common/referrer.h"
 #include "extensions/common/constants.h"
 #include "third_party/blink/public/common/features.h"
-#include "third_party/blink/public/mojom/renderer_preferences.mojom.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/display/scoped_display_for_new_windows.h"
@@ -76,7 +75,8 @@ void SetTabHelperAppId(content::WebContents* web_contents,
 
 Browser* CreateWebApplicationWindow(Profile* profile,
                                     const std::string& app_id,
-                                    WindowOpenDisposition disposition) {
+                                    WindowOpenDisposition disposition,
+                                    bool can_resize) {
   std::string app_name = GenerateApplicationNameFromAppId(app_id);
   gfx::Rect initial_bounds;
   Browser::CreateParams browser_params =
@@ -88,7 +88,8 @@ Browser* CreateWebApplicationWindow(Profile* profile,
                 app_name, /*trusted_source=*/true, initial_bounds, profile,
                 /*user_gesture=*/true);
   browser_params.initial_show_state = DetermineWindowShowState();
-  return new Browser(browser_params);
+  browser_params.can_resize = can_resize;
+  return Browser::Create(browser_params);
 }
 
 content::WebContents* NavigateWebApplicationWindow(
@@ -115,21 +116,24 @@ WebAppLaunchManager::WebAppLaunchManager(Profile* profile)
 WebAppLaunchManager::~WebAppLaunchManager() = default;
 
 content::WebContents* WebAppLaunchManager::OpenApplication(
-    const apps::AppLaunchParams& params) {
+    apps::AppLaunchParams&& params) {
   if (!provider_->registrar().IsInstalled(params.app_id))
     return nullptr;
 
   if (params.container == apps::mojom::LaunchContainer::kLaunchContainerWindow)
     RecordAppWindowLaunch(profile_, params.app_id);
 
-  web_app::FileHandlerManager& file_handler_manager =
-      provider_->file_handler_manager();
+  if (GetOpenApplicationCallback())
+    return GetOpenApplicationCallback().Run(std::move(params));
+
+  web_app::OsIntegrationManager& os_integration_manager =
+      provider_->os_integration_manager();
 
   const GURL url =
       params.override_url.is_empty()
-          ? file_handler_manager
+          ? os_integration_manager
                 .GetMatchingFileHandlerURL(params.app_id, params.launch_files)
-                .value_or(provider_->registrar().GetAppLaunchURL(params.app_id))
+                .value_or(provider_->registrar().GetAppLaunchUrl(params.app_id))
           : params.override_url;
 
   // Place new windows on the specified display.
@@ -140,7 +144,7 @@ content::WebContents* WebAppLaunchManager::OpenApplication(
       GetSystemWebAppTypeForAppId(profile_, params.app_id);
   if (system_app_type) {
     Browser* browser =
-        LaunchSystemWebApp(profile_, *system_app_type, url, params);
+        LaunchSystemWebApp(profile_, *system_app_type, url, std::move(params));
     return browser->tab_strip_model()->GetActiveWebContents();
   }
 
@@ -155,8 +159,8 @@ content::WebContents* WebAppLaunchManager::OpenApplication(
       disposition = params.disposition;
     } else {
       browser =
-          new Browser(Browser::CreateParams(Browser::TYPE_NORMAL, profile_,
-                                            /*user_gesture=*/true));
+          Browser::Create(Browser::CreateParams(Browser::TYPE_NORMAL, profile_,
+                                                /*user_gesture=*/true));
     }
   } else {
     if (params.disposition == WindowOpenDisposition::CURRENT_TAB &&
@@ -200,7 +204,7 @@ content::WebContents* WebAppLaunchManager::OpenApplication(
         browser, params.app_id, url, WindowOpenDisposition::NEW_FOREGROUND_TAB);
   }
 
-  if (file_handler_manager.IsFileHandlingAPIAvailable(params.app_id)) {
+  if (os_integration_manager.IsFileHandlingAPIAvailable(params.app_id)) {
     web_launch::WebLaunchFilesHelper::SetLaunchPaths(web_contents, url,
                                                      params.launch_files);
   }
@@ -261,14 +265,21 @@ void WebAppLaunchManager::LaunchApplication(
   // on_registry_ready will not fire.
   provider_->on_registry_ready().Post(
       FROM_HERE, base::BindOnce(&WebAppLaunchManager::LaunchWebApplication,
-                                weak_ptr_factory_.GetWeakPtr(), params,
-                                std::move(callback)));
+                                weak_ptr_factory_.GetWeakPtr(),
+                                std::move(params), std::move(callback)));
+}
+
+// static
+void WebAppLaunchManager::SetOpenApplicationCallbackForTesting(
+    OpenApplicationCallback callback) {
+  GetOpenApplicationCallback() = std::move(callback);
 }
 
 void WebAppLaunchManager::LaunchWebApplication(
-    apps::AppLaunchParams params,
+    apps::AppLaunchParams&& params,
     base::OnceCallback<void(Browser* browser,
                             apps::mojom::LaunchContainer container)> callback) {
+  apps::mojom::LaunchContainer container;
   Browser* browser;
   if (provider_->registrar().IsInstalled(params.app_id)) {
     if (provider_->registrar().GetAppEffectiveDisplayMode(params.app_id) ==
@@ -277,15 +288,25 @@ void WebAppLaunchManager::LaunchWebApplication(
       params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
     }
 
-    const content::WebContents* web_contents = OpenApplication(params);
+    container = params.container;
+    const content::WebContents* web_contents =
+        OpenApplication(std::move(params));
     browser = chrome::FindBrowserWithWebContents(web_contents);
     DCHECK(browser);
   } else {
     // Open an empty browser window as the app_id is invalid.
+    container = apps::mojom::LaunchContainer::kLaunchContainerNone;
     browser = apps::CreateBrowserWithNewTabPage(profile_);
-    params.container = apps::mojom::LaunchContainer::kLaunchContainerNone;
   }
-  std::move(callback).Run(browser, params.container);
+  std::move(callback).Run(browser, container);
+}
+
+// static
+WebAppLaunchManager::OpenApplicationCallback&
+WebAppLaunchManager::GetOpenApplicationCallback() {
+  static base::NoDestructor<OpenApplicationCallback> callback;
+
+  return *callback;
 }
 
 void RecordAppWindowLaunch(Profile* profile, const std::string& app_id) {
@@ -293,7 +314,8 @@ void RecordAppWindowLaunch(Profile* profile, const std::string& app_id) {
   if (!provider)
     return;
 
-  DisplayMode display = provider->registrar().GetAppDisplayMode(app_id);
+  DisplayMode display =
+      provider->registrar().GetEffectiveDisplayModeFromManifest(app_id);
   if (display == DisplayMode::kUndefined)
     return;
 

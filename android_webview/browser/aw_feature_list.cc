@@ -25,7 +25,10 @@ namespace {
 // in other locations in the code base (e.g. content/, components/, etc).
 const base::Feature* kFeaturesExposedToJava[] = {
     &features::kWebViewConnectionlessSafeBrowsing,
+    &features::kWebViewDisplayCutout,
+    &features::kWebViewMixedContentAutoupgrades,
     &features::kWebViewTestFeature,
+    &features::kWebViewMeasureScreenCoverage,
 };
 
 const base::Feature* FindFeatureExposedToJava(const std::string& feature_name) {

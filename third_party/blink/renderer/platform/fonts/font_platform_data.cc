@@ -23,6 +23,7 @@
 #include "build/build_config.h"
 #include "hb-ot.h"
 #include "hb.h"
+#include "third_party/blink/public/common/privacy_budget/identifiable_token_builder.h"
 #include "third_party/blink/public/platform/linux/web_sandbox_support.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/fonts/font_cache.h"
@@ -33,10 +34,11 @@
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/skia/include/core/SkData.h"
 #include "third_party/skia/include/core/SkFont.h"
 #include "third_party/skia/include/core/SkTypeface.h"
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #include "third_party/skia/include/ports/SkTypeface_mac.h"
 #endif
 
@@ -77,7 +79,7 @@ FontPlatformData::FontPlatformData(float size,
 
 FontPlatformData::FontPlatformData(const FontPlatformData& source)
     : typeface_(source.typeface_),
-#if !defined(OS_WIN) && !defined(OS_MACOSX)
+#if !defined(OS_WIN) && !defined(OS_MAC)
       family_(source.family_),
 #endif
       text_size_(source.text_size_),
@@ -85,17 +87,16 @@ FontPlatformData::FontPlatformData(const FontPlatformData& source)
       synthetic_italic_(source.synthetic_italic_),
       avoid_embedded_bitmaps_(source.avoid_embedded_bitmaps_),
       orientation_(source.orientation_),
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
       style_(source.style_),
 #endif
       harfbuzz_face_(nullptr),
-      is_hash_table_deleted_value_(false)
-{
+      is_hash_table_deleted_value_(false) {
 }
 
 FontPlatformData::FontPlatformData(const FontPlatformData& src, float text_size)
     : FontPlatformData(src.typeface_,
-#if !defined(OS_WIN) && !defined(OS_MACOSX)
+#if !defined(OS_WIN) && !defined(OS_MAC)
                        src.family_.data(),
 #else
                        std::string(),
@@ -113,7 +114,7 @@ FontPlatformData::FontPlatformData(sk_sp<SkTypeface> typeface,
                                    bool synthetic_italic,
                                    FontOrientation orientation)
     : typeface_(typeface),
-#if !defined(OS_WIN) && !defined(OS_MACOSX)
+#if !defined(OS_WIN) && !defined(OS_MAC)
       family_(family),
 #endif
       text_size_(text_size),
@@ -121,9 +122,8 @@ FontPlatformData::FontPlatformData(sk_sp<SkTypeface> typeface,
       synthetic_italic_(synthetic_italic),
       avoid_embedded_bitmaps_(false),
       orientation_(orientation),
-      is_hash_table_deleted_value_(false)
-{
-#if !defined(OS_MACOSX)
+      is_hash_table_deleted_value_(false) {
+#if !defined(OS_MAC)
   style_ = WebFontRenderStyle::GetDefault();
   auto system_style =
 #if !defined(OS_WIN)
@@ -146,7 +146,7 @@ FontPlatformData::FontPlatformData(sk_sp<SkTypeface> typeface,
 
 FontPlatformData::~FontPlatformData() = default;
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 CTFontRef FontPlatformData::CtFont() const {
   return SkTypeface_GetCTFontRef(typeface_.get());
 }
@@ -159,7 +159,7 @@ const FontPlatformData& FontPlatformData::operator=(
     return *this;
 
   typeface_ = other.typeface_;
-#if !defined(OS_WIN) && !defined(OS_MACOSX)
+#if !defined(OS_WIN) && !defined(OS_MAC)
   family_ = other.family_;
 #endif
   text_size_ = other.text_size_;
@@ -168,7 +168,7 @@ const FontPlatformData& FontPlatformData::operator=(
   avoid_embedded_bitmaps_ = other.avoid_embedded_bitmaps_;
   harfbuzz_face_ = nullptr;
   orientation_ = other.orientation_;
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
   style_ = other.style_;
 #endif
 
@@ -189,7 +189,7 @@ bool FontPlatformData::operator==(const FontPlatformData& a) const {
          synthetic_bold_ == a.synthetic_bold_ &&
          synthetic_italic_ == a.synthetic_italic_ &&
          avoid_embedded_bitmaps_ == a.avoid_embedded_bitmaps_
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
          && style_ == a.style_
 #endif
          && orientation_ == a.orientation_;
@@ -250,7 +250,7 @@ unsigned FontPlatformData::GetHash() const {
   return h;
 }
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
 bool FontPlatformData::FontContainsCharacter(UChar32 character) {
   SkFont font;
   SetupSkFont(&font);
@@ -258,7 +258,7 @@ bool FontPlatformData::FontContainsCharacter(UChar32 character) {
 }
 #endif
 
-#if !defined(OS_MACOSX) && !defined(OS_WIN)
+#if !defined(OS_MAC) && !defined(OS_WIN)
 // static
 WebFontRenderStyle FontPlatformData::QuerySystemRenderStyle(
     const std::string& family,
@@ -295,5 +295,56 @@ void FontPlatformData::SetupSkFont(SkFont* font,
   font->setEmbeddedBitmaps(!avoid_embedded_bitmaps_);
 }
 #endif
+
+IdentifiableToken FontPlatformData::ComputeTypefaceDigest() const {
+  DCHECK(typeface_);
+  int table_count = typeface_->countTables();
+
+  // If no tables are found, return 0, to make it clearer that no identifiable
+  // information was available.
+  if (!table_count)
+    return 0;
+
+  IdentifiableTokenBuilder builder;
+  builder.AddValue(table_count);
+
+  Vector<SkFontTableTag> all_table_tags(table_count);
+  int tags_copied = typeface_->getTableTags(all_table_tags.data());
+  DCHECK_EQ(tags_copied, table_count);
+
+  // The tags are probably already sorted, but let's make sure.
+  std::sort(all_table_tags.begin(), all_table_tags.end());
+  for (SkFontTableTag table_tag : all_table_tags) {
+    builder.AddValue(table_tag).AddValue(typeface_->getTableSize(table_tag));
+  }
+
+  // These tables should both be small enough to compute a digest quickly and
+  // varied enough to ensure that different fonts have distinct hashes.
+  constexpr SkFontTableTag kTablesToFullyDigest[] = {
+      SkSetFourByteTag('c', 'm', 'a', 'p'),
+      SkSetFourByteTag('h', 'e', 'a', 'd'),
+      SkSetFourByteTag('n', 'a', 'm', 'e'),
+  };
+  for (SkFontTableTag table_tag : kTablesToFullyDigest) {
+    base::span<const uint8_t> table_data_span;
+    sk_sp<SkData> table_data = typeface_->copyTableData(table_tag);
+    if (table_data) {
+      table_data_span =
+          base::span<const uint8_t>(table_data->bytes(), table_data->size());
+    }
+    builder.AddAtomic(table_data_span);
+  }
+
+  return builder.GetToken();  // hasher.GetHash();
+}
+
+String FontPlatformData::GetPostScriptName() const {
+  if (!typeface_)
+    return String();
+
+  SkString postscript_name;
+  bool success = typeface_->getPostScriptName(&postscript_name);
+  return success ? postscript_name.c_str() : String();
+}
 
 }  // namespace blink

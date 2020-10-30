@@ -12,9 +12,8 @@
 // HistoryService <----------------> HistoryBackend
 //                                   -> HistoryDatabase
 //                                      -> SQLite connection to History
-//                                   -> ThumbnailDatabase
-//                                      -> SQLite connection to Thumbnails
-//                                         (and favicons)
+//                                   -> FaviconDatabase
+//                                      -> SQLite connection to favicons
 
 #include "components/history/core/browser/history_service.h"
 
@@ -110,9 +109,15 @@ class HistoryService::BackendDelegate : public HistoryBackend::Delegate {
   }
 
   void NotifyURLsModified(const URLRows& changed_urls) override {
+    // As the two argument version is overridden, this should not be called.
+    NOTREACHED();
+  }
+
+  void NotifyURLsModified(const URLRows& changed_urls,
+                          UrlsModifiedReason reason) override {
     service_task_runner_->PostTask(
         FROM_HERE, base::BindOnce(&HistoryService::NotifyURLsModified,
-                                  history_service_, changed_urls));
+                                  history_service_, changed_urls, reason));
   }
 
   void NotifyURLsDeleted(DeletionInfo deletion_info) override {
@@ -1180,10 +1185,11 @@ void HistoryService::NotifyURLVisited(ui::PageTransition transition,
     observer.OnURLVisited(this, transition, row, redirects, visit_time);
 }
 
-void HistoryService::NotifyURLsModified(const URLRows& changed_urls) {
+void HistoryService::NotifyURLsModified(const URLRows& changed_urls,
+                                        UrlsModifiedReason reason) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   for (HistoryServiceObserver& observer : observers_)
-    observer.OnURLsModified(this, changed_urls);
+    observer.OnURLsModified(this, changed_urls, reason);
 }
 
 void HistoryService::NotifyURLsDeleted(const DeletionInfo& deletion_info) {
@@ -1242,18 +1248,17 @@ void HistoryService::NotifyKeywordSearchTermDeleted(URLID url_id) {
     observer.OnKeywordSearchTermDeleted(this, url_id);
 }
 
-std::unique_ptr<
-    base::CallbackList<void(const std::set<GURL>&, const GURL&)>::Subscription>
+std::unique_ptr<HistoryService::FaviconsChangedCallbackList::Subscription>
 HistoryService::AddFaviconsChangedCallback(
-    const HistoryService::OnFaviconsChangedCallback& callback) {
+    const HistoryService::FaviconsChangedCallback& callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  return favicon_changed_callback_list_.Add(callback);
+  return favicons_changed_callback_list_.Add(callback);
 }
 
 void HistoryService::NotifyFaviconsChanged(const std::set<GURL>& page_urls,
                                            const GURL& icon_url) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  favicon_changed_callback_list_.Notify(page_urls, icon_url);
+  favicons_changed_callback_list_.Notify(page_urls, icon_url);
 }
 
 }  // namespace history

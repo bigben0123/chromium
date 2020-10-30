@@ -46,10 +46,6 @@ base::Optional<TransformationMatrix> XRTargetRaySpace::MojoFromNative() {
   }
 }
 
-base::Optional<TransformationMatrix> XRTargetRaySpace::NativeFromMojo() {
-  return XRSpace::TryInvert(MojoFromNative());
-}
-
 bool XRTargetRaySpace::EmulatedPosition() const {
   return input_source_->emulatedPosition();
 }
@@ -57,6 +53,10 @@ bool XRTargetRaySpace::EmulatedPosition() const {
 base::Optional<device::mojom::blink::XRNativeOriginInformation>
 XRTargetRaySpace::NativeOrigin() const {
   return input_source_->nativeOrigin();
+}
+
+std::string XRTargetRaySpace::ToString() const {
+  return "XRTargetRaySpace";
 }
 
 bool XRTargetRaySpace::IsStationary() const {

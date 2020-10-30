@@ -7,8 +7,8 @@
 
 #include "base/macros.h"
 #include "chrome/browser/ui/passwords/password_dialog_prompts.h"
+#include "components/password_manager/core/browser/password_form_forward.h"
 #include "ui/views/bubble/bubble_dialog_delegate_view.h"
-#include "ui/views/controls/button/button.h"
 
 namespace content {
 class WebContents;
@@ -17,7 +17,6 @@ class WebContents;
 class CredentialManagerDialogController;
 
 class AccountChooserDialogView : public views::BubbleDialogDelegateView,
-                                 public views::ButtonListener,
                                  public AccountChooserPrompt {
  public:
   AccountChooserDialogView(CredentialManagerDialogController* controller,
@@ -38,11 +37,10 @@ class AccountChooserDialogView : public views::BubbleDialogDelegateView,
   // DialogDelegate:
   bool Accept() override;
 
-  // ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
-
   // Sets up the child views.
   void InitWindow();
+
+  void CredentialsItemPressed(const password_manager::PasswordForm* form);
 
   // A weak pointer to the controller.
   CredentialManagerDialogController* controller_;

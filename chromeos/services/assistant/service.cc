@@ -12,6 +12,7 @@
 #include "ash/public/cpp/assistant/assistant_state.h"
 #include "ash/public/cpp/assistant/controller/assistant_alarm_timer_controller.h"
 #include "ash/public/cpp/assistant/controller/assistant_controller.h"
+#include "ash/public/cpp/assistant/controller/assistant_notification_controller.h"
 #include "ash/public/cpp/session/session_controller.h"
 #include "base/bind.h"
 #include "base/command_line.h"
@@ -75,6 +76,9 @@ constexpr base::TimeDelta kMaxTokenRefreshDelay =
 
 // Testing override for the URI used to contact the s3 server.
 const char* g_s3_server_uri_override = nullptr;
+// Testing override for the device-id used by Libassistant to identify this
+// device.
+const char* g_device_id_override = nullptr;
 
 AssistantStatus ToAssistantStatus(AssistantManagerService::State state) {
   using State = AssistantManagerService::State;
@@ -93,6 +97,12 @@ AssistantStatus ToAssistantStatus(AssistantManagerService::State state) {
 base::Optional<std::string> GetS3ServerUriOverride() {
   if (g_s3_server_uri_override)
     return g_s3_server_uri_override;
+  return base::nullopt;
+}
+
+base::Optional<std::string> GetDeviceIdOverride() {
+  if (g_device_id_override)
+    return g_device_id_override;
   return base::nullopt;
 }
 #endif
@@ -165,9 +175,9 @@ class Service::Context : public ServiceContext {
     return ash::AssistantController::Get();
   }
 
-  ash::mojom::AssistantNotificationController*
-  assistant_notification_controller() override {
-    return parent_->assistant_notification_controller_.get();
+  ash::AssistantNotificationController* assistant_notification_controller()
+      override {
+    return ash::AssistantNotificationController::Get();
   }
 
   ash::AssistantScreenContextController* assistant_screen_context_controller()
@@ -227,6 +237,11 @@ Service::~Service() {
 // static
 void Service::OverrideS3ServerUriForTesting(const char* uri) {
   g_s3_server_uri_override = uri;
+}
+
+// static
+void Service::OverrideDeviceIdForTesting(const char* device_id) {
+  g_device_id_override = device_id;
 }
 
 void Service::SetAssistantManagerServiceForTesting(
@@ -546,7 +561,7 @@ Service::CreateAndReturnAssistantManagerService() {
   DCHECK(pending_url_loader_factory_);
   return std::make_unique<AssistantManagerServiceImpl>(
       context(), std::move(delegate), std::move(pending_url_loader_factory_),
-      GetS3ServerUriOverride());
+      GetS3ServerUriOverride(), GetDeviceIdOverride());
 #else
   return std::make_unique<FakeAssistantManagerServiceImpl>();
 #endif
@@ -563,10 +578,6 @@ void Service::FinalizeAssistantManagerService() {
   if (is_assistant_manager_service_finalized_)
     return;
   is_assistant_manager_service_finalized_ = true;
-
-  // Bind to the AssistantNotificationController in ash.
-  AssistantClient::Get()->RequestAssistantNotificationController(
-      assistant_notification_controller_.BindNewPipeAndPassReceiver());
 
   AddAshSessionObserver();
 

@@ -34,11 +34,6 @@ extern const CGFloat kProgressBarHeight;
 // Height of the separator. Should be aligned to upper pixel.
 extern const CGFloat kToolbarSeparatorHeight;
 
-// HandleBar width, height, and bottom anchor constant.
-extern const CGFloat kHandleBarWidth;
-extern const CGFloat kHandleBarHeight;
-extern const CGFloat kHandleBarBottomAnchorConstant;
-
 // Toolbar Buttons.
 extern const CGFloat kAdaptiveToolbarButtonHeight;
 extern const CGFloat kAdaptiveToolbarButtonWidth;
@@ -97,6 +92,10 @@ extern NSString* const kToolbarShareButtonIdentifier;
 extern NSString* const kToolbarNewTabButtonIdentifier;
 // Accessibility identifier of the cancel omnibox edit button.
 extern NSString* const kToolbarCancelOmniboxEditButtonIdentifier;
+
+// Round corner radius for top-left and top-right corners when thumb strip is
+// visible.
+extern const CGFloat kTopCornerRadius;
 
 // Font size for the TabGrid button containing the tab count.
 extern const NSInteger kTabGridButtonFontSize;

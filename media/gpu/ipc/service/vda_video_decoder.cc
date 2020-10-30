@@ -13,6 +13,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "gpu/config/gpu_driver_bug_workarounds.h"
 #include "gpu/config/gpu_info.h"
 #include "gpu/config/gpu_preferences.h"
@@ -69,13 +70,18 @@ std::unique_ptr<VideoDecodeAccelerator> CreateAndInitializeVda(
     VideoDecodeAccelerator::Client* client,
     MediaLog* media_log,
     const VideoDecodeAccelerator::Config& config) {
+  GpuVideoDecodeGLClient gl_client;
+  gl_client.get_context = base::BindRepeating(
+      &CommandBufferHelper::GetGLContext, command_buffer_helper);
+  gl_client.make_context_current = base::BindRepeating(
+      &CommandBufferHelper::MakeContextCurrent, command_buffer_helper);
+  gl_client.bind_image = base::BindRepeating(&BindImage, command_buffer_helper);
+  gl_client.is_passthrough = command_buffer_helper->IsPassthrough();
+  gl_client.supports_arb_texture_rectangle =
+      command_buffer_helper->SupportsTextureRectangle();
+
   std::unique_ptr<GpuVideoDecodeAcceleratorFactory> factory =
-      GpuVideoDecodeAcceleratorFactory::Create(
-          base::BindRepeating(&CommandBufferHelper::GetGLContext,
-                              command_buffer_helper),
-          base::BindRepeating(&CommandBufferHelper::MakeContextCurrent,
-                              command_buffer_helper),
-          base::BindRepeating(&BindImage, command_buffer_helper));
+      GpuVideoDecodeAcceleratorFactory::Create(gl_client);
   // Note: GpuVideoDecodeAcceleratorFactory may create and initialize more than
   // one VDA. It is therefore important that VDAs do not call client methods
   // from Initialize().
@@ -272,7 +278,7 @@ void VdaVideoDecoder::Initialize(const VideoDecoderConfig& config,
   // (https://crbug.com/929565). We should support reinitialization for profile
   // changes. We limit this support as small as possible for safety.
   const bool is_profile_change =
-#if defined(OS_CHROMEOS) && BUILDFLAG(USE_VAAPI)
+#if BUILDFLAG(IS_ASH) && BUILDFLAG(USE_VAAPI)
       config_.profile() != config.profile();
 #else
       false;
@@ -536,7 +542,8 @@ void VdaVideoDecoder::ProvidePictureBuffersAsync(uint32_t count,
 
   std::vector<PictureBuffer> picture_buffers =
       picture_buffer_manager_->CreatePictureBuffers(
-          count, pixel_format, planes, texture_size, texture_target);
+          count, pixel_format, planes, texture_size, texture_target,
+          vda_->SupportsSharedImagePictureBuffers());
   if (picture_buffers.empty()) {
     parent_task_runner_->PostTask(
         FROM_HERE,
@@ -629,6 +636,7 @@ void VdaVideoDecoder::PictureReadyOnParentThread(Picture picture) {
     EnterErrorState();
     return;
   }
+  frame->set_hdr_metadata(config_.hdr_metadata());
 
   output_cb_.Run(std::move(frame));
 }
@@ -753,6 +761,10 @@ void VdaVideoDecoder::NotifyError(VideoDecodeAccelerator::Error error) {
   parent_task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&VdaVideoDecoder::NotifyErrorOnParentThread,
                                 parent_weak_this_, error));
+}
+
+gpu::SharedImageStub* VdaVideoDecoder::GetSharedImageStub() const {
+  return command_buffer_helper_->GetSharedImageStub();
 }
 
 void VdaVideoDecoder::NotifyErrorOnParentThread(

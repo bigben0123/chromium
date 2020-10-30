@@ -31,6 +31,7 @@ absl_source_set("strings") {
     "ascii.h",
     "charconv.h",
     "escaping.h",
+    "internal/string_constant.h",
     "match.h",
     "numbers.h",
     "str_cat.h",
@@ -120,6 +121,8 @@ absl_source_set("cord_internal") {
   visibility = [ ":*" ]
   deps = [
     ":strings",
+    "//third_party/abseil-cpp/absl/base:base_internal",
+    "//third_party/abseil-cpp/absl/container:compressed_tuple",
     "//third_party/abseil-cpp/absl/meta:type_traits",
   ]
 }
@@ -133,7 +136,6 @@ absl_source_set("cord") {
     ":str_format",
     ":strings",
     "//third_party/abseil-cpp/absl/base",
-    "//third_party/abseil-cpp/absl/base:base_internal",
     "//third_party/abseil-cpp/absl/base:core_headers",
     "//third_party/abseil-cpp/absl/base:endian",
     "//third_party/abseil-cpp/absl/base:raw_logging_internal",

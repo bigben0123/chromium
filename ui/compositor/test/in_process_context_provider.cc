@@ -20,7 +20,7 @@
 #include "gpu/ipc/gl_in_process_context.h"
 #include "gpu/skia_bindings/grcontext_for_gles2_interface.h"
 #include "ipc/common/surface_handle.h"
-#include "third_party/skia/include/gpu/GrContext.h"
+#include "third_party/skia/include/gpu/GrDirectContext.h"
 #include "third_party/skia/include/gpu/gl/GrGLInterface.h"
 
 namespace ui {
@@ -104,6 +104,8 @@ gpu::ContextResult InProcessContextProvider::BindToCurrentThread() {
       /*surface=*/nullptr,
       /*is_offscreen=*/window_ == gpu::kNullSurfaceHandle, window_, attribs_,
       gpu::SharedMemoryLimits(), gpu_memory_buffer_manager_, image_factory_,
+      /*gpu_task_scheduler=*/nullptr,
+      /*display_controller_on_gpu=*/nullptr,
       base::ThreadTaskRunnerHandle::Get());
 
   if (bind_result_ != gpu::ContextResult::kSuccess)
@@ -150,7 +152,7 @@ gpu::ContextSupport* InProcessContextProvider::ContextSupport() {
   return context_->GetImplementation();
 }
 
-class GrContext* InProcessContextProvider::GrContext() {
+class GrDirectContext* InProcessContextProvider::GrContext() {
   CheckValidThreadOrLockAcquired();
 
   if (gr_context_)

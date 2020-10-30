@@ -27,10 +27,12 @@ import org.chromium.android_webview.metrics.AwNonembeddedUmaReplayer;
 import org.chromium.android_webview.policy.AwPolicyProvider;
 import org.chromium.android_webview.proto.MetricsBridgeRecords.HistogramRecord;
 import org.chromium.android_webview.safe_browsing.AwSafeBrowsingConfigHelper;
+import org.chromium.base.BaseSwitches;
 import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.PathUtils;
+import org.chromium.base.PowerMonitor;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TimeUtils;
 import org.chromium.base.annotations.CalledByNative;
@@ -44,10 +46,10 @@ import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskRunner;
 import org.chromium.base.task.TaskTraits;
 import org.chromium.components.minidump_uploader.CrashFileManager;
+import org.chromium.components.policy.CombinedPolicyProvider;
 import org.chromium.content_public.browser.BrowserStartupController;
 import org.chromium.content_public.browser.ChildProcessCreationParams;
 import org.chromium.content_public.browser.ChildProcessLauncherHelper;
-import org.chromium.policy.CombinedPolicyProvider;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -153,6 +155,8 @@ public final class AwBrowserProcess {
                     BrowserStartupController.getInstance().startBrowserProcessesSync(
                             LibraryProcessType.PROCESS_WEBVIEW, !multiProcess);
                 }
+
+                PowerMonitor.create();
             });
         }
     }
@@ -185,7 +189,7 @@ public final class AwBrowserProcess {
         try (ScopedSysTraceEvent e1 = ScopedSysTraceEvent.scoped(
                      "AwBrowserProcess.handleMinidumpsAndSetMetricsConsent")) {
             final boolean enableMinidumpUploadingForTesting = CommandLine.getInstance().hasSwitch(
-                    AwSwitches.CRASH_UPLOADS_ENABLED_FOR_TESTING_SWITCH);
+                    BaseSwitches.ENABLE_CRASH_REPORTER_FOR_TESTING);
             if (enableMinidumpUploadingForTesting) {
                 handleMinidumps(true /* enabled */);
             }
@@ -316,10 +320,14 @@ public final class AwBrowserProcess {
             intent.setClassName(getWebViewPackageName(), ServiceNames.CRASH_RECEIVER_SERVICE);
 
             ServiceConnection connection = new ServiceConnection() {
+                private boolean mHasConnected;
+
                 @Override
                 public void onServiceConnected(ComponentName className, IBinder service) {
-                    // onServiceConnected is called on the UI thread, so punt this back to the
-                    // background thread.
+                    if (mHasConnected) return;
+                    mHasConnected = true;
+                    // onServiceConnected is called on the UI thread, so punt this back to
+                    // the background thread.
                     sSequencedTaskRunner.postTask(() -> {
                         transmitMinidumps(minidumpFiles, crashesInfoMap,
                                 ICrashReceiverService.Stub.asInterface(service));
@@ -389,8 +397,12 @@ public final class AwBrowserProcess {
         intent.setClassName(getWebViewPackageName(), ServiceNames.METRICS_BRIDGE_SERVICE);
 
         ServiceConnection connection = new ServiceConnection() {
+            private boolean mHasConnected;
+
             @Override
             public void onServiceConnected(ComponentName className, IBinder service) {
+                if (mHasConnected) return;
+                mHasConnected = true;
                 // onServiceConnected is called on the UI thread, so punt this back to the
                 // background thread.
                 PostTask.postTask(TaskTraits.THREAD_POOL_BEST_EFFORT, () -> {

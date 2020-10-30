@@ -22,6 +22,7 @@
 #include "third_party/blink/renderer/modules/peerconnection/rtc_rtp_receiver_impl.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_rtp_sender_impl.h"
 #include "third_party/blink/renderer/modules/peerconnection/thermal_resource.h"
+#include "third_party/blink/renderer/modules/peerconnection/thermal_uma_listener.h"
 #include "third_party/blink/renderer/modules/peerconnection/transceiver_state_surfacer.h"
 #include "third_party/blink/renderer/modules/peerconnection/webrtc_media_stream_track_adapter_map.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
@@ -153,13 +154,6 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
   virtual void SetRemoteDescription(blink::RTCVoidRequest* request,
                                     RTCSessionDescriptionPlatform* description);
 
-  virtual RTCSessionDescriptionPlatform* LocalDescription();
-  virtual RTCSessionDescriptionPlatform* RemoteDescription();
-  virtual RTCSessionDescriptionPlatform* CurrentLocalDescription();
-  virtual RTCSessionDescriptionPlatform* CurrentRemoteDescription();
-  virtual RTCSessionDescriptionPlatform* PendingLocalDescription();
-  virtual RTCSessionDescriptionPlatform* PendingRemoteDescription();
-
   virtual const webrtc::PeerConnectionInterface::RTCConfiguration&
   GetConfiguration() const;
   virtual webrtc::RTCErrorType SetConfiguration(
@@ -258,7 +252,16 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
   class SetLocalDescriptionRequest;
   friend class SetLocalDescriptionRequest;
 
-  void OnSignalingChange(
+  void OnSessionDescriptionsUpdated(
+      std::unique_ptr<webrtc::SessionDescriptionInterface>
+          pending_local_description,
+      std::unique_ptr<webrtc::SessionDescriptionInterface>
+          current_local_description,
+      std::unique_ptr<webrtc::SessionDescriptionInterface>
+          pending_remote_description,
+      std::unique_ptr<webrtc::SessionDescriptionInterface>
+          current_remote_description);
+  void TrackSignalingChange(
       webrtc::PeerConnectionInterface::SignalingState new_state);
   void OnIceConnectionChange(
       webrtc::PeerConnectionInterface::IceConnectionState new_state);
@@ -268,11 +271,14 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
       webrtc::PeerConnectionInterface::PeerConnectionState new_state);
   void OnIceGatheringChange(
       webrtc::PeerConnectionInterface::IceGatheringState new_state);
-  void OnRenegotiationNeeded();
-  void OnAddReceiverPlanB(blink::RtpReceiverState receiver_state);
-  void OnRemoveReceiverPlanB(uintptr_t receiver_id);
+  void OnNegotiationNeededEvent(uint32_t event_id);
+  void OnReceiversModifiedPlanB(
+      webrtc::PeerConnectionInterface::SignalingState signaling_state,
+      Vector<blink::RtpReceiverState> receiver_state,
+      Vector<uintptr_t> receiver_id);
   void OnModifySctpTransport(blink::WebRTCSctpTransportSnapshot state);
   void OnModifyTransceivers(
+      webrtc::PeerConnectionInterface::SignalingState signaling_state,
       std::vector<blink::RtpTransceiverState> transceiver_states,
       bool is_remote_description);
   void OnDataChannel(scoped_refptr<webrtc::DataChannelInterface> channel);
@@ -288,6 +294,9 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
                            int error_code,
                            const String& error_text);
   void OnInterestingUsage(int usage_pattern);
+
+  // Protected for testing.
+  ThermalUmaListener* thermal_uma_listener() const;
 
  private:
   // Record info about the first SessionDescription from the local and
@@ -381,6 +390,7 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
   std::unique_ptr<blink::RTCRtpTransceiverImpl> CreateOrUpdateTransceiver(
       blink::RtpTransceiverState transceiver_state,
       blink::TransceiverStateUpdateMode update_mode);
+  void MaybeCreateThermalUmaListner();
 
   // Initialize() is never expected to be called more than once, even if the
   // first call fails.
@@ -461,6 +471,10 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
   // The Thermal Resource is lazily instantiated on platforms where thermal
   // signals are supported.
   scoped_refptr<ThermalResource> thermal_resource_ = nullptr;
+  // ThermalUmaListener is only tracked on peer connection that add a track.
+  std::unique_ptr<ThermalUmaListener> thermal_uma_listener_ = nullptr;
+  base::PowerObserver::DeviceThermalState last_thermal_state_ =
+      base::PowerObserver::DeviceThermalState::kUnknown;
 
   // Record info about the first SessionDescription from the local and
   // remote side to record UMA stats once both are set.  We only check

@@ -6,6 +6,7 @@
 #define ASH_ASSISTANT_UTIL_ASSISTANT_UTIL_H_
 
 #include "base/component_export.h"
+#include "base/optional.h"
 
 namespace chromeos {
 namespace assistant {
@@ -36,15 +37,6 @@ bool IsFinishingSession(AssistantVisibility new_visibility);
 COMPONENT_EXPORT(ASSISTANT_UTIL)
 bool IsVoiceEntryPoint(chromeos::assistant::AssistantEntryPoint entry_point,
                        bool prefer_voice);
-
-// Returns true if the |entry_point| should attempt warmer welcome.
-COMPONENT_EXPORT(ASSISTANT_UTIL)
-bool ShouldAttemptWarmerWelcome(
-    chromeos::assistant::AssistantEntryPoint entry_point);
-
-// Returns true if we should show Assistant onboarding.
-COMPONENT_EXPORT(ASSISTANT_UTIL)
-bool ShouldShowOnboarding();
 
 COMPONENT_EXPORT(ASSISTANT_UTIL)
 bool IsGoogleDevice();

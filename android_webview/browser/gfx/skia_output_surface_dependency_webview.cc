@@ -11,6 +11,7 @@
 #include "android_webview/browser/gfx/task_queue_web_view.h"
 #include "base/callback_helpers.h"
 #include "base/logging.h"
+#include "gpu/ipc/gpu_task_scheduler_helper.h"
 
 namespace android_webview {
 

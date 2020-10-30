@@ -97,7 +97,7 @@ BOOL WaitForKeyboardToAppear() {
   GREYCondition* waitForKeyboard = [GREYCondition
       conditionWithName:@"Wait for keyboard"
                   block:^BOOL {
-                    return [ChromeEarlGrey isKeyboardShownWithError:nil];
+                    return [EarlGrey isKeyboardShownWithError:nil];
                   }];
   return [waitForKeyboard waitWithTimeout:kWaitForActionTimeout];
 }
@@ -127,8 +127,7 @@ BOOL WaitForKeyboardToAppear() {
 
 - (void)tearDown {
   [AutofillAppInterface clearCreditCardStore];
-  [ChromeEarlGrey rotateDeviceToOrientation:UIDeviceOrientationPortrait
-                                      error:nil];
+  [EarlGrey rotateDeviceToOrientation:UIDeviceOrientationPortrait error:nil];
   [super tearDown];
 }
 
@@ -442,8 +441,7 @@ BOOL WaitForKeyboardToAppear() {
 
 // Tests that the credit card View Controller is dismissed when tapping the
 // keyboard.
-// TODO(crbug.com/1099432): Test fails on iPad when rolling EG2 version.
-- (void)DISABLED_testTappingKeyboardDismissCreditCardControllerPopOver {
+- (void)testTappingKeyboardDismissCreditCardControllerPopOver {
   if (![ChromeEarlGrey isIPadIdiom]) {
     return;
   }
@@ -462,9 +460,10 @@ BOOL WaitForKeyboardToAppear() {
       selectElementWithMatcher:ManualFallbackCreditCardTableViewMatcher()]
       assertWithMatcher:grey_sufficientlyVisible()];
 
-  [[EarlGrey
-      selectElementWithMatcher:[KeyboardAppInterface keyboardWindowMatcher]]
-      performAction:grey_typeText(@"text")];
+  // Tap a keyboard key directly. Typing with EG helpers do not trigger physical
+  // keyboard presses.
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityLabel(@"G")]
+      performAction:grey_tap()];
 
   // Verify the credit card controller table view and the credit card icon is
   // NOT visible.
@@ -515,8 +514,8 @@ BOOL WaitForKeyboardToAppear() {
       selectElementWithMatcher:ManualFallbackCreditCardTableViewMatcher()]
       assertWithMatcher:grey_sufficientlyVisible()];
 
-  [ChromeEarlGrey rotateDeviceToOrientation:UIDeviceOrientationLandscapeLeft
-                                      error:nil];
+  [EarlGrey rotateDeviceToOrientation:UIDeviceOrientationLandscapeLeft
+                                error:nil];
 
   // Verify the credit card controller table view is still visible.
   [[EarlGrey

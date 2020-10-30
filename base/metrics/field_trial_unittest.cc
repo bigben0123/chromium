@@ -33,7 +33,7 @@
 #include "base/posix/global_descriptors.h"
 #endif
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_MAC)
 #include "base/mac/mach_port_rendezvous.h"
 #endif
 
@@ -63,12 +63,14 @@ class TestFieldTrialObserver : public FieldTrialList::Observer {
     SYNCHRONOUS,
   };
 
-  TestFieldTrialObserver(Type type) : type_(type) {
+  explicit TestFieldTrialObserver(Type type) : type_(type) {
     if (type == SYNCHRONOUS)
       FieldTrialList::SetSynchronousObserver(this);
     else
       FieldTrialList::AddObserver(this);
   }
+  TestFieldTrialObserver(const TestFieldTrialObserver&) = delete;
+  TestFieldTrialObserver& operator=(const TestFieldTrialObserver&) = delete;
 
   ~TestFieldTrialObserver() override {
     if (type_ == SYNCHRONOUS)
@@ -90,8 +92,6 @@ class TestFieldTrialObserver : public FieldTrialList::Observer {
   const Type type_;
   std::string trial_name_;
   std::string group_name_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestFieldTrialObserver);
 };
 
 std::string MockEscapeQueryParamValue(const std::string& input) {
@@ -103,6 +103,8 @@ std::string MockEscapeQueryParamValue(const std::string& input) {
 class FieldTrialTest : public ::testing::Test {
  public:
   FieldTrialTest() : trial_list_(nullptr) {}
+  FieldTrialTest(const FieldTrialTest&) = delete;
+  FieldTrialTest& operator=(const FieldTrialTest&) = delete;
 
  private:
   test::TaskEnvironment task_environment_;
@@ -110,8 +112,6 @@ class FieldTrialTest : public ::testing::Test {
   // tests it's cleaner to start from scratch.
   test::ScopedFieldTrialListResetter trial_list_resetter_;
   FieldTrialList trial_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(FieldTrialTest);
 };
 
 // Test registration, and also check that destructors are called for trials.
@@ -1390,7 +1390,7 @@ MULTIPROCESS_TEST_MAIN(SerializeSharedMemoryRegionMetadata) {
   std::string guid_string =
       CommandLine::ForCurrentProcess()->GetSwitchValueASCII("guid");
 
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_WIN) || defined(OS_MAC)
   base::ReadOnlySharedMemoryRegion deserialized =
       FieldTrialList::DeserializeSharedMemoryRegionMetadata(serialized);
 #elif defined(OS_ANDROID)
@@ -1405,7 +1405,7 @@ MULTIPROCESS_TEST_MAIN(SerializeSharedMemoryRegionMetadata) {
   // Use the arbitrary fd value selected in the main process.
   base::ReadOnlySharedMemoryRegion deserialized =
       FieldTrialList::DeserializeSharedMemoryRegionMetadata(42, serialized);
-#endif  // defined(OS_WIN) || defined(OS_MACOSX)
+#endif  // defined(OS_WIN) || defined(OS_MAC)
   CHECK(deserialized.IsValid());
   CHECK_EQ(deserialized.GetGUID().ToString(), guid_string);
   CHECK(!deserialized.GetGUID().is_empty());
@@ -1425,7 +1425,7 @@ TEST_F(FieldTrialListTest, SerializeSharedMemoryRegionMetadata) {
 
 #if defined(OS_WIN)
   options.handles_to_inherit.push_back(shm.region.GetPlatformHandle());
-#elif defined(OS_MACOSX) && !defined(OS_IOS)
+#elif defined(OS_MAC)
   options.mach_ports_for_rendezvous.insert(
       std::make_pair('fldt', MachRendezvousPort{shm.region.GetPlatformHandle(),
                                                 MACH_MSG_TYPE_COPY_SEND}));
@@ -1458,8 +1458,7 @@ TEST_F(FieldTrialListTest, SerializeSharedMemoryRegionMetadata) {
 // does not allow writable mappings. Test disabled on NaCl, Fuchsia, and Mac,
 // which don't support/implement shared memory configuration. For Fuchsia, see
 // crbug.com/752368
-#if !defined(OS_NACL) && !defined(OS_FUCHSIA) && \
-    !(defined(OS_MACOSX) && !defined(OS_IOS))
+#if !defined(OS_NACL) && !defined(OS_FUCHSIA) && !defined(OS_MAC)
 TEST_F(FieldTrialListTest, CheckReadOnlySharedMemoryRegion) {
   FieldTrialList field_trial_list(nullptr);
   FieldTrialList::CreateFieldTrial("Trial1", "Group1");
@@ -1474,7 +1473,7 @@ TEST_F(FieldTrialListTest, CheckReadOnlySharedMemoryRegion) {
       base::ReadOnlySharedMemoryRegion::TakeHandleForSerialization(
           std::move(region))));
 }
-#endif  // !OS_NACL && !OS_FUCHSIA && !(OS_MACOSX && !OS_IOS)
+#endif  // !OS_NACL && !OS_FUCHSIA && !OS_MAC
 
 TEST_F(FieldTrialTest, TestAllParamsToString) {
   std::string exptected_output = "t1.g1:p1/v1/p2/v2";

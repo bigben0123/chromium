@@ -36,13 +36,12 @@
 #include "chrome/browser/ui/app_list/test/test_app_list_controller_delegate.h"
 #include "chrome/browser/web_applications/components/web_app_provider_base.h"
 #include "chrome/browser/web_applications/test/web_app_install_test_utils.h"
-#include "chrome/browser/web_applications/test/web_app_test.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/arc/test/fake_app_instance.h"
 #include "components/crx_file/id_util.h"
 #include "components/services/app_service/public/cpp/stub_icon_loader.h"
+#include "components/services/app_service/public/mojom/types.mojom.h"
 #include "components/sessions/content/content_test_helper.h"
 #include "components/sessions/core/serialized_navigation_entry_test_helper.h"
 #include "components/sessions/core/session_id.h"
@@ -59,8 +58,6 @@
 #include "extensions/common/extension_set.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-using web_app::ProviderType;
 
 namespace app_list {
 namespace test {
@@ -87,8 +84,6 @@ constexpr char kRankingNormalAppActivity[] = "test.ranking.app.normal.activity";
 constexpr char kRankingNormalAppName[] = "testRankingAppNormal";
 constexpr char kRankingNormalAppPackageName[] = "test.ranking.app.normal";
 
-constexpr char kSettingsInternalName[] = "Settings";
-
 constexpr char kWebAppUrl[] = "https://webappone.com/";
 constexpr char kWebAppName[] = "WebApp1";
 
@@ -109,16 +104,31 @@ bool MoreRelevant(const ChromeSearchResult* result1,
   return result1->relevance() > result2->relevance();
 }
 
+void UpdateIconKey(apps::AppServiceProxy& proxy, const std::string& app_id) {
+  apps::mojom::AppPtr app = apps::mojom::App::New();
+  app->app_id = app_id;
+  proxy.AppRegistryCache().ForOneApp(
+      app_id, [&app](const apps::AppUpdate& update) {
+        app->app_type = update.AppType();
+        app->icon_key = apps::mojom::IconKey::New(
+            update.IconKey()->timeline + 1, update.IconKey()->resource_id,
+            update.IconKey()->icon_effects);
+      });
+
+  std::vector<apps::mojom::AppPtr> apps;
+  apps.push_back(app.Clone());
+  proxy.AppRegistryCache().OnApps(std::move(apps));
+  proxy.FlushMojoCallsForTesting();
+}
+
 class AppSearchProviderTest : public AppListTestBase {
  public:
   AppSearchProviderTest() {
-    // Disable System Web Apps so the Settings Internal App is still installed.
     // TODO(crbug.com/990684): disable FuzzyAppSearch because we flipped the
     // flag to be enabled by default, need to enable it after it is fully
     // launched.
     scoped_feature_list_.InitWithFeatures(
-        {},
-        {features::kSystemWebApps, app_list_features::kEnableFuzzyAppSearch});
+        {}, {app_list_features::kEnableFuzzyAppSearch});
   }
   ~AppSearchProviderTest() override {}
 
@@ -159,8 +169,11 @@ class AppSearchProviderTest : public AppListTestBase {
       sorted_results.emplace_back(result.get());
     std::sort(sorted_results.begin(), sorted_results.end(), &MoreRelevant);
 
+    // If the query is empty, every other result is a chip result identical to
+    // the tile result. Skip these.
+    const int increment = query.empty() ? 2 : 1;
     std::string result_str;
-    for (size_t i = 0; i < sorted_results.size(); ++i) {
+    for (size_t i = 0; i < sorted_results.size(); i += increment) {
       if (!result_str.empty())
         result_str += ',';
 
@@ -193,8 +206,12 @@ class AppSearchProviderTest : public AppListTestBase {
                                    priority_results.end());
     }
 
+    // If the query is empty, every other result is a chip result identical to
+    // the tile result. Skip these.
+    const int increment = query.empty() ? 2 : 1;
     std::string result_str;
-    for (auto* result : non_relevance_results) {
+    for (size_t i = 0; i < non_relevance_results.size(); i += increment) {
+      auto* result = non_relevance_results[i];
       if (!result_str.empty())
         result_str += ',';
 
@@ -397,14 +414,14 @@ TEST_F(AppSearchProviderTest, FetchRecommendations) {
   prefs->SetLastLaunchTime(kPackagedApp2Id, base::Time::FromInternalValue(5));
   // Allow async callbacks to run.
   base::RunLoop().RunUntilIdle();
-  EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2,Settings", RunQuery(""));
+  EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2", RunQuery(""));
 
   prefs->SetLastLaunchTime(kHostedAppId, base::Time::FromInternalValue(5));
   prefs->SetLastLaunchTime(kPackagedApp1Id, base::Time::FromInternalValue(10));
   prefs->SetLastLaunchTime(kPackagedApp2Id, base::Time::FromInternalValue(20));
   // Allow async callbacks to run.
   base::RunLoop().RunUntilIdle();
-  EXPECT_EQ("Packaged App 2,Packaged App 1,Hosted App,Settings", RunQuery(""));
+  EXPECT_EQ("Packaged App 2,Packaged App 1,Hosted App", RunQuery(""));
 
   // Times in the future should just be handled as highest priority.
   prefs->SetLastLaunchTime(kHostedAppId,
@@ -413,7 +430,7 @@ TEST_F(AppSearchProviderTest, FetchRecommendations) {
   prefs->SetLastLaunchTime(kPackagedApp2Id, base::Time::FromInternalValue(5));
   // Allow async callbacks to run.
   base::RunLoop().RunUntilIdle();
-  EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2,Settings", RunQuery(""));
+  EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2", RunQuery(""));
 }
 
 TEST_F(AppSearchProviderTest, FetchRecommendationsWithContinueReading) {
@@ -480,7 +497,7 @@ TEST_F(AppSearchProviderTest, FetchRecommendationsWithContinueReading) {
     session_tracker()->GetSession(kForeignSessionTag3)->device_type =
         sync_pb::SyncEnums::TYPE_PHONE;
 
-    EXPECT_EQ("title2,Hosted App,Packaged App 1,Packaged App 2,Settings",
+    EXPECT_EQ("title2,Hosted App,Packaged App 1,Packaged App 2",
               RunQueryNotSortingByRelevance(""));
   }
 
@@ -504,7 +521,7 @@ TEST_F(AppSearchProviderTest, FetchRecommendationsWithContinueReading) {
     session_tracker()->GetSession(kLocalSessionTag)->device_type =
         sync_pb::SyncEnums::TYPE_PHONE;
 
-    EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2,Settings",
+    EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2",
               RunQueryNotSortingByRelevance(""));
   }
 
@@ -529,7 +546,7 @@ TEST_F(AppSearchProviderTest, FetchRecommendationsWithContinueReading) {
     session_tracker()->GetSession(kForeignSessionTag1)->device_type =
         sync_pb::SyncEnums::TYPE_PHONE;
 
-    EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2,Settings",
+    EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2",
               RunQueryNotSortingByRelevance(""));
   }
 
@@ -554,7 +571,7 @@ TEST_F(AppSearchProviderTest, FetchRecommendationsWithContinueReading) {
     session_tracker()->GetSession(kForeignSessionTag1)->device_type =
         sync_pb::SyncEnums::TYPE_TABLET;
 
-    EXPECT_EQ("title1,Hosted App,Packaged App 1,Packaged App 2,Settings",
+    EXPECT_EQ("title1,Hosted App,Packaged App 1,Packaged App 2",
               RunQueryNotSortingByRelevance(""));
   }
 
@@ -579,7 +596,7 @@ TEST_F(AppSearchProviderTest, FetchRecommendationsWithContinueReading) {
     session_tracker()->GetSession(kForeignSessionTag1)->device_type =
         sync_pb::SyncEnums::TYPE_CROS;
 
-    EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2,Settings",
+    EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2",
               RunQueryNotSortingByRelevance(""));
   }
 
@@ -604,7 +621,7 @@ TEST_F(AppSearchProviderTest, FetchRecommendationsWithContinueReading) {
     session_tracker()->GetSession(kForeignSessionTag1)->device_type =
         sync_pb::SyncEnums::TYPE_CROS;
 
-    EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2,Settings",
+    EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2",
               RunQueryNotSortingByRelevance(""));
   }
 
@@ -627,7 +644,7 @@ TEST_F(AppSearchProviderTest, FetchRecommendationsWithContinueReading) {
         kTimestamp1;
     session_tracker()->GetSession(kForeignSessionTag1)->device_type =
         sync_pb::SyncEnums::TYPE_PHONE;
-    EXPECT_EQ("Settings", RunQueryNotSortingByRelevance("ti"));
+    EXPECT_EQ("", RunQueryNotSortingByRelevance("ti"));
   }
 }
 
@@ -642,7 +659,7 @@ TEST_F(AppSearchProviderTest, FetchUnlaunchedRecommendations) {
   prefs->SetLastLaunchTime(kHostedAppId, base::Time::Now());
   prefs->SetLastLaunchTime(kPackagedApp1Id, base::Time::FromInternalValue(0));
   prefs->SetLastLaunchTime(kPackagedApp2Id, base::Time::FromInternalValue(0));
-  EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2,Settings", RunQuery(""));
+  EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2", RunQuery(""));
 }
 
 TEST_F(AppSearchProviderTest, FilterDuplicate) {
@@ -695,26 +712,9 @@ TEST_F(AppSearchProviderTest, FetchInternalApp) {
   EXPECT_EQ(kKeyboardShortcutHelperInternalName, RunQuery("Keyboard"));
   EXPECT_EQ(kKeyboardShortcutHelperInternalName, RunQuery("Shortcut"));
   EXPECT_EQ(kKeyboardShortcutHelperInternalName, RunQuery("Helper"));
-
-  // Search Settings.
-  EXPECT_EQ(kSettingsInternalName, RunQuery("Settings"));
-  EXPECT_EQ(kSettingsInternalName, RunQuery("Set"));
 }
 
-class AppSearchProviderWebAppTest : public AppSearchProviderTest {
- public:
-  AppSearchProviderWebAppTest() {
-    scoped_feature_list_.InitAndEnableFeature(
-        features::kDesktopPWAsWithoutExtensions);
-  }
-
-  ~AppSearchProviderWebAppTest() override = default;
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
-TEST_F(AppSearchProviderWebAppTest, WebApp) {
+TEST_F(AppSearchProviderTest, WebApp) {
   apps::AppServiceProxy* proxy =
       apps::AppServiceProxyFactory::GetForProfile(testing_profile());
   proxy->FlushMojoCallsForTesting();
@@ -729,27 +729,9 @@ TEST_F(AppSearchProviderWebAppTest, WebApp) {
   EXPECT_EQ("WebApp1", RunQuery("WebA"));
 }
 
-class AppSearchProviderCrostiniTest
-    : public AppSearchProviderTest,
-      public ::testing::WithParamInterface<ProviderType> {
- protected:
-  AppSearchProviderCrostiniTest() {
-    if (GetParam() == ProviderType::kWebApps) {
-      scoped_feature_list_.InitAndEnableFeature(
-          features::kDesktopPWAsWithoutExtensions);
-    } else if (GetParam() == ProviderType::kBookmarkApps) {
-      scoped_feature_list_.InitAndDisableFeature(
-          features::kDesktopPWAsWithoutExtensions);
-    }
-  }
+using AppSearchProviderCrostiniTest = AppSearchProviderTest;
 
-  ~AppSearchProviderCrostiniTest() override = default;
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
-TEST_P(AppSearchProviderCrostiniTest, CrostiniTerminal) {
+TEST_F(AppSearchProviderCrostiniTest, CrostiniTerminal) {
   CreateSearch();
 
   // Crostini UI is not allowed yet.
@@ -782,7 +764,7 @@ TEST_P(AppSearchProviderCrostiniTest, CrostiniTerminal) {
   EXPECT_EQ("Terminal", RunQuery("cros"));
 }
 
-TEST_P(AppSearchProviderCrostiniTest, CrostiniApp) {
+TEST_F(AppSearchProviderCrostiniTest, CrostiniApp) {
   // This both allows Crostini UI and enables Crostini.
   crostini::CrostiniTestHelper crostini_test_helper(testing_profile());
   crostini_test_helper.ReInitializeAppServiceIntegration();
@@ -835,15 +817,23 @@ TEST_F(AppSearchProviderTest, AppServiceIconCache) {
   RunQuery("pa");
   EXPECT_EQ(2, stub_icon_loader.NumLoadIconFromIconKeyCalls());
 
-  // Hiding the UI (i.e. calling ViewClosing) should clear the icon cache. The
-  // number of LoadIconFromIconKey calls should not change.
+  // The number of LoadIconFromIconKey calls should not change, when hiding the
+  // UI (i.e. calling ViewClosing).
   CallViewClosing();
   EXPECT_EQ(2, stub_icon_loader.NumLoadIconFromIconKeyCalls());
 
-  // Issuing the same "pa" query should bypass the now-clear icon cache, with 2
-  // further calls to the wrapped stub_icon_loader, bringing the total to 4.
+  // The icon has been added to the map, so issuing the same "pa" query should
+  // not call the wrapped stub_icon_loader.
   RunQuery("pa");
-  EXPECT_EQ(4, stub_icon_loader.NumLoadIconFromIconKeyCalls());
+  EXPECT_EQ(2, stub_icon_loader.NumLoadIconFromIconKeyCalls());
+
+  // Update the icon key to remove the app icon from cache.
+  UpdateIconKey(*proxy, kPackagedApp2Id);
+
+  // The icon has been removed from the cache, so issuing the same "pa" query
+  // should call the wrapped stub_icon_loader.
+  RunQuery("pa");
+  EXPECT_EQ(3, stub_icon_loader.NumLoadIconFromIconKeyCalls());
 
   proxy->OverrideInnerIconLoaderForTesting(old_icon_loader);
 }
@@ -1087,12 +1077,6 @@ INSTANTIATE_TEST_SUITE_P(
     AppSearchProviderWithArcAppInstallType,
     ::testing::ValuesIn({TestArcAppInstallType::CONTROLLED_BY_POLICY,
                          TestArcAppInstallType::INSTALLED_BY_DEFAULT}));
-
-INSTANTIATE_TEST_SUITE_P(All,
-                         AppSearchProviderCrostiniTest,
-                         ::testing::Values(ProviderType::kBookmarkApps,
-                                           ProviderType::kWebApps),
-                         web_app::ProviderTypeParamToString);
 
 }  // namespace test
 }  // namespace app_list

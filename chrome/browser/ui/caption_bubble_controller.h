@@ -44,6 +44,9 @@ class CaptionBubbleController {
       const chrome::mojom::TranscriptionResultPtr& transcription_result,
       content::WebContents* web_contents) = 0;
 
+  // Called when the speech service has an error.
+  virtual void OnError(content::WebContents* web_contents) = 0;
+
   // Called when the caption style changes.
   virtual void UpdateCaptionStyle(
       base::Optional<ui::CaptionStyle> caption_style) = 0;

@@ -34,12 +34,12 @@
 #include "cc/trees/paint_holding_commit_trigger.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
 #include "third_party/blink/public/common/dom_storage/session_storage_namespace_id.h"
-#include "third_party/blink/public/common/feature_policy/feature_policy.h"
-#include "third_party/blink/public/common/page/web_drag_operation.h"
+#include "third_party/blink/public/common/feature_policy/feature_policy_features.h"
+#include "third_party/blink/public/common/page/drag_operation.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/blame_context.h"
-#include "third_party/blink/public/platform/web_float_rect.h"
+#include "third_party/blink/public/platform/web_battery_savings.h"
 #include "third_party/blink/public/web/web_swap_result.h"
 #include "third_party/blink/public/web/web_widget_client.h"
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
@@ -99,13 +99,20 @@ class PopupOpeningObserver;
 class WebDragData;
 class WebViewImpl;
 
+enum class FullscreenRequestType;
+
 struct DateTimeChooserParameters;
 struct FrameLoadRequest;
-struct WebTextAutosizerPageInfo;
 struct ViewportDescription;
-struct WebScreenInfo;
+struct ScreenInfo;
 struct WebWindowFeatures;
 struct WebRect;
+
+namespace mojom {
+namespace blink {
+class TextAutosizerPageInfo;
+}
+}  // namespace mojom
 
 using CompositorElementId = cc::ElementId;
 
@@ -120,10 +127,6 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
   // Converts the scalar value from window coordinates to viewport scale.
   virtual float WindowToViewportScalar(LocalFrame*,
                                        const float value) const = 0;
-
-  // Converts the scalar value from window coordinates to viewport rectangle.
-  virtual void WindowToViewportRect(LocalFrame& frame,
-                                    WebFloatRect* viewport_rect) const {}
 
   virtual bool IsPopup() { return false; }
 
@@ -140,9 +143,19 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
   virtual void ScheduleAnimation(const LocalFrameView*,
                                  base::TimeDelta = base::TimeDelta()) = 0;
 
-  // The specified rectangle is adjusted for the minimum window size and the
-  // screen, then setWindowRect with the adjusted rectangle is called.
-  void SetWindowRectWithAdjustment(const IntRect&, LocalFrame&);
+  // Adjusts |pending_rect| for the minimum window size and |frame|'s screen
+  // and returns the adjusted value.
+  // Cross-screen window placements are passed on without same-screen clamping
+  // if the |requesting_frame| (i.e. the opener or |frame| itself) has
+  // experimental window placement features enabled. The browser will check
+  // permissions before actually supporting cross-screen placement requests.
+  IntRect CalculateWindowRectWithAdjustment(const IntRect& pending_rect,
+                                            LocalFrame& frame,
+                                            LocalFrame& requesting_frame);
+
+  // Calls CalculateWindowRectWithAdjustment, then SetWindowRect.
+  void SetWindowRectWithAdjustment(const IntRect& pending_rect,
+                                   LocalFrame& frame);
 
   // This gives the rect of the top level window that the given LocalFrame is a
   // part of.
@@ -186,7 +199,7 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
   // Start a system drag and drop operation.
   virtual void StartDragging(LocalFrame*,
                              const WebDragData&,
-                             WebDragOperationsMask,
+                             DragOperationsMask,
                              const SkBitmap& drag_image,
                              const gfx::Point& drag_image_offset) = 0;
   virtual bool AcceptsLoadDrops() const = 0;
@@ -202,9 +215,19 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
                      const AtomicString& frame_name,
                      const WebWindowFeatures&,
                      network::mojom::blink::WebSandboxFlags,
-                     const FeaturePolicy::FeatureState&,
-                     const SessionStorageNamespaceId&);
-  virtual void Show(NavigationPolicy) = 0;
+                     const FeaturePolicyFeatureState&,
+                     const SessionStorageNamespaceId&,
+                     bool& consumed_user_gesture);
+
+  // Show a previously created Page that was created via CreateWindow. This
+  // should only be called once the newly created window when it is ready to be
+  // shown. Under some circumstances CreateWindow's implementation may return a
+  // previously shown page. Calling this method should still work and the
+  // browser will discard the unnecessary show request.
+  virtual void Show(const base::UnguessableToken& opener_frame_token,
+                    NavigationPolicy navigation_policy,
+                    const IntRect& initial_rect,
+                    bool consumed_user_gesture) = 0;
 
   // All the parameters should be in viewport space. That is, if an event
   // scrolls by 10 px, but due to a 2X page scale we apply a 5px scroll to the
@@ -265,7 +288,7 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
                             String& result);
   virtual bool TabsToLinks() = 0;
 
-  virtual WebScreenInfo GetScreenInfo(LocalFrame& frame) const = 0;
+  virtual ScreenInfo GetScreenInfo(LocalFrame& frame) const = 0;
   virtual void SetCursor(const ui::Cursor&, LocalFrame* local_root) = 0;
 
   virtual void SetCursorOverridden(bool) = 0;
@@ -362,7 +385,7 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
 
   virtual void EnterFullscreen(LocalFrame&,
                                const FullscreenOptions*,
-                               bool for_cross_process_descendant) {}
+                               FullscreenRequestType) {}
   virtual void ExitFullscreen(LocalFrame&) {}
   virtual void FullscreenElementChanged(Element* old_element,
                                         Element* new_element) {}
@@ -421,21 +444,6 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
   }
 
   virtual bool IsSVGImageChromeClient() const { return false; }
-
-  virtual bool RequestPointerLock(LocalFrame*,
-                                  WebWidgetClient::PointerLockCallback callback,
-                                  bool request_unadjusted_movement) {
-    return false;
-  }
-
-  virtual bool RequestPointerLockChange(
-      LocalFrame*,
-      WebWidgetClient::PointerLockCallback callback,
-      bool request_unadjusted_movement) {
-    return false;
-  }
-
-  virtual void RequestPointerUnlock(LocalFrame*) {}
 
   virtual IntSize MinimumWindowSize() const { return IntSize(100, 100); }
 
@@ -499,8 +507,8 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
 
   virtual void Trace(Visitor*) const;
 
-  virtual void DidUpdateTextAutosizerPageInfo(const WebTextAutosizerPageInfo&) {
-  }
+  virtual void DidUpdateTextAutosizerPageInfo(
+      const mojom::blink::TextAutosizerPageInfo&) {}
 
   virtual void DocumentDetached(Document&) {}
 
@@ -513,6 +521,9 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
   virtual void SetDelegatedInkMetadata(
       LocalFrame* frame,
       std::unique_ptr<viz::DelegatedInkMetadata> metadata) {}
+
+  virtual void BatterySavingsChanged(LocalFrame& main_frame,
+                                     WebBatterySavingsFlags savings) = 0;
 
  protected:
   ChromeClient() = default;
@@ -533,8 +544,9 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
                                      const AtomicString& frame_name,
                                      const WebWindowFeatures&,
                                      network::mojom::blink::WebSandboxFlags,
-                                     const FeaturePolicy::FeatureState&,
-                                     const SessionStorageNamespaceId&) = 0;
+                                     const FeaturePolicyFeatureState&,
+                                     const SessionStorageNamespaceId&,
+                                     bool& consumed_user_gesture) = 0;
 
  private:
   bool CanOpenUIElementIfDuringPageDismissal(Frame& main_frame,

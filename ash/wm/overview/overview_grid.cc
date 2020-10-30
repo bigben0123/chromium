@@ -9,6 +9,7 @@
 #include <memory>
 #include <utility>
 
+#include "ash/frame_throttler/frame_throttling_controller.h"
 #include "ash/metrics/histogram_macros.h"
 #include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/metrics_util.h"
@@ -52,11 +53,11 @@
 #include "base/bind.h"
 #include "base/containers/unique_ptr_adapters.h"
 #include "base/numerics/ranges.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/compositor/layer_animation_observer.h"
 #include "ui/compositor/throughput_tracker.h"
-#include "ui/gfx/geometry/safe_integer_conversions.h"
 #include "ui/gfx/geometry/vector2d_f.h"
 #include "ui/gfx/transform_util.h"
 #include "ui/views/view.h"
@@ -251,8 +252,8 @@ float GetWantedDropTargetOpacity(
 
 gfx::Insets GetGridInsets(const gfx::Rect& grid_bounds) {
   const int horizontal_inset =
-      gfx::ToFlooredInt(std::min(kOverviewInsetRatio * grid_bounds.width(),
-                                 kOverviewInsetRatio * grid_bounds.height()));
+      base::ClampFloor(std::min(kOverviewInsetRatio * grid_bounds.width(),
+                                kOverviewInsetRatio * grid_bounds.height()));
   const int vertical_inset =
       horizontal_inset +
       kOverviewVerticalInset * (grid_bounds.height() - 2 * horizontal_inset);
@@ -401,12 +402,7 @@ void OverviewGrid::Shutdown() {
         single_animation_in_clamshell, minimized_in_tablet);
   }
 
-  while (!window_list_.empty()) {
-    RemoveItem(window_list_.back().get(), /*item_destroying=*/false,
-               /*reposition=*/false);
-  }
-
-  // RemoveItem() uses `overview_session_`, so clear it at the end.
+  window_list_.clear();
   overview_session_ = nullptr;
 }
 
@@ -547,6 +543,8 @@ void OverviewGrid::AddItem(aura::Window* window,
   window_list_.insert(
       window_list_.begin() + index,
       std::make_unique<OverviewItem>(window, overview_session_, this));
+
+  UpdateFrameThrottling();
   auto* item = window_list_[index].get();
   item->PrepareForOverview();
 
@@ -598,7 +596,9 @@ void OverviewGrid::RemoveItem(OverviewItem* overview_item,
   DCHECK(iter != window_list_.rend());
 
   // This can also be called when shutting down |this|, at which the item will
-  // be cleaning up and its associated view may be nullptr.
+  // be cleaning up and its associated view may be nullptr. |overview_item|
+  // needs to still be in |window_list_| so we can compute what the deleted
+  // index is.
   if (overview_session_ && (*iter)->overview_item_view()) {
     overview_session_->highlight_controller()->OnViewDestroyingOrDisabling(
         (*iter)->overview_item_view());
@@ -609,6 +609,8 @@ void OverviewGrid::RemoveItem(OverviewItem* overview_item,
   std::unique_ptr<OverviewItem> tmp = std::move(*iter);
   window_list_.erase(std::next(iter).base());
   tmp.reset();
+
+  UpdateFrameThrottling();
 
   if (!item_destroying)
     return;
@@ -1009,6 +1011,7 @@ void OverviewGrid::OnStartingAnimationComplete(bool canceled) {
 
   for (auto& window : window_list())
     window->OnStartingAnimationComplete();
+
 }
 
 void OverviewGrid::CalculateWindowListAnimationStates(
@@ -1302,40 +1305,6 @@ void OverviewGrid::EndNudge() {
   nudge_data_.clear();
 }
 
-void OverviewGrid::SlideWindowsIn() {
-  for (const auto& window_item : window_list_)
-    window_item->SlideWindowIn();
-}
-
-std::unique_ptr<ui::ScopedLayerAnimationSettings>
-OverviewGrid::UpdateYPositionAndOpacity(
-    float new_y,
-    float opacity,
-    OverviewSession::UpdateAnimationSettingsCallback callback) {
-  std::unique_ptr<ui::ScopedLayerAnimationSettings> settings_to_observe;
-  if (desks_widget_) {
-    aura::Window* window = desks_widget_->GetNativeWindow();
-    ui::Layer* layer = window->layer();
-    if (!callback.is_null()) {
-      settings_to_observe = std::make_unique<ui::ScopedLayerAnimationSettings>(
-          layer->GetAnimator());
-      callback.Run(settings_to_observe.get());
-    }
-    window->SetTransform(gfx::Transform(1.f, 0.f, 0.f, 1.f, 0.f, -new_y));
-    layer->SetOpacity(opacity);
-  }
-
-  // Translate the window items to |new_y| with the opacity. Observe the
-  // animation of the last item, if any.
-  for (const auto& window_item : window_list_) {
-    auto new_settings =
-        window_item->UpdateYPositionAndOpacity(new_y, opacity, callback);
-    if (new_settings)
-      settings_to_observe = std::move(new_settings);
-  }
-  return settings_to_observe;
-}
-
 aura::Window* OverviewGrid::GetTargetWindowOnLocation(
     const gfx::PointF& location_in_screen,
     OverviewItem* ignored_item) {
@@ -1528,7 +1497,7 @@ int OverviewGrid::CalculateWidthAndMaybeSetUnclippedBounds(OverviewItem* item,
         target_size = ::ash::GetTargetBoundsInScreen(dragged_window).size();
         target_size.SetToMin(gfx::SizeF(work_area_size));
       }
-      const gfx::SizeF inset_size(0, height - 2 * kWindowMargin);
+      const gfx::SizeF inset_size(0, height);
       scale = ScopedOverviewTransformWindow::GetItemScale(
           target_size, inset_size,
           dragged_window->GetProperty(aura::client::kTopViewInset),
@@ -1536,8 +1505,7 @@ int OverviewGrid::CalculateWidthAndMaybeSetUnclippedBounds(OverviewItem* item,
     }
   }
 
-  int width = std::max(
-      1, gfx::ToFlooredInt(target_size.width() * scale) + 2 * kWindowMargin);
+  int width = std::max(1, base::ClampFloor(target_size.width() * scale));
   switch (grid_fill_mode) {
     case OverviewGridWindowFillMode::kLetterBoxed:
       width = kExtremeWindowRatioThreshold * height;
@@ -1567,15 +1535,14 @@ int OverviewGrid::CalculateWidthAndMaybeSetUnclippedBounds(OverviewItem* item,
   const float target_aspect_ratio =
       split_view_bounds->width() / split_view_bounds->height();
   const bool clip_horizontally = aspect_ratio > target_aspect_ratio;
-  const int window_height = height - 2 * kWindowMargin - kHeaderHeightDp;
+  const int window_height = height - kHeaderHeightDp;
   gfx::Size unclipped_size;
   if (clip_horizontally) {
-    unclipped_size.set_width(width - 2 * kWindowMargin);
-    unclipped_size.set_height(height - 2 * kWindowMargin);
+    unclipped_size.set_width(width);
+    unclipped_size.set_height(height);
     // For horizontal clipping, shrink |width| so that the aspect ratio matches
     // that of |split_view_bounds|.
-    width = std::max(1, gfx::ToFlooredInt(target_aspect_ratio * window_height) +
-                            2 * kWindowMargin);
+    width = std::max(1, base::ClampFloor(target_aspect_ratio * window_height));
   } else {
     // For vertical clipping, we want |height| to stay the same, so calculate
     // what the unclipped height would be based on |split_view_bounds|.
@@ -1591,9 +1558,6 @@ int OverviewGrid::CalculateWidthAndMaybeSetUnclippedBounds(OverviewItem* item,
         width * target_size.height() / target_size.width();
     unclipped_size.set_width(width);
     unclipped_size.set_height(unclipped_height + kHeaderHeightDp);
-
-    // Add some space between this item and the next one (if it exists).
-    width += (2 * kWindowMargin);
   }
 
   DCHECK(!unclipped_size.IsEmpty());
@@ -1690,8 +1654,8 @@ std::vector<gfx::RectF> OverviewGrid::GetWindowRects(
     gfx::Rect overview_mode_bounds(total_bounds);
     overview_mode_bounds.set_width(right_bound - total_bounds.x());
     bool windows_fit = FitWindowRectsInBounds(
-        overview_mode_bounds, std::min(kMaxHeight + 2 * kWindowMargin, height),
-        ignored_items, &rects, &max_bottom, &min_right, &max_right);
+        overview_mode_bounds, std::min(kMaxHeight, height), ignored_items,
+        &rects, &max_bottom, &min_right, &max_right);
 
     if (height_fixed) {
       if (!windows_fit) {
@@ -1736,9 +1700,9 @@ std::vector<gfx::RectF> OverviewGrid::GetWindowRects(
   if (make_last_adjustment) {
     gfx::Rect overview_mode_bounds(total_bounds);
     overview_mode_bounds.set_width(right_bound - total_bounds.x());
-    FitWindowRectsInBounds(
-        overview_mode_bounds, std::min(kMaxHeight + 2 * kWindowMargin, height),
-        ignored_items, &rects, &max_bottom, &min_right, &max_right);
+    FitWindowRectsInBounds(overview_mode_bounds, std::min(kMaxHeight, height),
+                           ignored_items, &rects, &max_bottom, &min_right,
+                           &max_right);
   }
 
   gfx::Vector2dF offset(0, (total_bounds.bottom() - max_bottom) / 2.f);
@@ -1844,8 +1808,10 @@ bool OverviewGrid::FitWindowRectsInBounds(
     if (ShouldExcludeItemFromGridLayout(window_list_[i].get(), ignored_items))
       continue;
 
-    int width =
-        CalculateWidthAndMaybeSetUnclippedBounds(window_list_[i].get(), height);
+    int width = CalculateWidthAndMaybeSetUnclippedBounds(window_list_[i].get(),
+                                                         height) +
+                2 * kWindowMargin;
+    int height_with_margin = height + 2 * kWindowMargin;
 
     if (left + width > bounds.right()) {
       // Move to the next row if possible.
@@ -1853,11 +1819,11 @@ bool OverviewGrid::FitWindowRectsInBounds(
         *out_min_right = left;
       if (*out_max_right < left)
         *out_max_right = left;
-      top += height;
+      top += height_with_margin;
 
       // Check if the new row reaches the bottom or if the first item in the new
       // row does not fit within the available width.
-      if (top + height > bounds.bottom() ||
+      if (top + height_with_margin > bounds.bottom() ||
           bounds.x() + width > bounds.right()) {
         return false;
       }
@@ -1865,12 +1831,12 @@ bool OverviewGrid::FitWindowRectsInBounds(
     }
 
     // Position the current rect.
-    (*out_rects)[i] = gfx::RectF(left, top, width, height);
+    (*out_rects)[i] = gfx::RectF(left, top, width, height_with_margin);
 
     // Increment horizontal position using sanitized positive |width|.
     left += width;
 
-    *out_max_bottom = top + height;
+    *out_max_bottom = top + height_with_margin;
   }
 
   // Update the narrowest and widest row width for the last row.
@@ -1966,4 +1932,12 @@ void OverviewGrid::UpdateCannotSnapWarningVisibility() {
     overview_mode_item->UpdateCannotSnapWarningVisibility();
 }
 
+void OverviewGrid::UpdateFrameThrottling() {
+  std::vector<aura::Window*> windows_to_throttle(window_list_.size(), nullptr);
+  std::transform(
+      window_list_.begin(), window_list_.end(), windows_to_throttle.begin(),
+      [](std::unique_ptr<OverviewItem>& item) { return item->GetWindow(); });
+  Shell::Get()->frame_throttling_controller()->StartThrottling(
+      windows_to_throttle);
+}
 }  // namespace ash
