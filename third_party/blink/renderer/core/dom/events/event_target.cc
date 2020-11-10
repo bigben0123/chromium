@@ -546,20 +546,17 @@ bool EventTarget::AddEventListenerInternal(
                                 listener->async_task_id());
     }
 #ifndef CUST_NO_EVENT_NOTIFY_ADD_EVENT_LISTENER  // zhibin:notify addEventListener
-    String nodename = ToNode() ? ToNode()->nodeName() : InterfaceName();
-    if (nodename == "DIV" && (event_type.GetString() == "keypress" 
-        //||
-        //                  event_type.GetString() == "transitionend" ||
-        //                  event_type.StartsWith("animation")
-        )) {
-    } else {
+    {
       LOG(INFO) << "====== event add:" << ToNode()
                 << " event type: " << event_type.GetString();
       LocalDOMWindow* executing_window = ExecutingWindow();
-      MutationEvent* ce = MutationEvent::Create(
-          "cust_event_notify_add_event_listener", Event::Bubbles::kNo, ToNode(),
-          "", "", event_type.GetString());
-      executing_window->DispatchEvent(*ce, this);
+
+      if (executing_window) {
+        MutationEvent* ce = MutationEvent::Create(
+            "cust_event_notify_add_event_listener", Event::Bubbles::kNo,
+            ToNode(), "", "", event_type.GetString());
+        executing_window->DispatchEvent(*ce, this);
+      }
     }
 #if 0  // ndef CONFIG_NO_NOTIFY_ADD_EVENT_LISTENER_DISPATCH  //zhibin:patch_to_content not used.
   {
