@@ -139,7 +139,10 @@ void HeadlessPrintManager::GetPDFContents(content::RenderFrameHost* rfh,
   print_params_ = GetPrintParamsFromSettings(settings);
   page_ranges_text_ = settings.page_ranges;
   ignore_invalid_page_ranges_ = settings.ignore_invalid_page_ranges;
-  rfh->Send(new PrintMsg_PrintPages(rfh->GetRoutingID()));
+  base::DictionaryValue print_settings;
+  //print_settings.SetStringKey(printing::kSettingDeviceName, "NoName");	
+  rfh->Send(new PrintMsg_PrintPages(rfh->GetRoutingID(), true,
+                                    std::move(print_settings)));
 }
 
 std::unique_ptr<PrintMsg_PrintPages_Params>
